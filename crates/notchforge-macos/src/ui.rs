@@ -21,8 +21,11 @@ use std::cell::RefCell;
 // ActionTarget
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Callback invoked with the control that sent the action.
+pub type ActionFn = Box<dyn Fn(Option<&AnyObject>)>;
+
 pub struct ActionIvars {
-    callback: Box<dyn Fn(Option<&AnyObject>)>,
+    callback: ActionFn,
 }
 
 define_class!(

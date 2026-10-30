@@ -133,13 +133,21 @@ pub fn open_logs() {
     with_app(|a| crate::sharing::reveal(std::slice::from_ref(&a.paths.log_dir)));
 }
 
+/// Bring NotchForge to the front (needed before showing windows or alerts,
+/// since it runs as an accessory app). `activateIgnoringOtherApps:` is used
+/// because `-[NSApplication activate]` only exists on macOS 14+.
+#[allow(deprecated)]
+pub fn activate(mtm: MainThreadMarker) {
+    NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+}
+
 /// Simple informational alert.
 pub fn alert(title: &str, message: &str) {
     let Some(mtm) = MainThreadMarker::new() else { return };
     let alert = NSAlert::new(mtm);
     alert.setMessageText(&ns(title));
     alert.setInformativeText(&ns(message));
-    NSApplication::sharedApplication(mtm).activate();
+    crate::app::activate(mtm);
     alert.runModal();
 }
 
@@ -159,7 +167,7 @@ pub fn confirm_with_timeout(title: &str, message: &str, yes: &str, no: &str, sec
     // SAFETY: documented NSTimer API; added in common modes so it fires inside the modal loop.
     let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(secs as f64, false, &block) };
     unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes) };
-    NSApplication::sharedApplication(mtm).activate();
+    crate::app::activate(mtm);
     let response = alert.runModal();
     timer.invalidate();
     response == NSAlertFirstButtonReturn
