@@ -10,7 +10,9 @@
 
 use super::payload::{Overrides, parse_events};
 use notchforge_core::model::{Origin, ProviderStatus};
-use notchforge_core::provider::{BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent};
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent,
+};
 
 pub struct SocketAgentProvider;
 

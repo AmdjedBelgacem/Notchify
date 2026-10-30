@@ -12,7 +12,9 @@
 
 use super::payload::{Overrides, parse_events};
 use notchforge_core::model::{NewNotification, Origin, ProviderStatus};
-use notchforge_core::provider::{BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake};
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
+};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::time::Duration;

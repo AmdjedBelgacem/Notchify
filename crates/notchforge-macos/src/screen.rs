@@ -17,9 +17,7 @@ pub fn to_nsrect(r: Rect) -> NSRect {
 pub fn display_id(screen: &NSScreen) -> u32 {
     let desc = screen.deviceDescription();
     let key = NSString::from_str("NSScreenNumber");
-    desc.objectForKey(&key)
-        .and_then(|v| v.downcast::<NSNumber>().ok())
-        .map_or(0, |n| n.unsignedIntValue())
+    desc.objectForKey(&key).and_then(|v| v.downcast::<NSNumber>().ok()).map_or(0, |n| n.unsignedIntValue())
 }
 
 fn aux_area(r: NSRect) -> Option<Rect> {

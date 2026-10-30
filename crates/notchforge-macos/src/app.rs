@@ -104,7 +104,9 @@ fn sync_accessibility_observer(cfg: &Config, events: &mpsc::Sender<ProviderEvent
         Ok(()) => report_status(events, ProviderStatus::Running),
         Err(e) => {
             tracing::info!(error = %e, "banner observer not started");
-            let status = if crate::permissions::state(Permission::Accessibility) == notchforge_core::model::PermissionState::Granted {
+            let status = if crate::permissions::state(Permission::Accessibility)
+                == notchforge_core::model::PermissionState::Granted
+            {
                 ProviderStatus::Failing(e)
             } else {
                 ProviderStatus::NeedsPermission(Permission::Accessibility)

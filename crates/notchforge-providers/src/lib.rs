@@ -16,7 +16,10 @@ pub mod weather;
 
 use notchforge_core::provider::{Provider, ProviderSpec};
 
-fn spec<P: Provider + Default>(enabled: fn(&notchforge_core::config::Config) -> bool, restart_key: fn(&notchforge_core::config::Config) -> String) -> ProviderSpec {
+fn spec<P: Provider + Default>(
+    enabled: fn(&notchforge_core::config::Config) -> bool,
+    restart_key: fn(&notchforge_core::config::Config) -> String,
+) -> ProviderSpec {
     ProviderSpec {
         descriptor: P::default().descriptor(),
         enabled,

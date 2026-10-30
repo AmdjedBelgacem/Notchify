@@ -149,7 +149,10 @@ impl SpringRect {
     }
 
     pub fn is_settled(&self) -> bool {
-        self.width.is_settled() && self.height.is_settled() && self.radius.is_settled() && self.content_alpha.is_settled()
+        self.width.is_settled()
+            && self.height.is_settled()
+            && self.radius.is_settled()
+            && self.content_alpha.is_settled()
     }
 }
 

@@ -26,10 +26,11 @@ pub struct AgentPayload {
     pub kind: Option<String>,
     pub title: Option<String>,
     pub subtitle: Option<String>,
-    #[serde(alias = "message", alias = "text")]
+    /// `last-assistant-message` is what the Codex CLI `notify` hook sends.
+    #[serde(alias = "message", alias = "text", alias = "last-assistant-message")]
     pub body: Option<String>,
     pub priority: Option<String>,
-    #[serde(alias = "session_id", alias = "conversation_id", alias = "session")]
+    #[serde(alias = "session_id", alias = "conversation_id", alias = "session", alias = "turn-id")]
     pub thread: Option<String>,
     pub url: Option<String>,
     /// Unix seconds or milliseconds.
@@ -85,9 +86,10 @@ fn hook_kind(event: &str) -> NotificationKind {
 
 impl AgentPayload {
     pub fn into_notification(self, origin: Origin, overrides: &Overrides) -> NewNotification {
-        let source = overrides.source.clone().or(non_empty(self.source)).unwrap_or_else(|| {
-            if self.hook_event_name.is_some() { "claude".to_owned() } else { "agent".to_owned() }
-        });
+        let source =
+            overrides.source.clone().or(non_empty(self.source)).unwrap_or_else(|| {
+                if self.hook_event_name.is_some() { "claude".to_owned() } else { "agent".to_owned() }
+            });
         let app = match KnownApp::from_key(&source) {
             Some(k) => AppRef::known(k),
             None => AppRef { known: Some(KnownApp::GenericAgent), bundle_id: None, display_name: source.clone() },
@@ -160,8 +162,12 @@ mod tests {
 
     #[test]
     fn minimal_event() {
-        let ev = parse_events(br#"{"source":"cursor","kind":"task_finished","title":"Done"}"#, Origin::AgentWebhook, &Overrides::default())
-            .expect("parse");
+        let ev = parse_events(
+            br#"{"source":"cursor","kind":"task_finished","title":"Done"}"#,
+            Origin::AgentWebhook,
+            &Overrides::default(),
+        )
+        .expect("parse");
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].app.known, Some(KnownApp::Cursor));
         assert_eq!(ev[0].kind, NotificationKind::TaskFinished);
@@ -194,7 +200,8 @@ mod tests {
 
     #[test]
     fn overrides_and_aliases() {
-        let json = br#"[{"agent":"whatever","type":"error","message":"boom","priority":"critical","timestamp":1700000000}]"#;
+        let json =
+            br#"[{"agent":"whatever","type":"error","message":"boom","priority":"critical","timestamp":1700000000}]"#;
         let o = Overrides { source: Some("qoder".into()), kind: None };
         let n = &parse_events(json, Origin::AgentSocket, &o).expect("parse")[0];
         assert_eq!(n.app.known, Some(KnownApp::Qoder));
@@ -202,6 +209,17 @@ mod tests {
         assert_eq!(n.priority, Some(Priority::Critical));
         assert_eq!(n.timestamp_ms, 1_700_000_000_000);
         assert_eq!(n.title, "Error");
+    }
+
+    #[test]
+    fn codex_notify_payload() {
+        let json = br#"{"type":"agent-turn-complete","turn-id":"t1","input-messages":["fix it"],"last-assistant-message":"Fixed the bug."}"#;
+        let o = Overrides { source: Some("chatgpt".into()), kind: None };
+        let n = &parse_events(json, Origin::AgentWebhook, &o).expect("parse")[0];
+        assert_eq!(n.app.known, Some(KnownApp::ChatGpt));
+        assert_eq!(n.kind, NotificationKind::TaskFinished);
+        assert_eq!(n.body, "Fixed the bug.");
+        assert_eq!(n.title, "Finished");
     }
 
     #[test]

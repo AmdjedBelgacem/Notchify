@@ -5,7 +5,9 @@
 //! development): `/sys/class/power_supply`.
 
 use notchforge_core::model::{BatteryStatus, ProviderStatus};
-use notchforge_core::provider::{BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake};
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
+};
 use std::time::Duration;
 
 const POLL: Duration = Duration::from_secs(30);
@@ -55,9 +57,8 @@ pub fn parse_sysfs(capacity: &str, status: &str, ac_online: Option<&str>) -> Opt
 async fn read() -> Result<BatteryStatus, ProviderError> {
     #[cfg(target_os = "macos")]
     {
-        if let Some(b) = tokio::task::spawn_blocking(crate::sys::iokit::read_internal_battery)
-            .await
-            .map_err(ProviderError::other)?
+        if let Some(b) =
+            tokio::task::spawn_blocking(crate::sys::iokit::read_internal_battery).await.map_err(ProviderError::other)?
         {
             return Ok(b);
         }
@@ -123,17 +124,30 @@ mod tests {
             "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=4653155)\t76%; discharging; 5:21 remaining present: true\n",
         )
         .expect("parse");
-        assert_eq!(b, BatteryStatus { percent: 76, charging: false, plugged_in: false, minutes_remaining: Some(321), present: true });
+        assert_eq!(
+            b,
+            BatteryStatus {
+                percent: 76,
+                charging: false,
+                plugged_in: false,
+                minutes_remaining: Some(321),
+                present: true
+            }
+        );
     }
 
     #[test]
     fn pmset_charging_and_charged() {
-        let b = parse_pmset("Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t42%; charging; 1:05 remaining present: true")
-            .expect("parse");
+        let b = parse_pmset(
+            "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t42%; charging; 1:05 remaining present: true",
+        )
+        .expect("parse");
         assert!(b.charging && b.plugged_in);
         assert_eq!(b.minutes_remaining, Some(65));
-        let b = parse_pmset("Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining present: true")
-            .expect("parse");
+        let b = parse_pmset(
+            "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining present: true",
+        )
+        .expect("parse");
         assert!(!b.charging && b.plugged_in);
         assert_eq!(b.minutes_remaining, None);
         let b = parse_pmset("Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t50%; discharging; (no estimate) present: true")

@@ -10,8 +10,12 @@ pub type AXObserverRef = CFTypeRef;
 pub type AXError = i32;
 pub const kAXErrorSuccess: AXError = 0;
 
-pub type AXObserverCallback =
-    unsafe extern "C" fn(observer: AXObserverRef, element: AXUIElementRef, notification: CFStringRef, refcon: *mut c_void);
+pub type AXObserverCallback = unsafe extern "C" fn(
+    observer: AXObserverRef,
+    element: AXUIElementRef,
+    notification: CFStringRef,
+    refcon: *mut c_void,
+);
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -19,7 +23,11 @@ unsafe extern "C" {
     pub fn AXIsProcessTrusted() -> u8;
     pub fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> u8;
     pub fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
-    pub fn AXUIElementCopyAttributeValue(element: AXUIElementRef, attribute: CFStringRef, value: *mut CFTypeRef) -> AXError;
+    pub fn AXUIElementCopyAttributeValue(
+        element: AXUIElementRef,
+        attribute: CFStringRef,
+        value: *mut CFTypeRef,
+    ) -> AXError;
     pub fn AXUIElementCopyActionNames(element: AXUIElementRef, names: *mut CFArrayRef) -> AXError;
     pub fn AXUIElementPerformAction(element: AXUIElementRef, action: CFStringRef) -> AXError;
     pub fn AXObserverCreate(application: i32, callback: AXObserverCallback, observer: *mut AXObserverRef) -> AXError;

@@ -34,6 +34,7 @@ OPTIONS:
     --port <N>          Webhook port (default 47815 or $NOTCHFORGE_PORT)
     --token <T>         Bearer token (or $NOTCHFORGE_TOKEN)
     --best-effort       Always exit 0 (recommended in hooks)
+    '{...}'             A JSON event as the last argument (Codex CLI `notify` style)
     -h, --help          Show this help";
 
 #[derive(Default)]
@@ -45,6 +46,7 @@ struct Args {
     best_effort: bool,
     source: Option<String>,
     kind: Option<String>,
+    json_arg: Option<String>,
 }
 
 fn parse() -> Result<Option<Args>, String> {
@@ -65,6 +67,8 @@ fn parse() -> Result<Option<Args>, String> {
             "--stdin" => a.stdin = true,
             "--best-effort" => a.best_effort = true,
             "-h" | "--help" => return Ok(None),
+            // A bare JSON argument (the Codex CLI `notify` hook passes one).
+            json if json.trim_start().starts_with('{') => a.json_arg = Some(json.to_owned()),
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -125,7 +129,11 @@ fn send_http(port: u16, token: Option<&str>, query: &str, body: &str) -> Result<
     let mut resp = String::new();
     s.read_to_string(&mut resp).map_err(|e| e.to_string())?;
     let status = resp.split_whitespace().nth(1).unwrap_or("");
-    if status.starts_with('2') { Ok(()) } else { Err(format!("server replied: {}", resp.lines().last().unwrap_or(status))) }
+    if status.starts_with('2') {
+        Ok(())
+    } else {
+        Err(format!("server replied: {}", resp.lines().last().unwrap_or(status)))
+    }
 }
 
 #[cfg(unix)]
@@ -148,7 +156,11 @@ fn send_socket(_line: &str) -> Result<(), String> {
 fn append_inbox(line: &str) -> Result<(), String> {
     let dir = data_dir().ok_or("no data dir")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("inbox.jsonl")).map_err(|e| e.to_string())?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("inbox.jsonl"))
+        .map_err(|e| e.to_string())?;
     writeln!(f, "{line}").map_err(|e| e.to_string())
 }
 
@@ -168,7 +180,9 @@ fn main() -> ExitCode {
         eprintln!("notchforge-notify: {msg}");
         if best_effort { ExitCode::SUCCESS } else { ExitCode::FAILURE }
     };
-    let stdin = if args.stdin {
+    let stdin = if let Some(j) = args.json_arg.clone() {
+        Some(j)
+    } else if args.stdin {
         let mut s = String::new();
         if let Err(e) = std::io::stdin().read_to_string(&mut s) {
             return fail(format!("reading stdin: {e}"), args.best_effort);
@@ -181,10 +195,8 @@ fn main() -> ExitCode {
         Ok(b) => b.to_string(),
         Err(e) => return fail(e, args.best_effort),
     };
-    let port = args
-        .port
-        .or_else(|| std::env::var("NOTCHFORGE_PORT").ok().and_then(|p| p.parse().ok()))
-        .unwrap_or(47815);
+    let port =
+        args.port.or_else(|| std::env::var("NOTCHFORGE_PORT").ok().and_then(|p| p.parse().ok())).unwrap_or(47815);
     let token = args.token.clone().or_else(|| std::env::var("NOTCHFORGE_TOKEN").ok());
     let mut query = Vec::new();
     if let Some(s) = &args.source {
@@ -211,11 +223,7 @@ mod tests {
 
     #[test]
     fn body_merges_stdin_and_flags() {
-        let a = Args {
-            fields: vec![("title", "T".into())],
-            source: Some("claude".into()),
-            ..Args::default()
-        };
+        let a = Args { fields: vec![("title", "T".into())], source: Some("claude".into()), ..Args::default() };
         let v = build_body(&a, Some(r#"{"hook_event_name":"Stop","title":"old"}"#)).expect("body");
         assert_eq!(v["title"], "T");
         assert_eq!(v["source"], "claude");

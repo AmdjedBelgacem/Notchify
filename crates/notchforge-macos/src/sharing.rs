@@ -3,7 +3,9 @@
 use crate::ui::ns;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString, NSSharingService, NSSharingServiceNameSendViaAirDrop, NSWorkspace};
+use objc2_app_kit::{
+    NSPasteboard, NSPasteboardTypeString, NSSharingService, NSSharingServiceNameSendViaAirDrop, NSWorkspace,
+};
 use objc2_foundation::{NSArray, NSString, NSURL};
 use std::path::{Path, PathBuf};
 
@@ -27,7 +29,8 @@ pub fn airdrop(paths: &[PathBuf]) -> bool {
     // SAFETY: reading an AppKit constant.
     let name = unsafe { NSSharingServiceNameSendViaAirDrop };
     let Some(service) = NSSharingService::sharingServiceNamed(name) else { return false };
-    let urls: Vec<Retained<AnyObject>> = paths.iter().map(|p| Retained::into_super(Retained::into_super(file_url(p)))).collect();
+    let urls: Vec<Retained<AnyObject>> =
+        paths.iter().map(|p| Retained::into_super(Retained::into_super(file_url(p)))).collect();
     let items = NSArray::from_retained_slice(&urls);
     // SAFETY: items are file URLs, which the AirDrop service accepts.
     unsafe {
@@ -68,8 +71,5 @@ pub fn open_url(url: &str) -> bool {
 
 /// Bring an app to the front by bundle id.
 pub fn open_app(bundle_id: &str) -> bool {
-    std::process::Command::new("/usr/bin/open")
-        .args(["-b", bundle_id])
-        .spawn()
-        .is_ok()
+    std::process::Command::new("/usr/bin/open").args(["-b", bundle_id]).spawn().is_ok()
 }

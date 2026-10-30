@@ -52,9 +52,14 @@ impl NotificationKind {
     pub fn parse(s: &str) -> NotificationKind {
         match s.trim().to_ascii_lowercase().replace(['-', ' '], "_").as_str() {
             "message" | "new_message" => NotificationKind::Message,
-            "task_finished" | "finished" | "done" | "stop" | "complete" | "completed" => {
-                NotificationKind::TaskFinished
-            }
+            "task_finished"
+            | "finished"
+            | "done"
+            | "stop"
+            | "complete"
+            | "completed"
+            | "agent_turn_complete"
+            | "turn_complete" => NotificationKind::TaskFinished,
             "needs_input" | "input" | "permission" | "waiting" | "question" | "notification" => {
                 NotificationKind::NeedsInput
             }
@@ -490,9 +495,7 @@ impl Permission {
                 "Lets NotchForge read the Notification Center database so WhatsApp, Discord, \
                  Messages, Slack and others appear in the notch, and read the Focus state."
             }
-            Permission::Location => {
-                "Used only to fetch local weather. You can type a city in Settings instead."
-            }
+            Permission::Location => "Used only to fetch local weather. You can type a city in Settings instead.",
             Permission::Notifications => {
                 "Lets NotchForge post its own alerts (e.g. low device battery) when the notch \
                  is hidden."
@@ -540,6 +543,7 @@ mod tests {
     fn kind_parsing_is_lenient() {
         assert_eq!(NotificationKind::parse("Task-Finished"), NotificationKind::TaskFinished);
         assert_eq!(NotificationKind::parse("stop"), NotificationKind::TaskFinished);
+        assert_eq!(NotificationKind::parse("agent-turn-complete"), NotificationKind::TaskFinished);
         assert_eq!(NotificationKind::parse("permission"), NotificationKind::NeedsInput);
         assert_eq!(NotificationKind::parse("whatever"), NotificationKind::Info);
     }
@@ -558,11 +562,7 @@ mod tests {
             id: "x".into(),
             name: "AirPods Pro".into(),
             kind: DeviceKind::AirPods,
-            levels: vec![
-                (BatteryComponent::Left, 80),
-                (BatteryComponent::Right, 60),
-                (BatteryComponent::Case, 5),
-            ],
+            levels: vec![(BatteryComponent::Left, 80), (BatteryComponent::Right, 60), (BatteryComponent::Case, 5)],
         };
         assert_eq!(d.min_level(), Some(60));
         assert_eq!(DeviceKind::guess("Magic Trackpad"), DeviceKind::Trackpad);
@@ -570,7 +570,8 @@ mod tests {
 
     #[test]
     fn display_mode_label() {
-        let m = DisplayMode { id: 1, width: 1512, height: 982, pixel_width: 3024, pixel_height: 1964, refresh_hz: 120.0 };
+        let m =
+            DisplayMode { id: 1, width: 1512, height: 982, pixel_width: 3024, pixel_height: 1964, refresh_hz: 120.0 };
         assert_eq!(m.label(), "1512 × 982 (HiDPI) @ 120 Hz");
     }
 }

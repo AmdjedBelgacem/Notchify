@@ -1,0 +1,119 @@
+# NotchForge configuration
+# ------------------------
+# Location: ~/Library/Application Support/NotchForge/config.toml
+# Every key is optional; missing keys use the defaults shown here. Edits are
+# picked up live (within ~2 s) — no restart needed. Invalid edits are ignored
+# and logged. Print the full default config with: notchforge --print-config
+
+[general]
+launch_at_login = false
+show_menu_bar_icon = true
+# "notch" (built-in display with a notch, else main) | "main" | "mouse"
+screen = "notch"
+# Pointer must rest this long near the notch before it opens (ms).
+hover_delay_ms = 120
+# Grace period after the pointer leaves before collapsing (ms).
+collapse_delay_ms = 350
+# How long a new notification peeks out of the collapsed notch (ms).
+peek_duration_ms = 4000
+# Minimum priority that peeks: "low" | "normal" | "high" | "critical"
+peek_min_priority = "normal"
+
+[appearance]
+# "system" follows Accessibility › Reduce motion; "always" | "never"
+reduced_motion = "system"
+# Spring stiffness multiplier: 0.5 = relaxed, 2.0 = snappy
+animation_speed = 1.0
+# Sizes in points (content area below the notch).
+compact_width = 460.0
+compact_height = 112.0
+expanded_width = 680.0
+expanded_height = 320.0
+# Live indicators either side of the notch (charging, unread, tray).
+show_wings = true
+high_contrast = false
+
+[providers]
+battery = true
+bluetooth = true               # AirPods, Magic Keyboard/Mouse/Trackpad, HID devices
+weather = true
+agents = true                  # HTTP webhook, Unix socket, JSONL inbox
+notification_center = true     # needs Full Disk Access
+accessibility_banners = false  # fallback banner reader, needs Accessibility
+focus = true                   # Focus/DND state, needs Full Disk Access
+
+[weather]
+# "auto" uses CoreLocation (needs Location permission); or a place name.
+location = "auto"
+# Pin exact coordinates instead (both required):
+# latitude = 48.8566
+# longitude = 2.3522
+unit = "celsius"               # or "fahrenheit"
+refresh_minutes = 20
+# Open-Meteo is free and keyless. Point these at a self-hosted or commercial
+# instance if you like; api_key is appended as &apikey=…
+api_base = "https://api.open-meteo.com/v1/forecast"
+geocoding_base = "https://geocoding-api.open-meteo.com/v1/search"
+# api_key = "…"
+
+[agents]
+http_enabled = true
+http_port = 47815              # bound to 127.0.0.1 only
+# token = "change-me"          # require "Authorization: Bearer change-me"
+socket_enabled = true
+# socket_path = "/custom/agent.sock"   # default: <data dir>/agent.sock
+inbox_enabled = true
+# inbox_path = "/custom/inbox.jsonl"   # default: <data dir>/inbox.jsonl
+
+[notifications]
+max_items = 100
+# Identical (app, title, body) within this window is dropped.
+dedupe_window_secs = 10
+# Per-app token bucket; overflow is folded into the latest entry, not lost.
+rate_limit_burst = 5
+rate_limit_refill_secs = 3
+# Same app + thread within this window is grouped into one entry.
+group_window_secs = 300
+# While a Focus mode is active only show this priority and above.
+focus_min_priority = "high"
+# Show notifications from apps NotchForge doesn't specifically know.
+allow_other_apps = true
+# Experimental: close the native banner via Accessibility once the notch shows it.
+suppress_native_banners = false
+db_poll_interval_ms = 1000
+
+# Per-app rules. Keys: claude, chatgpt, cursor, zed, opencode, qoder, agent,
+# whatsapp, discord, instagram, facebook, messages, slack, telegram, signal —
+# or any bundle identifier (e.g. "com.apple.mail").
+[notifications.apps.discord]
+enabled = true
+# priority = "low"
+muted_keywords = ["@everyone"]
+
+[notifications.apps.claude]
+enabled = true
+priority = "high"
+
+[notifications.apps."com.apple.mail"]
+enabled = false
+
+# Attribute extra bundle ids to a known app (e.g. a new build of an agent IDE).
+# [[notifications.aliases]]
+# bundle_id = "com.example.qoder-insiders"
+# app = "qoder"
+
+[tray]
+# Keep tray contents across restarts (files are referenced, never copied).
+persist = false
+max_items = 50
+
+[controls]
+brightness = true
+volume = true
+resolution = true
+focus = true
+# Shortcuts (Shortcuts.app, "Set Focus" action) used to toggle Focus.
+focus_on_shortcut = "NotchForge Focus On"
+focus_off_shortcut = "NotchForge Focus Off"
+# Resolution changes revert automatically unless confirmed within this time.
+resolution_confirm_secs = 15

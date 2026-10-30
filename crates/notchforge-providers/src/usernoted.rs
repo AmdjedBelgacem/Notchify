@@ -17,7 +17,9 @@
 
 use notchforge_core::apps::{AppCategory, AppRef};
 use notchforge_core::model::{NewNotification, NotificationKind, Origin, Permission, ProviderStatus};
-use notchforge_core::provider::{BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake};
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
+};
 use notchforge_core::time::{mac_absolute_to_unix_ms, now_ms};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -94,7 +96,8 @@ pub fn infer_agent_kind(text: &str) -> NotificationKind {
     let t = text.to_lowercase();
     if ["error", "failed", "failure", "crash"].iter().any(|w| t.contains(w)) {
         NotificationKind::Error
-    } else if ["permission", "approve", "waiting", "needs your", "input", "confirm", "?"].iter().any(|w| t.contains(w)) {
+    } else if ["permission", "approve", "waiting", "needs your", "input", "confirm", "?"].iter().any(|w| t.contains(w))
+    {
         NotificationKind::NeedsInput
     } else if ["done", "finished", "complete", "ready", "responded"].iter().any(|w| t.contains(w)) {
         NotificationKind::TaskFinished
@@ -103,7 +106,11 @@ pub fn infer_agent_kind(text: &str) -> NotificationKind {
     }
 }
 
-pub fn to_notification(bundle_id: &str, rec: DecodedRecord, aliases: &[(String, notchforge_core::apps::KnownApp)]) -> NewNotification {
+pub fn to_notification(
+    bundle_id: &str,
+    rec: DecodedRecord,
+    aliases: &[(String, notchforge_core::apps::KnownApp)],
+) -> NewNotification {
     let hint = format!("{} {} {}", rec.title, rec.subtitle.as_deref().unwrap_or(""), rec.body);
     let app = AppRef::resolve(bundle_id, &hint, aliases);
     let kind = match app.category() {
@@ -307,7 +314,8 @@ mod tests {
         assert_eq!(n.kind, NotificationKind::Message);
         assert_eq!(n.origin, Origin::NotificationCenterDb);
 
-        let rec = DecodedRecord { title: "Claude".into(), body: "Claude needs your permission".into(), ..Default::default() };
+        let rec =
+            DecodedRecord { title: "Claude".into(), body: "Claude needs your permission".into(), ..Default::default() };
         let n = to_notification("com.anthropic.claudefordesktop", rec, &[]);
         assert_eq!(n.kind, NotificationKind::NeedsInput);
     }
