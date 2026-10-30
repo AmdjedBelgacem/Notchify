@@ -1,6 +1,11 @@
 [package]
 name = "notchforge-notify"
+description = "Tiny CLI that sends coding-agent events to NotchForge (HTTP, falling back to the Unix socket and inbox file)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+dirs = { workspace = true }

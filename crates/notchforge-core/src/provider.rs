@@ -211,6 +211,7 @@ pub struct Supervisor;
 const MIN_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
 const PERMISSION_RETRY: Duration = Duration::from_secs(30);
+const SHUTDOWN_GRACE: Duration = Duration::from_millis(300);
 
 impl Supervisor {
     /// Spawn one supervising task per spec on the current tokio runtime.
@@ -262,7 +263,12 @@ impl Supervisor {
             let outcome = loop {
                 tokio::select! {
                     r = &mut fut => break Some(r),
-                    _ = shutdown.wait() => break None,
+                    _ = shutdown.wait() => {
+                        // Providers watch the same signal; let them clean up
+                        // (remove sockets, flush state) before dropping them.
+                        let _ = tokio::time::timeout(SHUTDOWN_GRACE, &mut fut).await;
+                        break None;
+                    }
                     r = config.changed() => {
                         if r.is_err() { break None; }
                         let new = config.borrow_and_update().clone();

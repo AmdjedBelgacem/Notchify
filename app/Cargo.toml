@@ -1,6 +1,23 @@
 [package]
 name = "notchforge"
+description = "NotchForge — turns the MacBook notch into a smart control and notification surface."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+default-run = "notchforge"
+
+[[bin]]
+name = "notchforge"
+path = "src/main.rs"
+
+[dependencies]
+notchforge-core = { workspace = true }
+notchforge-providers = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+notchforge-macos = { workspace = true }
