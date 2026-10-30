@@ -104,24 +104,28 @@ crates/
     provider.rs               Provider trait, context, supervisor, BoxFuture
     engine.rs                 state owner, command handling, snapshot coalescing
     time.rs                   relative-time formatting, Mac absolute time
+    error.rs                  CoreError
   notchforge-providers/
     battery.rs                IOKit (macOS) / pmset parser / sysfs (Linux dev)
+    util.rs                   command runner with timeout, small parsers
     bluetooth.rs              ioreg plist + system_profiler JSON parsers, merger
     weather.rs                Open-Meteo client, WMO code mapping
     agents/{payload,http,socket,inbox,mod}.rs   coding-agent hub
     usernoted.rs              Notification Center DB watcher (FDA)
     focus.rs                  DND/Focus state reader (fragile, isolated)
-    sys/iokit.rs              raw IOKit/CF FFI (macOS only)
+    sys/{cf,iokit}.rs         raw CoreFoundation / IOKit FFI (macOS only)
   notchforge-macos/           everything AppKit; compiles to nothing off macOS
-    app.rs, bridge.rs, screen.rs, panel.rs, controller.rs, animator.rs,
-    views/{root,collapsed,compact,expanded,widgets}.rs,
+    app.rs (bootstrap, main-thread state), bridge.rs (snapshots → main queue),
+    controller.rs (FSM + springs + timers + input), panel.rs (NSPanel, RootView,
+    TrayItemView), screen.rs, ui.rs (closure targets, helpers),
+    views/{collapsed,peek,compact,expanded}.rs,
     menubar.rs, settings.rs, permissions.rs, login_item.rs, location.rs,
-    accessibility.rs, sharing.rs, monitor.rs,
+    accessibility.rs, sharing.rs, icons.rs,
     controls/{brightness,display_modes,volume,focus}.rs,
     private_api/display_services.rs   (dlopen'd, fragile, isolated)
-    ffi/{cf,ax,coregraphics,coreaudio}.rs
+    ffi/{ax,cg,coreaudio}.rs          (CoreFoundation helpers shared from providers::sys::cf)
   notchforge-notify/          tiny CLI that agents call: `notchforge-notify …`
-app/                          `notchforge` binary — thin main
+app/                          `notchforge` binary — thin main (cli, logging, headless sink)
 packaging/                    Info.plist, entitlements, bundle script
 integrations/                 Claude Code hooks, OpenCode plugin, shell helpers
 config/notchforge.example.toml
