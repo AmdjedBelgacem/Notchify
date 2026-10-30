@@ -54,6 +54,8 @@ impl NotchPanel {
             msg_send![this, initWithContentRect: frame, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
         };
         // Above the menu bar (24) so the island covers it, below screen savers.
+        // Note: never call `setFloatingPanel(true)` — it resets the level to
+        // NSFloatingWindowLevel, which is *below* the menu bar.
         panel.setLevel(NSMainMenuWindowLevel + 3);
         panel.setCollectionBehavior(
             NSWindowCollectionBehavior::CanJoinAllSpaces
@@ -68,7 +70,6 @@ impl NotchPanel {
         panel.setAcceptsMouseMovedEvents(true);
         panel.setMovable(false);
         panel.setHidesOnDeactivate(false);
-        panel.setFloatingPanel(true);
         // SAFETY: we keep our own strong reference; AppKit must not release on close.
         unsafe { panel.setReleasedWhenClosed(false) };
         panel.setContentView(Some(content));
