@@ -12,7 +12,9 @@ use notchforge_core::config::WeatherConfig;
 use notchforge_core::model::{
     Coordinates, HourlyForecast, Permission, ProviderStatus, TemperatureUnit, Weather, WeatherCondition,
 };
-use notchforge_core::provider::{BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake};
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
+};
 use notchforge_core::time::now_ms;
 use serde::Deserialize;
 use std::time::Duration;
@@ -136,9 +138,14 @@ struct Resolver {
 
 impl Resolver {
     /// Returns coordinates and a display name.
-    async fn resolve(&mut self, ctx: &mut ProviderContext, cfg: &WeatherConfig) -> Result<(Coordinates, String), ProviderError> {
+    async fn resolve(
+        &mut self,
+        ctx: &mut ProviderContext,
+        cfg: &WeatherConfig,
+    ) -> Result<(Coordinates, String), ProviderError> {
         if let (Some(latitude), Some(longitude)) = (cfg.latitude, cfg.longitude) {
-            let name = if cfg.location.eq_ignore_ascii_case("auto") { "Pinned location".into() } else { cfg.location.clone() };
+            let name =
+                if cfg.location.eq_ignore_ascii_case("auto") { "Pinned location".into() } else { cfg.location.clone() };
             return Ok((Coordinates { latitude, longitude }, name));
         }
         if cfg.location.trim().eq_ignore_ascii_case("auto") {

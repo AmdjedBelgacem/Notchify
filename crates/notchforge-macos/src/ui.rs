@@ -11,8 +11,8 @@ use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol, Sel};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSButton, NSColor, NSControlSize, NSFont, NSFontWeight, NSFontWeightMedium, NSFontWeightRegular,
-    NSFontWeightSemibold, NSImage, NSImageScaling, NSImageSymbolConfiguration, NSImageView, NSLineBreakMode, NSTextField,
-    NSView,
+    NSFontWeightSemibold, NSImage, NSImageScaling, NSImageSymbolConfiguration, NSImageView, NSLineBreakMode,
+    NSTextField, NSView,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use std::cell::RefCell;
@@ -248,8 +248,15 @@ pub fn icon_button(
     // SAFETY: valid target/selector; target is kept alive by the caller.
     let b = unsafe {
         match image {
-            Some(img) => NSButton::buttonWithImage_target_action(&img, Some(target.as_any()), Some(ActionTarget::action()), mtm),
-            None => NSButton::buttonWithTitle_target_action(&ns(tooltip), Some(target.as_any()), Some(ActionTarget::action()), mtm),
+            Some(img) => {
+                NSButton::buttonWithImage_target_action(&img, Some(target.as_any()), Some(ActionTarget::action()), mtm)
+            }
+            None => NSButton::buttonWithTitle_target_action(
+                &ns(tooltip),
+                Some(target.as_any()),
+                Some(ActionTarget::action()),
+                mtm,
+            ),
         }
     };
     b.setBordered(false);

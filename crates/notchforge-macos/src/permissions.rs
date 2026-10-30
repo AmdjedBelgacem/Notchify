@@ -11,7 +11,9 @@ use objc2::rc::Retained;
 use objc2::runtime::Bool;
 use objc2_app_kit::NSWorkspace;
 use objc2_foundation::{NSBundle, NSDictionary, NSError, NSNumber, NSString, NSURL};
-use objc2_user_notifications::{UNAuthorizationOptions, UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter};
+use objc2_user_notifications::{
+    UNAuthorizationOptions, UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter,
+};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU8, Ordering};
 

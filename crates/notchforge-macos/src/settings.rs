@@ -17,8 +17,8 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSBackingStoreType, NSButton, NSColor, NSControlSize, NSControlStateValueOff, NSControlStateValueOn,
-    NSPopUpButton, NSScrollView, NSSlider, NSTextField, NSView, NSWindow, NSWindowStyleMask,
+    NSBackingStoreType, NSButton, NSColor, NSControlSize, NSControlStateValueOff, NSControlStateValueOn, NSPopUpButton,
+    NSScrollView, NSSlider, NSTextField, NSView, NSWindow, NSWindowStyleMask,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -56,13 +56,25 @@ impl Form<'_> {
 
     fn section(&self, title: &str) {
         self.y.set(self.y.get() + 14.0);
-        let l = crate::ui::label(self.mtm, title, &font(13.0, Weight::Semibold), &NSColor::labelColor(), rect(LEFT, self.y.get(), WIDTH - 2.0 * LEFT, 18.0));
+        let l = crate::ui::label(
+            self.mtm,
+            title,
+            &font(13.0, Weight::Semibold),
+            &NSColor::labelColor(),
+            rect(LEFT, self.y.get(), WIDTH - 2.0 * LEFT, 18.0),
+        );
         self.doc.addSubview(&l);
         self.y.set(self.y.get() + 26.0);
     }
 
     fn row_label(&self, title: &str) {
-        let l = crate::ui::label(self.mtm, title, &font(12.0, Weight::Regular), &NSColor::labelColor(), rect(LEFT + 8.0, self.y.get() + 3.0, LABEL_W - 8.0, 16.0));
+        let l = crate::ui::label(
+            self.mtm,
+            title,
+            &font(12.0, Weight::Regular),
+            &NSColor::labelColor(),
+            rect(LEFT + 8.0, self.y.get() + 3.0, LABEL_W - 8.0, 16.0),
+        );
         self.doc.addSubview(&l);
     }
 
@@ -71,7 +83,14 @@ impl Form<'_> {
     }
 
     fn note(&self, text: &str) {
-        let l = wrapping_label(self.mtm, text, &font(11.0, Weight::Regular), &NSColor::secondaryLabelColor(), rect(LEFT + 8.0, self.y.get(), WIDTH - 2.0 * LEFT - 16.0, 30.0), 3);
+        let l = wrapping_label(
+            self.mtm,
+            text,
+            &font(11.0, Weight::Regular),
+            &NSColor::secondaryLabelColor(),
+            rect(LEFT + 8.0, self.y.get(), WIDTH - 2.0 * LEFT - 16.0, 30.0),
+            3,
+        );
         self.doc.addSubview(&l);
         self.advance(32.0);
     }
@@ -85,7 +104,14 @@ impl Form<'_> {
             }
         });
         // SAFETY: target kept alive by `targets`.
-        let b = unsafe { NSButton::checkboxWithTitle_target_action(&ns(title), Some(t.as_any()), Some(ActionTarget::action()), self.mtm) };
+        let b = unsafe {
+            NSButton::checkboxWithTitle_target_action(
+                &ns(title),
+                Some(t.as_any()),
+                Some(ActionTarget::action()),
+                self.mtm,
+            )
+        };
         b.setState(if value { NSControlStateValueOn } else { NSControlStateValueOff });
         b.setFrame(rect(LEFT + 8.0, self.y.get(), WIDTH - 2.0 * LEFT - 16.0, 20.0));
         self.doc.addSubview(&b);
@@ -94,7 +120,11 @@ impl Form<'_> {
 
     fn popup(&self, title: &str, options: &[&str], selected: usize, set: impl Fn(&mut Config, usize) + 'static) {
         self.row_label(title);
-        let p = NSPopUpButton::initWithFrame_pullsDown(NSPopUpButton::alloc(self.mtm), rect(CONTROL_X, self.y.get(), CONTROL_W.min(220.0), 24.0), false);
+        let p = NSPopUpButton::initWithFrame_pullsDown(
+            NSPopUpButton::alloc(self.mtm),
+            rect(CONTROL_X, self.y.get(), CONTROL_W.min(220.0), 24.0),
+            false,
+        );
         for o in options {
             p.addItemWithTitle(&ns(o));
         }
@@ -153,7 +183,16 @@ impl Form<'_> {
             }
         });
         // SAFETY: target kept alive by `targets`.
-        let s = unsafe { NSSlider::sliderWithValue_minValue_maxValue_target_action(value, min, max, Some(t.as_any()), Some(ActionTarget::action()), self.mtm) };
+        let s = unsafe {
+            NSSlider::sliderWithValue_minValue_maxValue_target_action(
+                value,
+                min,
+                max,
+                Some(t.as_any()),
+                Some(ActionTarget::action()),
+                self.mtm,
+            )
+        };
         s.setControlSize(NSControlSize::Small);
         s.setContinuous(false);
         s.setFrame(rect(CONTROL_X, self.y.get(), CONTROL_W.min(240.0), 22.0));
@@ -177,7 +216,13 @@ impl Form<'_> {
             PermissionState::Denied => NSColor::systemOrangeColor(),
             _ => NSColor::secondaryLabelColor(),
         };
-        let status = crate::ui::label(self.mtm, permissions::state_label(state), &font(12.0, Weight::Medium), &color, rect(CONTROL_X, self.y.get() + 3.0, 120.0, 16.0));
+        let status = crate::ui::label(
+            self.mtm,
+            permissions::state_label(state),
+            &font(12.0, Weight::Medium),
+            &color,
+            rect(CONTROL_X, self.y.get() + 3.0, 120.0, 16.0),
+        );
         self.doc.addSubview(&status);
         if state != PermissionState::NotRequired {
             if state != PermissionState::Granted {
@@ -202,7 +247,13 @@ impl SettingsWindow {
         let style = NSWindowStyleMask::Titled | NSWindowStyleMask::Closable | NSWindowStyleMask::Miniaturizable;
         // SAFETY: NSWindow designated initializer.
         let window = unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(NSWindow::alloc(mtm), rect(0.0, 0.0, WIDTH, HEIGHT), style, NSBackingStoreType::Buffered, false)
+            NSWindow::initWithContentRect_styleMask_backing_defer(
+                NSWindow::alloc(mtm),
+                rect(0.0, 0.0, WIDTH, HEIGHT),
+                style,
+                NSBackingStoreType::Buffered,
+                false,
+            )
         };
         window.setTitle(&ns("NotchForge Settings"));
         // SAFETY: we own the window strongly.
@@ -226,35 +277,68 @@ impl SettingsWindow {
                 app::alert("Launch at login", &e);
             }
         });
-        form.checkbox("Show menu bar icon", c.general.show_menu_bar_icon, |cfg, on| cfg.general.show_menu_bar_icon = on);
-        let screens = [ScreenChoice::Notch, ScreenChoice::Main, ScreenChoice::Mouse];
-        form.popup("Show on screen", &["Built-in (notch)", "Main display", "Display with pointer"], index_of(&screens, &c.general.screen), move |cfg, i| {
-            cfg.general.screen = screens[i];
+        form.checkbox("Show menu bar icon", c.general.show_menu_bar_icon, |cfg, on| {
+            cfg.general.show_menu_bar_icon = on
         });
-        form.slider("Hover delay", 0.0, 600.0, c.general.hover_delay_ms as f64, |cfg, v| cfg.general.hover_delay_ms = v.round() as u64);
+        let screens = [ScreenChoice::Notch, ScreenChoice::Main, ScreenChoice::Mouse];
+        form.popup(
+            "Show on screen",
+            &["Built-in (notch)", "Main display", "Display with pointer"],
+            index_of(&screens, &c.general.screen),
+            move |cfg, i| {
+                cfg.general.screen = screens[i];
+            },
+        );
+        form.slider("Hover delay", 0.0, 600.0, c.general.hover_delay_ms as f64, |cfg, v| {
+            cfg.general.hover_delay_ms = v.round() as u64
+        });
         let prios: Vec<Priority> = PRIORITIES.iter().map(|p| p.1).collect();
         let prio_names: Vec<&str> = PRIORITIES.iter().map(|p| p.0).collect();
         let pl = prios.clone();
-        form.popup("Peek for priority ≥", &prio_names, index_of(&prios, &c.general.peek_min_priority), move |cfg, i| {
-            cfg.general.peek_min_priority = pl[i];
-        });
+        form.popup(
+            "Peek for priority ≥",
+            &prio_names,
+            index_of(&prios, &c.general.peek_min_priority),
+            move |cfg, i| {
+                cfg.general.peek_min_priority = pl[i];
+            },
+        );
 
         form.section("Appearance & Motion");
         let motions = [ReducedMotion::System, ReducedMotion::Always, ReducedMotion::Never];
-        form.popup("Reduce motion", &["Follow system", "Always", "Never"], index_of(&motions, &c.appearance.reduced_motion), move |cfg, i| {
-            cfg.appearance.reduced_motion = motions[i];
+        form.popup(
+            "Reduce motion",
+            &["Follow system", "Always", "Never"],
+            index_of(&motions, &c.appearance.reduced_motion),
+            move |cfg, i| {
+                cfg.appearance.reduced_motion = motions[i];
+            },
+        );
+        form.slider("Animation speed", 0.5, 2.0, c.appearance.animation_speed, |cfg, v| {
+            cfg.appearance.animation_speed = v
         });
-        form.slider("Animation speed", 0.5, 2.0, c.appearance.animation_speed, |cfg, v| cfg.appearance.animation_speed = v);
-        form.checkbox("Show live indicators beside the notch", c.appearance.show_wings, |cfg, on| cfg.appearance.show_wings = on);
+        form.checkbox("Show live indicators beside the notch", c.appearance.show_wings, |cfg, on| {
+            cfg.appearance.show_wings = on
+        });
         form.checkbox("High contrast text", c.appearance.high_contrast, |cfg, on| cfg.appearance.high_contrast = on);
 
         form.section("Providers");
         form.checkbox("Mac battery", c.providers.battery, |cfg, on| cfg.providers.battery = on);
-        form.checkbox("Accessory batteries (AirPods, keyboards, mice…)", c.providers.bluetooth, |cfg, on| cfg.providers.bluetooth = on);
+        form.checkbox("Accessory batteries (AirPods, keyboards, mice…)", c.providers.bluetooth, |cfg, on| {
+            cfg.providers.bluetooth = on
+        });
         form.checkbox("Weather", c.providers.weather, |cfg, on| cfg.providers.weather = on);
-        form.checkbox("Coding agents (webhook, socket, inbox)", c.providers.agents, |cfg, on| cfg.providers.agents = on);
-        form.checkbox("Notification Center (needs Full Disk Access)", c.providers.notification_center, |cfg, on| cfg.providers.notification_center = on);
-        form.checkbox("Banner observer fallback (needs Accessibility)", c.providers.accessibility_banners, |cfg, on| cfg.providers.accessibility_banners = on);
+        form.checkbox("Coding agents (webhook, socket, inbox)", c.providers.agents, |cfg, on| {
+            cfg.providers.agents = on
+        });
+        form.checkbox("Notification Center (needs Full Disk Access)", c.providers.notification_center, |cfg, on| {
+            cfg.providers.notification_center = on
+        });
+        form.checkbox(
+            "Banner observer fallback (needs Accessibility)",
+            c.providers.accessibility_banners,
+            |cfg, on| cfg.providers.accessibility_banners = on,
+        );
         form.checkbox("Focus state (needs Full Disk Access)", c.providers.focus, |cfg, on| cfg.providers.focus = on);
 
         form.section("Weather");
@@ -264,11 +348,18 @@ impl SettingsWindow {
             cfg.weather.longitude = None;
         });
         let units = [TemperatureUnit::Celsius, TemperatureUnit::Fahrenheit];
-        form.popup("Units", &["Celsius", "Fahrenheit"], index_of(&units, &c.weather.unit), move |cfg, i| cfg.weather.unit = units[i]);
-        let refresh = [10u64, 20, 30, 60];
-        form.popup("Refresh every", &["10 minutes", "20 minutes", "30 minutes", "60 minutes"], index_of(&refresh, &c.weather.refresh_minutes), move |cfg, i| {
-            cfg.weather.refresh_minutes = refresh[i];
+        form.popup("Units", &["Celsius", "Fahrenheit"], index_of(&units, &c.weather.unit), move |cfg, i| {
+            cfg.weather.unit = units[i]
         });
+        let refresh = [10u64, 20, 30, 60];
+        form.popup(
+            "Refresh every",
+            &["10 minutes", "20 minutes", "30 minutes", "60 minutes"],
+            index_of(&refresh, &c.weather.refresh_minutes),
+            move |cfg, i| {
+                cfg.weather.refresh_minutes = refresh[i];
+            },
+        );
 
         form.section("Coding Agents");
         form.text("Webhook port", &c.agents.http_port.to_string(), "47815", |cfg, v| {
@@ -276,9 +367,14 @@ impl SettingsWindow {
                 cfg.agents.http_port = p;
             }
         });
-        form.text("Bearer token (optional)", c.agents.token.as_deref().unwrap_or(""), "leave empty for none", |cfg, v| {
-            cfg.agents.token = if v.is_empty() { None } else { Some(v) };
-        });
+        form.text(
+            "Bearer token (optional)",
+            c.agents.token.as_deref().unwrap_or(""),
+            "leave empty for none",
+            |cfg, v| {
+                cfg.agents.token = if v.is_empty() { None } else { Some(v) };
+            },
+        );
         let port = c.agents.http_port;
         form.note(&format!(
             "POST JSON to http://127.0.0.1:{port}/v1/notify — e.g. {{\"source\":\"cursor\",\"kind\":\"task_finished\",\"title\":\"Done\"}}. See README for Claude Code, OpenCode, Zed and Cursor recipes."
@@ -291,13 +387,24 @@ impl SettingsWindow {
         form.advance(32.0);
 
         form.section("Notifications");
-        form.popup("While Focus is on, show ≥", &prio_names, index_of(&prios, &c.notifications.focus_min_priority), move |cfg, i| {
-            cfg.notifications.focus_min_priority = prios[i];
+        form.popup(
+            "While Focus is on, show ≥",
+            &prio_names,
+            index_of(&prios, &c.notifications.focus_min_priority),
+            move |cfg, i| {
+                cfg.notifications.focus_min_priority = prios[i];
+            },
+        );
+        form.checkbox("Show notifications from other apps", c.notifications.allow_other_apps, |cfg, on| {
+            cfg.notifications.allow_other_apps = on
         });
-        form.checkbox("Show notifications from other apps", c.notifications.allow_other_apps, |cfg, on| cfg.notifications.allow_other_apps = on);
-        form.checkbox("Close the native banner when the notch shows it (experimental)", c.notifications.suppress_native_banners, |cfg, on| {
-            cfg.notifications.suppress_native_banners = on;
-        });
+        form.checkbox(
+            "Close the native banner when the notch shows it (experimental)",
+            c.notifications.suppress_native_banners,
+            |cfg, on| {
+                cfg.notifications.suppress_native_banners = on;
+            },
+        );
         for app_kind in KnownApp::ALL {
             let key = app_kind.key();
             let rule = c.notifications.apps.get(key).cloned().unwrap_or_default();
@@ -310,7 +417,11 @@ impl SettingsWindow {
             let k2 = key.to_owned();
             let options = ["Default priority", "Low", "Normal", "High", "Critical"];
             let selected = rule.priority.map_or(0, |p| 1 + PRIORITIES.iter().position(|x| x.1 == p).unwrap_or(1));
-            let p = NSPopUpButton::initWithFrame_pullsDown(NSPopUpButton::alloc(mtm), rect(CONTROL_X + 60.0, form.y.get() - 2.0, 160.0, 22.0), false);
+            let p = NSPopUpButton::initWithFrame_pullsDown(
+                NSPopUpButton::alloc(mtm),
+                rect(CONTROL_X + 60.0, form.y.get() - 2.0, 160.0, 22.0),
+                false,
+            );
             p.setControlSize(NSControlSize::Small);
             for o in options {
                 p.addItemWithTitle(&ns(o));
@@ -343,9 +454,15 @@ impl SettingsWindow {
         form.checkbox("Brightness slider", c.controls.brightness, |cfg, on| cfg.controls.brightness = on);
         form.checkbox("Volume slider", c.controls.volume, |cfg, on| cfg.controls.volume = on);
         form.checkbox("Resolution switcher", c.controls.resolution, |cfg, on| cfg.controls.resolution = on);
-        form.text("“Focus on” shortcut", &c.controls.focus_on_shortcut, "Shortcut name", |cfg, v| cfg.controls.focus_on_shortcut = v);
-        form.text("“Focus off” shortcut", &c.controls.focus_off_shortcut, "Shortcut name", |cfg, v| cfg.controls.focus_off_shortcut = v);
-        form.note("Create these in the Shortcuts app with the “Set Focus” action; NotchForge runs them to toggle Focus.");
+        form.text("“Focus on” shortcut", &c.controls.focus_on_shortcut, "Shortcut name", |cfg, v| {
+            cfg.controls.focus_on_shortcut = v
+        });
+        form.text("“Focus off” shortcut", &c.controls.focus_off_shortcut, "Shortcut name", |cfg, v| {
+            cfg.controls.focus_off_shortcut = v
+        });
+        form.note(
+            "Create these in the Shortcuts app with the “Set Focus” action; NotchForge runs them to toggle Focus.",
+        );
 
         form.section("Permissions");
         for p in Permission::ALL {

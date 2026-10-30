@@ -8,7 +8,9 @@ use notchforge_core::model::{Coordinates, PermissionState};
 use objc2::rc::Retained;
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_core_location::{CLAuthorizationStatus, CLLocation, CLLocationManager, CLLocationManagerDelegate, kCLLocationAccuracyThreeKilometers};
+use objc2_core_location::{
+    CLAuthorizationStatus, CLLocation, CLLocationManager, CLLocationManagerDelegate, kCLLocationAccuracyThreeKilometers,
+};
 use objc2_foundation::{NSArray, NSError};
 use std::cell::RefCell;
 use tokio::sync::watch;
@@ -110,7 +112,9 @@ pub fn authorization_state() -> PermissionState {
     SERVICE.with(|s| match s.borrow().as_ref() {
         // SAFETY: property read.
         Some((m, _)) => match unsafe { m.authorizationStatus() } {
-            CLAuthorizationStatus::AuthorizedAlways | CLAuthorizationStatus::AuthorizedWhenInUse => PermissionState::Granted,
+            CLAuthorizationStatus::AuthorizedAlways | CLAuthorizationStatus::AuthorizedWhenInUse => {
+                PermissionState::Granted
+            }
             CLAuthorizationStatus::Denied | CLAuthorizationStatus::Restricted => PermissionState::Denied,
             CLAuthorizationStatus::NotDetermined => PermissionState::NotDetermined,
             _ => PermissionState::Unknown,

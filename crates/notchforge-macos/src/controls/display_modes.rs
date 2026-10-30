@@ -25,7 +25,14 @@ unsafe fn describe(mode: CGDisplayModeRef) -> DisplayMode {
         let (w, h) = (CGDisplayModeGetWidth(mode), CGDisplayModeGetHeight(mode));
         let (pw, ph) = (CGDisplayModeGetPixelWidth(mode), CGDisplayModeGetPixelHeight(mode));
         let hz = CGDisplayModeGetRefreshRate(mode);
-        DisplayMode { id: mode_id(w, h, pw, ph, hz), width: w as u32, height: h as u32, pixel_width: pw as u32, pixel_height: ph as u32, refresh_hz: hz }
+        DisplayMode {
+            id: mode_id(w, h, pw, ph, hz),
+            width: w as u32,
+            height: h as u32,
+            pixel_width: pw as u32,
+            pixel_height: ph as u32,
+            refresh_hz: hz,
+        }
     }
 }
 

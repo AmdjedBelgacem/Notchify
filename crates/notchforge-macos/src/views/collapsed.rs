@@ -2,7 +2,9 @@
 //! show live signals (charging, low battery, tray contents, unread messages).
 
 use super::{app_icon_view, set_app_icon};
-use crate::ui::{FlippedView, Palette, Weight, label, mono_digits, rect, set_accessibility_label, set_symbol, set_text, symbol_view};
+use crate::ui::{
+    FlippedView, Palette, Weight, label, mono_digits, rect, set_accessibility_label, set_symbol, set_text, symbol_view,
+};
 use notchforge_core::engine::Snapshot;
 use notchforge_core::geometry::{LayoutKind, NotchLayout, WING_WIDTH};
 use objc2::MainThreadMarker;
@@ -40,9 +42,13 @@ impl CollapsedView {
     pub fn update(&self, snap: &Snapshot, p: &Palette) {
         // Left wing: power first (charging / low), then tray.
         let left = match &snap.battery {
-            Some(b) if b.present && b.charging => Some(("bolt.fill", format!("{}%", b.percent), &p.success, "Charging")),
+            Some(b) if b.present && b.charging => {
+                Some(("bolt.fill", format!("{}%", b.percent), &p.success, "Charging"))
+            }
             Some(b) if b.is_low() => Some((b.symbol(), format!("{}%", b.percent), &p.warning, "Battery low")),
-            _ if !snap.tray.is_empty() => Some(("tray.full.fill", snap.tray.len().to_string(), &p.secondary, "Files in tray")),
+            _ if !snap.tray.is_empty() => {
+                Some(("tray.full.fill", snap.tray.len().to_string(), &p.secondary, "Files in tray"))
+            }
             _ => None,
         };
         match left {

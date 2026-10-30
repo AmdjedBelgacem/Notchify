@@ -71,9 +71,7 @@ pub struct Snapshot {
 impl Snapshot {
     /// Whether the collapsed notch should show live indicators either side.
     pub fn wants_wings(&self) -> bool {
-        self.unread > 0
-            || !self.tray.is_empty()
-            || self.battery.as_ref().is_some_and(|b| b.charging || b.is_low())
+        self.unread > 0 || !self.tray.is_empty() || self.battery.as_ref().is_some_and(|b| b.charging || b.is_low())
     }
 }
 
@@ -322,10 +320,7 @@ impl Engine {
 
     fn ingest(&mut self, n: NewNotification) -> bool {
         let cfg = self.config();
-        let flags = PipelineFlags {
-            paused: self.state.paused,
-            focus_active: self.state.focus.active == Some(true),
-        };
+        let flags = PipelineFlags { paused: self.state.paused, focus_active: self.state.focus.active == Some(true) };
         let from_system = matches!(n.origin, Origin::NotificationCenterDb | Origin::AccessibilityBanner);
         let now = now_ms();
         let outcome = self.state.pipeline.ingest(n, &cfg.notifications, flags, now);
@@ -339,7 +334,8 @@ impl Engine {
             if from_system && cfg.notifications.suppress_native_banners {
                 self.sink.native_banner_handled(&item);
             }
-            if peekable && item.priority >= cfg.general.peek_min_priority && now - self.last_peek_ms >= PEEK_COOLDOWN_MS {
+            if peekable && item.priority >= cfg.general.peek_min_priority && now - self.last_peek_ms >= PEEK_COOLDOWN_MS
+            {
                 self.last_peek_ms = now;
                 self.sink.peek(item);
             }
@@ -474,7 +470,13 @@ mod tests {
     #[test]
     fn mac_battery_thresholds() {
         let (mut e, _h, _rec, _tx) = engine();
-        let b = |p| BatteryStatus { percent: p, charging: false, plugged_in: false, minutes_remaining: None, present: true };
+        let b = |p| BatteryStatus {
+            percent: p,
+            charging: false,
+            plugged_in: false,
+            minutes_remaining: None,
+            present: true,
+        };
         e.apply_event(ProviderEvent::Battery(b(50)));
         assert!(e.snapshot().notifications.is_empty());
         e.apply_event(ProviderEvent::Battery(b(19)));

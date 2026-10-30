@@ -10,7 +10,9 @@
 
 use super::payload::{Overrides, parse_events};
 use notchforge_core::model::{Origin, ProviderStatus};
-use notchforge_core::provider::{BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent};
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent,
+};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -137,7 +139,11 @@ impl Response {
 }
 
 /// Route a fully-read request. Pure so it can be unit-tested.
-fn route(head: &RequestHead, body: &[u8], token: Option<&str>) -> (Response, Vec<notchforge_core::model::NewNotification>) {
+fn route(
+    head: &RequestHead,
+    body: &[u8],
+    token: Option<&str>,
+) -> (Response, Vec<notchforge_core::model::NewNotification>) {
     if let Some(t) = token.filter(|t| !t.is_empty()) {
         if !token_matches(t, head.authorization.as_deref()) {
             return (Response::error(401, "missing or invalid bearer token"), Vec::new());
@@ -158,7 +164,9 @@ fn route(head: &RequestHead, body: &[u8], token: Option<&str>) -> (Response, Vec
                 Err(e) => (Response::error(400, &e), Vec::new()),
             }
         }
-        (_, "/v1/notify" | "/notify" | "/v1/health" | "/health") => (Response::error(405, "method not allowed"), Vec::new()),
+        (_, "/v1/notify" | "/notify" | "/v1/health" | "/health") => {
+            (Response::error(405, "method not allowed"), Vec::new())
+        }
         _ => (Response::error(404, "not found"), Vec::new()),
     }
 }

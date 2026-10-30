@@ -6,7 +6,10 @@ use crate::ui::{ActionTarget, Targets, ns, symbol_image};
 use notchforge_core::engine::Command;
 use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSControlStateValueOff, NSControlStateValueOn, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength};
+use objc2_app_kit::{
+    NSControlStateValueOff, NSControlStateValueOn, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
+    NSVariableStatusItemLength,
+};
 
 pub struct MenuBar {
     item: Retained<NSStatusItem>,
@@ -14,11 +17,22 @@ pub struct MenuBar {
     _targets: Targets,
 }
 
-fn menu_item(mtm: MainThreadMarker, targets: &Targets, title: &str, key: &str, f: impl Fn() + 'static) -> Retained<NSMenuItem> {
+fn menu_item(
+    mtm: MainThreadMarker,
+    targets: &Targets,
+    title: &str,
+    key: &str,
+    f: impl Fn() + 'static,
+) -> Retained<NSMenuItem> {
     let t = targets.add(mtm, move |_| f());
     // SAFETY: valid selector; target kept alive by `targets`.
     let item = unsafe {
-        NSMenuItem::initWithTitle_action_keyEquivalent(NSMenuItem::alloc(mtm), &ns(title), Some(ActionTarget::action()), &ns(key))
+        NSMenuItem::initWithTitle_action_keyEquivalent(
+            NSMenuItem::alloc(mtm),
+            &ns(title),
+            Some(ActionTarget::action()),
+            &ns(key),
+        )
     };
     // SAFETY: target kept alive by `targets`.
     unsafe { item.setTarget(Some(t.as_any())) };

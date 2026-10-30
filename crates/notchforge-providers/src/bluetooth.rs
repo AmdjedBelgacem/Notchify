@@ -15,7 +15,9 @@
 
 use crate::util::{normalize_address, parse_percent, run_command};
 use notchforge_core::model::{BatteryComponent, DeviceBattery, DeviceKind, ProviderStatus};
-use notchforge_core::provider::{BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake};
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
+};
 use std::time::{Duration, Instant};
 
 const IOREG_INTERVAL: Duration = Duration::from_secs(60);
@@ -160,13 +162,16 @@ impl Provider for BluetoothProvider {
                     }
                     last_profiler = Some(now);
                 }
-                let ioreg = match run_command("/usr/sbin/ioreg", &["-r", "-a", "-k", "BatteryPercent"], Duration::from_secs(5)).await {
-                    Ok(xml) => parse_ioreg(&xml),
-                    Err(e) => {
-                        tracing::debug!(error = %e, "ioreg failed");
-                        Vec::new()
-                    }
-                };
+                let ioreg =
+                    match run_command("/usr/sbin/ioreg", &["-r", "-a", "-k", "BatteryPercent"], Duration::from_secs(5))
+                        .await
+                    {
+                        Ok(xml) => parse_ioreg(&xml),
+                        Err(e) => {
+                            tracing::debug!(error = %e, "ioreg failed");
+                            Vec::new()
+                        }
+                    };
                 last_poll = Some(Instant::now());
                 let merged = merge(profiler_devices.clone(), ioreg);
                 if last_sent.as_ref() != Some(&merged) {

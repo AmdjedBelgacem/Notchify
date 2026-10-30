@@ -2,8 +2,8 @@
 
 use super::{app_icon_view, battery_spoken, battery_text, device_levels, set_app_icon, temperature};
 use crate::ui::{
-    FlippedView, Palette, Weight, font, label, make_card, mono_digits, rect, set_accessibility_label, set_symbol, set_text,
-    symbol_view, wrapping_label,
+    FlippedView, Palette, Weight, font, label, make_card, mono_digits, rect, set_accessibility_label, set_symbol,
+    set_text, symbol_view, wrapping_label,
 };
 use notchforge_core::engine::Snapshot;
 use notchforge_core::geometry::{LayoutKind, NotchLayout};
@@ -44,9 +44,12 @@ impl CompactView {
         // Weather card (1 column).
         let weather_card = FlippedView::new(mtm, rect(pad, top, col, ch));
         make_card(&weather_card, &p.card, 14.0);
-        let weather_icon = symbol_view(mtm, "cloud.sun.fill", 20.0, &p.primary, rect(10.0, 10.0, 24.0, 24.0), "Weather");
-        let weather_temp = label(mtm, "--°", &mono_digits(22.0, Weight::Semibold), &p.primary, rect(10.0, 36.0, col - 16.0, 28.0));
-        let weather_place = label(mtm, "Weather", &font(11.0, Weight::Regular), &p.secondary, rect(10.0, 64.0, col - 16.0, 14.0));
+        let weather_icon =
+            symbol_view(mtm, "cloud.sun.fill", 20.0, &p.primary, rect(10.0, 10.0, 24.0, 24.0), "Weather");
+        let weather_temp =
+            label(mtm, "--°", &mono_digits(22.0, Weight::Semibold), &p.primary, rect(10.0, 36.0, col - 16.0, 28.0));
+        let weather_place =
+            label(mtm, "Weather", &font(11.0, Weight::Regular), &p.secondary, rect(10.0, 64.0, col - 16.0, 14.0));
         for v in [&*weather_icon as &NSView, &weather_temp, &weather_place] {
             weather_card.addSubview(v);
         }
@@ -54,9 +57,12 @@ impl CompactView {
         // Battery card (1 column).
         let battery_card = FlippedView::new(mtm, rect(pad + col + gap, top, col, ch));
         make_card(&battery_card, &p.card, 14.0);
-        let battery_icon = symbol_view(mtm, "battery.100percent", 18.0, &p.primary, rect(10.0, 10.0, 30.0, 24.0), "Battery");
-        let battery_pct = label(mtm, "--", &mono_digits(22.0, Weight::Semibold), &p.primary, rect(10.0, 36.0, col - 16.0, 28.0));
-        let battery_detail = label(mtm, "", &font(11.0, Weight::Regular), &p.secondary, rect(10.0, 64.0, col - 16.0, 14.0));
+        let battery_icon =
+            symbol_view(mtm, "battery.100percent", 18.0, &p.primary, rect(10.0, 10.0, 30.0, 24.0), "Battery");
+        let battery_pct =
+            label(mtm, "--", &mono_digits(22.0, Weight::Semibold), &p.primary, rect(10.0, 36.0, col - 16.0, 28.0));
+        let battery_detail =
+            label(mtm, "", &font(11.0, Weight::Regular), &p.secondary, rect(10.0, 64.0, col - 16.0, 14.0));
         let device_line = label(mtm, "", &font(10.0, Weight::Regular), &p.tertiary, rect(44.0, 14.0, col - 50.0, 14.0));
         for v in [&*battery_icon as &NSView, &battery_pct, &battery_detail, &device_line] {
             battery_card.addSubview(v);
@@ -70,7 +76,8 @@ impl CompactView {
         let notif_icon = app_icon_view(mtm, rect(10.0, 10.0, 20.0, 20.0));
         let notif_header = label(mtm, "", &font(11.0, Weight::Medium), &p.secondary, rect(36.0, 12.0, nw - 46.0, 14.0));
         let notif_title = label(mtm, "", &font(13.0, Weight::Semibold), &p.primary, rect(10.0, 34.0, nw - 20.0, 17.0));
-        let notif_body = wrapping_label(mtm, "", &font(11.5, Weight::Regular), &p.secondary, rect(10.0, 52.0, nw - 20.0, 30.0), 2);
+        let notif_body =
+            wrapping_label(mtm, "", &font(11.5, Weight::Regular), &p.secondary, rect(10.0, 52.0, nw - 20.0, 30.0), 2);
         for v in [&*notif_icon as &NSView, &notif_header, &notif_title, &notif_body] {
             notif_card.addSubview(v);
         }

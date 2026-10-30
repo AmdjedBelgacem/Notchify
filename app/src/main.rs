@@ -115,7 +115,16 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    run_ui(Launch { config, paths, engine: handle, location: location_tx, provider_events: events_tx, trigger, runtime, tasks })
+    run_ui(Launch {
+        config,
+        paths,
+        engine: handle,
+        location: location_tx,
+        provider_events: events_tx,
+        trigger,
+        runtime,
+        tasks,
+    })
 }
 
 /// Everything the UI needs to take over the main thread.

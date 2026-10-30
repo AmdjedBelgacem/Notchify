@@ -140,7 +140,12 @@ struct SendPtr(CFTypeRef);
 // SAFETY: the pointer is retained and only dereferenced on the main thread.
 unsafe impl Send for SendPtr {}
 
-unsafe extern "C" fn on_ax_event(_obs: AXObserverRef, element: AXUIElementRef, _n: cf::CFStringRef, _refcon: *mut c_void) {
+unsafe extern "C" fn on_ax_event(
+    _obs: AXObserverRef,
+    element: AXUIElementRef,
+    _n: cf::CFStringRef,
+    _refcon: *mut c_void,
+) {
     // The banner's content is filled in just after the window appears.
     let retained = SendPtr(unsafe { CFRetain(element) });
     let when = dispatch2::DispatchTime::NOW.time(200_000_000);
@@ -177,7 +182,9 @@ pub fn start(events: mpsc::Sender<ProviderEvent>) -> Result<(), String> {
         }
         let observer = Owned::from_create(obs).ok_or("AXObserverCreate returned null")?;
         let name = cf::cfstring("AXWindowCreated").ok_or("CFString")?;
-        if AXObserverAddNotification(observer.as_ptr(), app.as_ptr(), name.as_ptr(), std::ptr::null_mut()) != kAXErrorSuccess {
+        if AXObserverAddNotification(observer.as_ptr(), app.as_ptr(), name.as_ptr(), std::ptr::null_mut())
+            != kAXErrorSuccess
+        {
             return Err("could not observe Notification Center".into());
         }
         let source = AXObserverGetRunLoopSource(observer.as_ptr());

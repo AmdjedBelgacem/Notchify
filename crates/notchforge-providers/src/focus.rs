@@ -10,7 +10,9 @@
 //! Toggling is done by the macOS layer through user-provided Shortcuts.
 
 use notchforge_core::model::{FocusState, Permission, ProviderStatus};
-use notchforge_core::provider::{BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake};
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
+};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -24,7 +26,8 @@ fn db_dir() -> Option<PathBuf> {
 /// Returns the active mode identifier, if any.
 pub fn parse_assertions(json: &str) -> Option<Option<String>> {
     let v: Value = serde_json::from_str(json).ok()?;
-    let records = v.get("data")?.as_array()?.iter().filter_map(|d| d.get("storeAssertionRecords")?.as_array()).flatten();
+    let records =
+        v.get("data")?.as_array()?.iter().filter_map(|d| d.get("storeAssertionRecords")?.as_array()).flatten();
     let mut active = false;
     let mut mode = None;
     for r in records {
@@ -42,9 +45,10 @@ pub fn parse_assertions(json: &str) -> Option<Option<String>> {
 /// Look up a human name for a mode identifier.
 pub fn parse_mode_name(json: &str, identifier: &str) -> Option<String> {
     let v: Value = serde_json::from_str(json).ok()?;
-    v.get("data")?.as_array()?.iter().find_map(|d| {
-        d.get("modeConfigurations")?.get(identifier)?.pointer("/mode/name")?.as_str().map(str::to_owned)
-    })
+    v.get("data")?
+        .as_array()?
+        .iter()
+        .find_map(|d| d.get("modeConfigurations")?.get(identifier)?.pointer("/mode/name")?.as_str().map(str::to_owned))
 }
 
 fn read_state() -> Result<FocusState, ProviderError> {
@@ -54,7 +58,9 @@ fn read_state() -> Result<FocusState, ProviderError> {
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
             return Err(ProviderError::NeedsPermission(Permission::FullDiskAccess));
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(FocusState { active: Some(false), mode_name: None }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(FocusState { active: Some(false), mode_name: None });
+        }
         Err(e) => return Err(e.into()),
     };
     let Some(active) = parse_assertions(&text) else {

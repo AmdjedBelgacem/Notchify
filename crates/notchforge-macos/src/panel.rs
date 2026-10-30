@@ -11,7 +11,7 @@
 use crate::app::with_controller;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
-use objc2::{AllocAnyThread, DefinedClass, Message, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2::{AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send};
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSDragOperation, NSDraggingContext, NSDraggingDestination, NSDraggingInfo,
     NSDraggingItem, NSDraggingSession, NSDraggingSource, NSEvent, NSMainMenuWindowLevel, NSPanel,
@@ -285,7 +285,11 @@ define_class!(
 
 impl TrayItemView {
     pub fn create(mtm: MainThreadMarker, frame: NSRect, path: PathBuf) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(TrayItemIvars { path, mouse_down: RefCell::new(None), dragging: Cell::new(false) });
+        let this = Self::alloc(mtm).set_ivars(TrayItemIvars {
+            path,
+            mouse_down: RefCell::new(None),
+            dragging: Cell::new(false),
+        });
         // SAFETY: NSView's designated initializer.
         unsafe { msg_send![super(this), initWithFrame: frame] }
     }
@@ -297,7 +301,8 @@ impl TrayItemView {
         let item = NSDraggingItem::initWithPasteboardWriter(NSDraggingItem::alloc(), writer);
         let icon = crate::icons::file_icon(path);
         let b = self.bounds();
-        let frame = NSRect::new(NSPoint::new((b.size.width - 40.0) / 2.0, 4.0), objc2_foundation::NSSize::new(40.0, 40.0));
+        let frame =
+            NSRect::new(NSPoint::new((b.size.width - 40.0) / 2.0, 4.0), objc2_foundation::NSSize::new(40.0, 40.0));
         let contents: &AnyObject = &icon;
         // SAFETY: contents is an NSImage, as documented.
         unsafe { item.setDraggingFrame_contents(frame, Some(contents)) };

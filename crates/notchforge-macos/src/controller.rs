@@ -183,7 +183,12 @@ impl Controller {
         });
         // SAFETY: valid notification name; the block is retained by the center.
         let token = unsafe {
-            ws_center.addObserverForName_object_queue_usingBlock(Some(NSWorkspaceDidWakeNotification), None, None, &on_wake)
+            ws_center.addObserverForName_object_queue_usingBlock(
+                Some(NSWorkspaceDidWakeNotification),
+                None,
+                None,
+                &on_wake,
+            )
         };
         self.observers.borrow_mut().push(token);
     }
@@ -427,9 +432,7 @@ impl Controller {
         if pb.changeCount() == self.drag_count_at_down.get() {
             return;
         }
-        let has_files = pb
-            .types()
-            .is_some_and(|types| types.iter().any(|t| &*t == unsafe { NSPasteboardTypeFileURL }));
+        let has_files = pb.types().is_some_and(|types| types.iter().any(|t| &*t == unsafe { NSPasteboardTypeFileURL }));
         if has_files {
             self.handle(Event::DragEntered);
             self.views.borrow().expanded.set_drop_highlight(true);
@@ -448,7 +451,9 @@ impl Controller {
                         || layout.retention_zone(LayoutKind::Peek).contains_inclusive(p)
                 }
                 State::Hover => layout.retention_zone(LayoutKind::Compact).contains_inclusive(p),
-                State::Expanded | State::DropTarget { .. } => layout.retention_zone(LayoutKind::Expanded).contains_inclusive(p),
+                State::Expanded | State::DropTarget { .. } => {
+                    layout.retention_zone(LayoutKind::Expanded).contains_inclusive(p)
+                }
             }
         };
         if inside != self.pointer_inside.replace(inside) {
@@ -527,7 +532,8 @@ impl Controller {
         let active = self.snapshot.borrow().focus.active;
         let on = &cfg.controls.focus_on_shortcut;
         let off = &cfg.controls.focus_off_shortcut;
-        let missing: Vec<&String> = [on, off].into_iter().filter(|n| !crate::controls::focus::shortcut_exists(n)).collect();
+        let missing: Vec<&String> =
+            [on, off].into_iter().filter(|n| !crate::controls::focus::shortcut_exists(n)).collect();
         if !missing.is_empty() {
             crate::app::alert(
                 "Set up Focus shortcuts",

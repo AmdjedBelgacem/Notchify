@@ -223,17 +223,13 @@ impl KnownApp {
     }
 
     pub fn from_bundle_id(bundle_id: &str) -> Option<KnownApp> {
-        KnownApp::ALL
-            .into_iter()
-            .find(|app| app.bundle_ids().iter().any(|b| b.eq_ignore_ascii_case(bundle_id)))
+        KnownApp::ALL.into_iter().find(|app| app.bundle_ids().iter().any(|b| b.eq_ignore_ascii_case(bundle_id)))
     }
 
     /// Recognise browser-delivered notifications by their visible text.
     pub fn from_web_text(text: &str) -> Option<KnownApp> {
         let lower = text.to_ascii_lowercase();
-        KnownApp::ALL
-            .into_iter()
-            .find(|app| app.web_hints().iter().any(|h| lower.contains(h)))
+        KnownApp::ALL.into_iter().find(|app| app.web_hints().iter().any(|h| lower.contains(h)))
     }
 }
 

@@ -26,9 +26,7 @@ pub fn app_icon(app: &AppRef) -> Option<Retained<NSImage>> {
         ids.extend(k.bundle_ids().iter().map(|s| (*s).to_owned()));
     }
     for id in ids {
-        let hit = CACHE.with(|c| {
-            c.borrow_mut().entry(id.clone()).or_insert_with(|| installed_icon(&id)).clone()
-        });
+        let hit = CACHE.with(|c| c.borrow_mut().entry(id.clone()).or_insert_with(|| installed_icon(&id)).clone());
         if hit.is_some() {
             return hit;
         }

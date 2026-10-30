@@ -387,15 +387,11 @@ impl Config {
     pub fn validate(&self) -> Result<()> {
         if let (Some(lat), Some(lon)) = (self.weather.latitude, self.weather.longitude) {
             if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
-                return Err(CoreError::InvalidConfig(format!(
-                    "weather coordinates out of range: {lat}, {lon}"
-                )));
+                return Err(CoreError::InvalidConfig(format!("weather coordinates out of range: {lat}, {lon}")));
             }
         }
         if self.weather.latitude.is_some() != self.weather.longitude.is_some() {
-            return Err(CoreError::InvalidConfig(
-                "weather.latitude and weather.longitude must be set together".into(),
-            ));
+            return Err(CoreError::InvalidConfig("weather.latitude and weather.longitude must be set together".into()));
         }
         if self.agents.http_enabled && self.agents.http_port < 1024 {
             return Err(CoreError::InvalidConfig("agents.http_port must be ≥ 1024".into()));
@@ -424,13 +420,9 @@ impl Paths {
             let base = PathBuf::from(home);
             return Ok(Self::rooted(&base));
         }
-        let data_dir =
-            dirs::data_dir().ok_or(CoreError::NoDirectory("application data"))?.join(APP_DIR_NAME);
+        let data_dir = dirs::data_dir().ok_or(CoreError::NoDirectory("application data"))?.join(APP_DIR_NAME);
         let log_dir = if cfg!(target_os = "macos") {
-            dirs::home_dir()
-                .ok_or(CoreError::NoDirectory("home"))?
-                .join("Library/Logs")
-                .join(APP_DIR_NAME)
+            dirs::home_dir().ok_or(CoreError::NoDirectory("home"))?.join("Library/Logs").join(APP_DIR_NAME)
         } else {
             data_dir.join("logs")
         };
@@ -438,11 +430,7 @@ impl Paths {
     }
 
     pub fn rooted(base: &Path) -> Self {
-        Self {
-            config_file: base.join("config.toml"),
-            data_dir: base.to_path_buf(),
-            log_dir: base.join("logs"),
-        }
+        Self { config_file: base.join("config.toml"), data_dir: base.to_path_buf(), log_dir: base.join("logs") }
     }
 
     pub fn socket_path(&self, cfg: &AgentsConfig) -> PathBuf {
@@ -514,11 +502,17 @@ mod tests {
 
     #[test]
     fn aliases_parse() {
-        let cfg = Config::from_toml(
-            "[[notifications.aliases]]\nbundle_id = \"com.acme.agent\"\napp = \"qoder\"",
-        )
-        .expect("parse");
+        let cfg = Config::from_toml("[[notifications.aliases]]\nbundle_id = \"com.acme.agent\"\napp = \"qoder\"")
+            .expect("parse");
         assert_eq!(cfg.notifications.alias_pairs(), vec![("com.acme.agent".to_owned(), KnownApp::Qoder)]);
+    }
+
+    #[test]
+    fn shipped_example_config_parses() {
+        let cfg = Config::from_toml(include_str!("../../../config/notchforge.example.toml")).expect("example parses");
+        assert_eq!(cfg.notifications.apps["discord"].muted_keywords, vec!["@everyone".to_owned()]);
+        assert!(!cfg.notifications.apps["com.apple.mail"].enabled);
+        assert_eq!(cfg.notifications.apps["claude"].priority, Some(Priority::High));
     }
 
     #[test]
