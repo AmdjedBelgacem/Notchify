@@ -62,6 +62,10 @@ impl ActionTarget {
 }
 
 /// Keeps action targets alive for as long as the views using them.
+///
+/// Never call [`Targets::clear`] synchronously from inside one of its own
+/// callbacks (that would free the running closure); defer it to a later
+/// main-queue turn instead, as `app::show_settings_soon` does.
 #[derive(Default)]
 pub struct Targets(RefCell<Vec<Retained<ActionTarget>>>);
 

@@ -62,6 +62,8 @@ pub struct Controller {
     engine: EngineHandle,
     pointer_inside: Cell<bool>,
     drag_count_at_down: Cell<isize>,
+    /// AppKit confirmed the drag is over our window (draggingEntered:).
+    native_drag: Cell<bool>,
     expanded_dirty: Cell<bool>,
     monitors: RefCell<Vec<Retained<AnyObject>>>,
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
@@ -129,6 +131,7 @@ impl Controller {
             engine,
             pointer_inside: Cell::new(false),
             drag_count_at_down: Cell::new(0),
+            native_drag: Cell::new(false),
             expanded_dirty: Cell::new(true),
             monitors: RefCell::new(Vec::new()),
             observers: RefCell::new(Vec::new()),
@@ -411,7 +414,7 @@ impl Controller {
             }
         } else if ty == NSEventType::LeftMouseUp {
             // A drag that ended elsewhere (or was cancelled).
-            if matches!(self.machine.borrow().state(), State::DropTarget { .. }) {
+            if matches!(self.machine.borrow().state(), State::DropTarget { .. }) && !self.native_drag.get() {
                 self.handle(Event::DragExited);
             }
         }
@@ -419,12 +422,22 @@ impl Controller {
 
     /// Detect a *new* file drag heading for the notch while the panel ignores
     /// mouse events (collapsed), and open the drop target.
+    ///
+    /// Until AppKit confirms the drag is over our window, the drop target is
+    /// kept open by a self-re-arming grace timer: every drag event inside the
+    /// zone re-arms it, so if the drag is released elsewhere (and no mouse-up
+    /// reaches us during the system drag session) the panel still closes.
     fn check_file_drag(&self) {
+        let m = NSEvent::mouseLocation();
+        let in_zone = self.layout.borrow().drag_zone().contains_inclusive(Point { x: m.x, y: m.y });
         if matches!(self.machine.borrow().state(), State::DropTarget { .. }) {
+            if in_zone && !self.native_drag.get() {
+                self.handle(Event::DragEntered);
+                self.handle(Event::DragExited);
+            }
             return;
         }
-        let m = NSEvent::mouseLocation();
-        if !self.layout.borrow().drag_zone().contains_inclusive(Point { x: m.x, y: m.y }) {
+        if !in_zone {
             return;
         }
         // SAFETY: reading AppKit constants.
@@ -435,6 +448,7 @@ impl Controller {
         let has_files = pb.types().is_some_and(|types| types.iter().any(|t| &*t == unsafe { NSPasteboardTypeFileURL }));
         if has_files {
             self.handle(Event::DragEntered);
+            self.handle(Event::DragExited);
             self.views.borrow().expanded.set_drop_highlight(true);
         }
     }
@@ -488,17 +502,20 @@ impl Controller {
     }
 
     pub fn drag_entered(&self) {
+        self.native_drag.set(true);
         self.handle(Event::DragEntered);
         self.views.borrow().expanded.set_drop_highlight(true);
     }
 
     pub fn drag_exited(&self) {
+        self.native_drag.set(false);
         self.handle(Event::DragExited);
         self.views.borrow().expanded.set_drop_highlight(false);
     }
 
     pub fn files_dropped(&self, paths: Vec<PathBuf>) {
         tracing::info!(count = paths.len(), "files dropped on notch");
+        self.native_drag.set(false);
         self.engine.send(Command::TrayAdd(paths));
         self.views.borrow().expanded.set_drop_highlight(false);
         self.handle(Event::Dropped);

@@ -229,6 +229,8 @@ impl Form<'_> {
                 self.button("Request Access", CONTROL_X + 124.0, 120.0, move || {
                     permissions::request(p);
                     app::send(Command::Refresh);
+                    // Deferred: rebuilding now would free this button's own target.
+                    app::show_settings_soon();
                 });
             }
             self.button("Open Settings", CONTROL_X + 248.0, 110.0, move || permissions::open_settings(p));
@@ -474,7 +476,7 @@ impl SettingsWindow {
         form.button("Open Logs", LEFT + 166.0, 120.0, app::open_logs);
         form.button("Reset to Defaults", LEFT + 294.0, 150.0, || {
             app::send(Command::UpdateConfig(Box::default()));
-            app::show_settings();
+            app::show_settings_soon();
         });
         form.advance(40.0);
 

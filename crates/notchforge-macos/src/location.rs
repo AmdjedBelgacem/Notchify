@@ -108,6 +108,19 @@ pub fn request_authorization() {
     }
 }
 
+/// Show the system prompt once, on first launch, if weather uses "auto".
+/// Never redirects to System Settings (unlike [`request_authorization`]).
+pub fn request_if_undetermined() {
+    if authorization_state() == PermissionState::NotDetermined {
+        SERVICE.with(|s| {
+            if let Some((m, _)) = s.borrow().as_ref() {
+                // SAFETY: documented call.
+                unsafe { m.requestWhenInUseAuthorization() };
+            }
+        });
+    }
+}
+
 pub fn authorization_state() -> PermissionState {
     SERVICE.with(|s| match s.borrow().as_ref() {
         // SAFETY: property read.
