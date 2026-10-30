@@ -30,7 +30,7 @@ kill -0 $PID 2>/dev/null || { echo "app crashed"; cat "$LOG"; exit 1; }
 echo "--- RSS (KB): $(ps -o rss= -p $PID)"
 echo "--- CPU (%):  $(ps -o %cpu= -p $PID)"
 cat "$LOG"
-grep -q "snapshot" "$LOG" || { echo "engine published no snapshots"; exit 1; }
+[ "$(grep -c "notification ingested" "$LOG")" -ge 3 ] || { echo "expected 3 ingested notifications"; exit 1; }
 kill -INT $PID
 for _ in $(seq 1 20); do kill -0 $PID 2>/dev/null || break; sleep 0.25; done
 if kill -0 $PID 2>/dev/null; then echo "app did not exit on SIGINT (expected under AppKit; killing)"; fi
