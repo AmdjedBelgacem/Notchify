@@ -115,7 +115,20 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    run_ui(config, paths, handle, location_tx, events_tx, trigger, runtime, tasks)
+    run_ui(Launch { config, paths, engine: handle, location: location_tx, provider_events: events_tx, trigger, runtime, tasks })
+}
+
+/// Everything the UI needs to take over the main thread.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+struct Launch {
+    config: Arc<Config>,
+    paths: Arc<Paths>,
+    engine: EngineHandle,
+    location: watch::Sender<Option<notchforge_core::model::Coordinates>>,
+    provider_events: mpsc::Sender<notchforge_core::provider::ProviderEvent>,
+    trigger: ShutdownTrigger,
+    runtime: tokio::runtime::Runtime,
+    tasks: Vec<JoinHandle<()>>,
 }
 
 /// Signal shutdown and give every task up to a second to finish cleanly
@@ -148,37 +161,26 @@ fn ui_sink(_headless: bool) -> Arc<dyn UiSink> {
 }
 
 #[cfg(target_os = "macos")]
-fn run_ui(
-    config: Arc<Config>,
-    paths: Arc<Paths>,
-    engine: EngineHandle,
-    location: watch::Sender<Option<notchforge_core::model::Coordinates>>,
-    provider_events: mpsc::Sender<notchforge_core::provider::ProviderEvent>,
-    trigger: ShutdownTrigger,
-    runtime: tokio::runtime::Runtime,
-    tasks: Vec<JoinHandle<()>>,
-) -> anyhow::Result<()> {
-    let state = std::cell::RefCell::new(Some((runtime, tasks)));
+fn run_ui(l: Launch) -> anyhow::Result<()> {
+    let state = std::cell::RefCell::new(Some((l.trigger, l.runtime, l.tasks)));
     let on_quit = Box::new(move || {
-        if let Some((rt, tasks)) = state.borrow_mut().take() {
+        if let Some((trigger, rt, tasks)) = state.borrow_mut().take() {
             stop(&trigger, rt, tasks);
         }
     });
-    notchforge_macos::app::run(notchforge_macos::app::Boot { config, paths, engine, location, provider_events, on_quit })
-        .map_err(anyhow::Error::msg)
+    notchforge_macos::app::run(notchforge_macos::app::Boot {
+        config: l.config,
+        paths: l.paths,
+        engine: l.engine,
+        location: l.location,
+        provider_events: l.provider_events,
+        on_quit,
+    })
+    .map_err(anyhow::Error::msg)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn run_ui(
-    _config: Arc<Config>,
-    _paths: Arc<Paths>,
-    _engine: EngineHandle,
-    _location: watch::Sender<Option<notchforge_core::model::Coordinates>>,
-    _provider_events: mpsc::Sender<notchforge_core::provider::ProviderEvent>,
-    _trigger: ShutdownTrigger,
-    _runtime: tokio::runtime::Runtime,
-    _tasks: Vec<JoinHandle<()>>,
-) -> anyhow::Result<()> {
+fn run_ui(_l: Launch) -> anyhow::Result<()> {
     unreachable!("non-macOS builds always run headless")
 }
 

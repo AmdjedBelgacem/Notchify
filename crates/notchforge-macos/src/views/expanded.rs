@@ -46,6 +46,9 @@ const ROW_GAP: f64 = 6.0;
 const MAX_ROWS: usize = 40;
 const TILE: f64 = 72.0;
 
+type TrayAction = Box<dyn Fn(Vec<PathBuf>, &EngineHandle)>;
+type Action = Box<dyn Fn()>;
+
 pub struct ExpandedView {
     pub root: Retained<FlippedView>,
     mtm: MainThreadMarker,
@@ -157,7 +160,7 @@ impl ExpandedView {
 
         let by = body_y + 22.0 + box_h + 6.0;
         let bw = 26.0;
-        let actions: [(&str, &str, Box<dyn Fn(Vec<PathBuf>, &EngineHandle)>); 4] = [
+        let actions: [(&str, &str, TrayAction); 4] = [
             ("dot.radiowaves.left.and.right", "AirDrop tray files", Box::new(|paths, _| {
                 crate::sharing::airdrop(&paths);
             })),
@@ -248,14 +251,14 @@ impl ExpandedView {
         root.addSubview(&resolution);
         y += 30.0;
 
-        let buttons: [(&str, &str, Box<dyn Fn()>); 4] = [
+        let buttons: [(&str, &str, Action); 4] = [
             ("moon.fill", "Toggle Focus", Box::new(|| {
                 with_controller(|c| c.toggle_focus());
             })),
             ("bell.slash", "Pause notifications", Box::new(|| {
                 with_controller(|c| c.toggle_pause());
             })),
-            ("gearshape", "Settings", Box::new(|| crate::app::show_settings())),
+            ("gearshape", "Settings", Box::new(crate::app::show_settings)),
             ("chevron.up", "Collapse", Box::new(|| {
                 with_controller(|c| c.collapse());
             })),
@@ -529,18 +532,18 @@ impl ExpandedView {
     fn tray_item_menu(&self, id: notchforge_core::model::TrayItemId, path: PathBuf) -> Retained<objc2_app_kit::NSMenu> {
         let mtm = self.mtm;
         let menu = objc2_app_kit::NSMenu::new(mtm);
-        let entries: [(&str, Box<dyn Fn()>); 5] = {
+        let entries: [(&str, Action); 5] = {
             let (p1, p2, p3, p4) = (path.clone(), path.clone(), path.clone(), path);
             let eng = self.engine.clone();
             [
                 ("Open", Box::new(move || {
                     crate::sharing::open_path(&p1);
                 })),
-                ("Reveal in Finder", Box::new(move || crate::sharing::reveal(&[p2.clone()]))),
+                ("Reveal in Finder", Box::new(move || crate::sharing::reveal(std::slice::from_ref(&p2)))),
                 ("AirDrop…", Box::new(move || {
-                    crate::sharing::airdrop(&[p3.clone()]);
+                    crate::sharing::airdrop(std::slice::from_ref(&p3));
                 })),
-                ("Copy Path", Box::new(move || crate::sharing::copy_paths(&[p4.clone()]))),
+                ("Copy Path", Box::new(move || crate::sharing::copy_paths(std::slice::from_ref(&p4)))),
                 ("Remove from Tray", Box::new(move || eng.send(Command::TrayRemove(id)))),
             ]
         };

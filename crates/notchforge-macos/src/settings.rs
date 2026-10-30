@@ -17,7 +17,7 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSButton, NSColor, NSControlSize, NSControlStateValueOff, NSControlStateValueOn,
+    NSBackingStoreType, NSButton, NSColor, NSControlSize, NSControlStateValueOff, NSControlStateValueOn,
     NSPopUpButton, NSScrollView, NSSlider, NSTextField, NSView, NSWindow, NSWindowStyleMask,
 };
 use std::cell::{Cell, RefCell};
@@ -372,7 +372,7 @@ impl SettingsWindow {
         if !self.window.isVisible() {
             self.window.center();
         }
-        NSApplication::sharedApplication(mtm).activate();
+        crate::app::activate(mtm);
         self.window.makeKeyAndOrderFront(None);
     }
 }

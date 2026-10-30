@@ -263,6 +263,8 @@ impl Controller {
         let speed = self.config.borrow().appearance.animation_speed;
         if kind == LayoutKind::Expanded {
             self.render_expanded(true);
+        } else {
+            self.views.borrow().expanded.set_drop_highlight(false);
         }
         if kind == LayoutKind::Compact {
             let snap = self.snapshot.borrow().clone();
