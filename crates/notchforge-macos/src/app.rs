@@ -49,7 +49,7 @@ struct AppState {
     engine: EngineHandle,
     provider_events: mpsc::Sender<ProviderEvent>,
     on_quit: Box<dyn Fn()>,
-    _location_timer: Retained<NSTimer>,
+    _timers: [Retained<NSTimer>; 2],
 }
 
 thread_local! {
@@ -123,6 +123,12 @@ pub fn show_settings() {
         let mtm = MainThreadMarker::from(&*a.controller.panel);
         s.get_or_insert_with(|| SettingsWindow::new(mtm)).show(&cfg);
     });
+}
+
+/// Re-open Settings shortly, after the engine has broadcast a config change.
+pub fn show_settings_soon() {
+    let when = dispatch2::DispatchTime::NOW.time(300_000_000);
+    let _ = dispatch2::DispatchQueue::main().after(when, show_settings);
 }
 
 pub fn open_config_file() {
@@ -199,10 +205,24 @@ pub fn run(boot: Boot) -> Result<(), String> {
     menubar.set_visible(boot.config.general.show_menu_bar_icon);
 
     crate::location::start(mtm, boot.location);
+    if boot.config.providers.weather && boot.config.weather.location.eq_ignore_ascii_case("auto") {
+        crate::location::request_if_undetermined();
+    }
     // Hourly location refresh for the weather provider.
     let block = RcBlock::new(|_t: NonNull<NSTimer>| crate::location::refresh());
     // SAFETY: documented NSTimer API.
     let location_timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(3600.0, true, &block) };
+    // Start the banner observer once Accessibility is granted (checked twice a minute).
+    let block = RcBlock::new(|_t: NonNull<NSTimer>| {
+        with_app(|a| {
+            let cfg = a.config.borrow().clone();
+            if cfg.providers.accessibility_banners && !crate::accessibility::is_running() {
+                sync_accessibility_observer(&cfg, &a.provider_events);
+            }
+        });
+    });
+    // SAFETY: documented NSTimer API.
+    let permission_timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(30.0, true, &block) };
 
     if boot.config.general.launch_at_login != crate::login_item::is_enabled() {
         if let Err(e) = crate::login_item::set_enabled(boot.config.general.launch_at_login) {
@@ -219,7 +239,7 @@ pub fn run(boot: Boot) -> Result<(), String> {
         engine: boot.engine,
         provider_events: boot.provider_events,
         on_quit: boot.on_quit,
-        _location_timer: location_timer,
+        _timers: [location_timer, permission_timer],
     });
     sync_accessibility_observer(&boot.config, &state.provider_events);
     APP.with(|a| *a.borrow_mut() = Some(state));
