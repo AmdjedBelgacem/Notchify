@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      NotchForge is distributed outside the Mac App Store with the Hardened
+      Runtime. It cannot be sandboxed: reading the Notification Center database
+      (Full Disk Access), observing other processes via Accessibility and
+      loading the DisplayServices framework are all incompatible with the
+      App Sandbox.
+    -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+    <!-- Hardened Runtime resource access: CoreLocation for weather. -->
+    <key>com.apple.security.personal-information.location</key>
+    <true/>
+</dict>
+</plist>

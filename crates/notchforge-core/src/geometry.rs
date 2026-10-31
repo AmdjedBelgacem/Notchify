@@ -123,10 +123,7 @@ pub fn detect_notch(screen: &ScreenInfo) -> Notch {
         let width = right.x - x;
         if width > 40.0 {
             let height = screen.safe_area_top;
-            return Notch {
-                rect: Rect::new(x, screen.frame.max_y() - height, width, height),
-                physical: true,
-            };
+            return Notch { rect: Rect::new(x, screen.frame.max_y() - height, width, height), physical: true };
         }
     }
     let height = screen.menu_bar_height();
@@ -144,10 +141,9 @@ pub fn choose_screen(screens: &[ScreenInfo], choice: ScreenChoice, mouse: Option
     }
     let main = screens.iter().position(|s| s.is_main).unwrap_or(0);
     let picked = match choice {
-        ScreenChoice::Notch => screens
-            .iter()
-            .position(ScreenInfo::has_notch)
-            .or_else(|| screens.iter().position(|s| s.is_builtin)),
+        ScreenChoice::Notch => {
+            screens.iter().position(ScreenInfo::has_notch).or_else(|| screens.iter().position(|s| s.is_builtin))
+        }
         ScreenChoice::Main => Some(main),
         ScreenChoice::Mouse => mouse.and_then(|p| screens.iter().position(|s| s.frame.contains_inclusive(p))),
     };
@@ -204,11 +200,9 @@ impl NotchLayout {
         let base_radius = (n.height * 0.38).clamp(6.0, 14.0);
         match kind {
             LayoutKind::Collapsed => IslandShape { width: n.width, height: n.height, corner_radius: base_radius },
-            LayoutKind::CollapsedWithWings => IslandShape {
-                width: n.width + 2.0 * WING_WIDTH,
-                height: n.height,
-                corner_radius: base_radius,
-            },
+            LayoutKind::CollapsedWithWings => {
+                IslandShape { width: n.width + 2.0 * WING_WIDTH, height: n.height, corner_radius: base_radius }
+            }
             LayoutKind::Peek => IslandShape {
                 width: (n.width + 2.0 * WING_WIDTH + 80.0).max(380.0).min(a.compact_width),
                 height: n.height + 52.0,

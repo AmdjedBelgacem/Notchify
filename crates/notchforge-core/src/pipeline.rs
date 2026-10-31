@@ -18,8 +18,8 @@
 use crate::apps::AppCategory;
 use crate::config::NotificationsConfig;
 use crate::model::{NewNotification, Notification, NotificationId, Priority};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 /// Why a notification was rejected.
@@ -35,9 +35,15 @@ pub enum FilterReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     /// A new entry was created.
-    Accepted { id: NotificationId, priority: Priority },
+    Accepted {
+        id: NotificationId,
+        priority: Priority,
+    },
     /// Folded into an existing entry (grouping or rate limiting).
-    Grouped { id: NotificationId, rate_limited: bool },
+    Grouped {
+        id: NotificationId,
+        rate_limited: bool,
+    },
     Duplicate,
     Filtered(FilterReason),
 }
@@ -122,13 +128,10 @@ impl Pipeline {
                 return Outcome::Filtered(FilterReason::MutedKeyword(word.clone()));
             }
         }
-        let priority = rule
-            .and_then(|r| r.priority)
-            .or(n.priority)
-            .unwrap_or_else(|| match n.app.category() {
-                AppCategory::Agent => n.kind.default_priority().max(Priority::Normal),
-                _ => Priority::Normal,
-            });
+        let priority = rule.and_then(|r| r.priority).or(n.priority).unwrap_or_else(|| match n.app.category() {
+            AppCategory::Agent => n.kind.default_priority().max(Priority::Normal),
+            _ => Priority::Normal,
+        });
         if flags.focus_active && priority < cfg.focus_min_priority {
             return Outcome::Filtered(FilterReason::FocusActive);
         }
@@ -211,12 +214,8 @@ impl Pipeline {
     /// Drop the least important, oldest entries beyond `max`.
     fn enforce_capacity(&mut self, max: usize) {
         while self.items.len() > max {
-            let victim = self
-                .items
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, i)| (i.priority, i.timestamp_ms))
-                .map(|(idx, _)| idx);
+            let victim =
+                self.items.iter().enumerate().min_by_key(|(_, i)| (i.priority, i.timestamp_ms)).map(|(idx, _)| idx);
             match victim {
                 Some(idx) => {
                     self.items.remove(idx);
@@ -337,10 +336,7 @@ mod tests {
         let mut p = Pipeline::new();
         let mut c = cfg();
         c.apps.insert("discord".into(), AppRule { enabled: false, ..AppRule::default() });
-        c.apps.insert(
-            "slack".into(),
-            AppRule { muted_keywords: vec!["standup".into()], ..AppRule::default() },
-        );
+        c.apps.insert("slack".into(), AppRule { muted_keywords: vec!["standup".into()], ..AppRule::default() });
         let f = PipelineFlags::default();
         assert_eq!(p.ingest(note(KnownApp::Discord, "x", "y"), &c, f, 0), Outcome::Filtered(FilterReason::AppDisabled));
         assert_eq!(
@@ -366,10 +362,7 @@ mod tests {
         c.allow_other_apps = false;
         let mut n = note(KnownApp::Slack, "a", "b");
         n.app = AppRef::resolve("com.example.thing", "", &[]);
-        assert_eq!(
-            p.ingest(n, &c, PipelineFlags::default(), 0),
-            Outcome::Filtered(FilterReason::UnknownAppDisallowed)
-        );
+        assert_eq!(p.ingest(n, &c, PipelineFlags::default(), 0), Outcome::Filtered(FilterReason::UnknownAppDisallowed));
     }
 
     #[test]

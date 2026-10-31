@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          { "type": "command", "command": "notchforge-notify --source claude --stdin --best-effort" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "notchforge-notify --source claude --stdin --best-effort" }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "notchforge-notify --source claude --kind task_finished --stdin --best-effort" }
+        ]
+      }
+    ]
+  }
+}

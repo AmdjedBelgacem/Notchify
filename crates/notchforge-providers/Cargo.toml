@@ -1,6 +1,29 @@
 [package]
 name = "notchforge-providers"
+description = "Data providers for NotchForge: battery, Bluetooth accessories, weather, coding agents, Notification Center, Focus."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+notchforge-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+plist = { workspace = true }
+reqwest = { workspace = true }
+dirs = { workspace = true }
+libc = { workspace = true }
+
+# On macOS link the system libsqlite3 (always present, no C toolchain needed);
+# elsewhere bundle SQLite so headless development builds work everywhere.
+[target.'cfg(target_os = "macos")'.dependencies]
+rusqlite = { workspace = true }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+rusqlite = { workspace = true, features = ["bundled"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

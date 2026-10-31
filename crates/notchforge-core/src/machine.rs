@@ -29,7 +29,9 @@ pub enum State {
     Expanded,
     /// Files are being dragged over the notch. `return_to` is where we go back
     /// if the drag leaves without dropping.
-    DropTarget { return_to: ReturnTo },
+    DropTarget {
+        return_to: ReturnTo,
+    },
 }
 
 /// Subset of states a drop target can return to.
@@ -285,9 +287,7 @@ mod tests {
     use super::*;
 
     fn layouts(fx: &[Effect]) -> Vec<LayoutKind> {
-        fx.iter()
-            .filter_map(|e| if let Effect::SetLayout(l) = e { Some(*l) } else { None })
-            .collect()
+        fx.iter().filter_map(|e| if let Effect::SetLayout(l) = e { Some(*l) } else { None }).collect()
     }
 
     fn m() -> NotchMachine {

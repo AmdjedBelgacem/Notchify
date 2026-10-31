@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Core & providers (Linux) + macOS type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      # The AppKit layer is pure Rust bindings, so it type-checks without a Mac.
+      - run: cargo clippy --workspace --target aarch64-apple-darwin -- -D warnings
+
+  macos:
+    name: Build, test & bundle (macOS, Apple Silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - run: packaging/bundle.sh
+      - run: packaging/smoke_test.sh
+      - name: Live providers (weather, batteries, agents, Notification Center, Focus)
+        run: packaging/providers_test.sh
+      - name: System notification paths (Notification Center DB + Accessibility banners)
+        run: packaging/system_paths_test.sh
+      - name: UI self-test (drives hover, click, drop, Escape, peek, settings)
+        run: |
+          export NOTCHFORGE_HOME="$(mktemp -d)"
+          # CI images enable "Reduce motion"; force springs on so the test measures them.
+          printf '[appearance]\nreduced_motion = "never"\n' > "$NOTCHFORGE_HOME/config.toml"
+          dist/NotchForge.app/Contents/MacOS/notchforge --self-test "$PWD/selftest" -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-self-test
+          path: selftest/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NotchForge.app
+          path: dist/NotchForge.app

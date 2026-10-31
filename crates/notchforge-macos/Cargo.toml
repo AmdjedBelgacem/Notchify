@@ -1,6 +1,27 @@
 [package]
 name = "notchforge-macos"
+description = "AppKit front-end and macOS system integration for NotchForge."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+
+[dependencies]
+notchforge-core = { workspace = true }
+notchforge-providers = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true }
+objc2-app-kit = { workspace = true }
+objc2-core-location = { workspace = true }
+objc2-service-management = { workspace = true }
+objc2-user-notifications = { workspace = true }
+objc2-quartz-core = { workspace = true }
+objc2-core-graphics = { workspace = true }
+block2 = { workspace = true }
+dispatch2 = { workspace = true }
+libc = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
