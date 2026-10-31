@@ -197,8 +197,11 @@ See its header for Developer ID signing, notarization and universal builds.
 packaging/bundle.sh
 ```
 
+To build, install into `/Applications` and launch in one step (it quits the
+running copy and replaces the old bundle):
+
 ```bash
-cp -R dist/NotchForge.app /Applications/ && open /Applications/NotchForge.app
+INSTALL=1 packaging/bundle.sh
 ```
 
 To put the agent CLI on your `PATH`:

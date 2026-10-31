@@ -73,5 +73,21 @@ if [[ -n "${NOTARY_PROFILE:-}" ]]; then
 fi
 
 echo "==> Done: $APP"
-echo "    Install: cp -R \"$APP\" /Applications && open /Applications/NotchForge.app"
+
+# INSTALL=1: quit the running copy, replace /Applications/NotchForge.app and
+# relaunch. (A plain `cp -R` onto an existing bundle copies the new app *inside*
+# the old one, so the old build keeps launching.)
+if [[ "${INSTALL:-0}" == "1" ]]; then
+  DEST="/Applications/NotchForge.app"
+  echo "==> Installing to $DEST"
+  osascript -e 'tell application id "dev.notchforge.NotchForge" to quit' >/dev/null 2>&1 || true
+  for _ in $(seq 1 20); do pgrep -xq notchforge || break; sleep 0.25; done
+  pkill -x notchforge 2>/dev/null || true
+  rm -rf "$DEST"
+  ditto "$APP" "$DEST"
+  open "$DEST"
+  echo "==> Installed and launched build $BUILD"
+else
+  echo "    Install: INSTALL=1 packaging/bundle.sh   (quits, replaces and relaunches)"
+fi
 echo "    CLI:     ln -sf /Applications/NotchForge.app/Contents/MacOS/notchforge-notify /usr/local/bin/"
