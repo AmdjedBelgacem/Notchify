@@ -532,6 +532,11 @@ impl Controller {
 
     // ── media page ───────────────────────────────────────────────────────
 
+    /// The resolution pill was clicked: offer the display's modes.
+    pub fn show_resolution_menu(&self, anchor: &objc2_app_kit::NSButton) {
+        self.views.borrow().expanded.resolution_menu(anchor);
+    }
+
     pub fn show_expanded_tab(&self, tab: crate::views::expanded::Tab) {
         self.views.borrow().expanded.show_tab(tab);
     }
@@ -539,6 +544,11 @@ impl Controller {
     /// 1 Hz tick from the music page (progress bar and clocks).
     pub fn media_tick(&self) {
         self.views.borrow().expanded.media.tick();
+    }
+
+    /// Render the Overview from an arbitrary snapshot (self-test).
+    pub fn preview_overview(&self, snap: &Snapshot) {
+        self.views.borrow().expanded.update(snap);
     }
 
     pub fn media_page_visible(&self) -> bool {

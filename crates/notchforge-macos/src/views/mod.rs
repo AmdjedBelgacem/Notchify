@@ -62,6 +62,17 @@ pub fn system_increase_contrast() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldIncreaseContrast()
 }
 
+/// Render an SF Symbol in its multicolour palette (sun yellow, cloud white…).
+pub fn multicolor(v: &NSImageView) {
+    let cfg = objc2_app_kit::NSImageSymbolConfiguration::configurationPreferringMulticolor();
+    if let Some(img) = v.image() {
+        if let Some(c) = img.imageWithSymbolConfiguration(&cfg) {
+            v.setImage(Some(&c));
+            v.setContentTintColor(None);
+        }
+    }
+}
+
 pub fn system_reduce_motion() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
 }

@@ -335,3 +335,290 @@ pub fn remove_all_subviews(view: &NSView) {
         v.removeFromSuperview();
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Design-system controls (see the "Tokens & motion" board)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Attributed title in one colour and font.
+pub fn attributed(text: &str, f: &NSFont, color: &NSColor) -> Retained<objc2_foundation::NSAttributedString> {
+    use objc2::AnyThread;
+    use objc2_foundation::{NSAttributedString, NSDictionary};
+    // SAFETY: AppKit's attribute-name constants.
+    let (fk, ck) = unsafe { (objc2_app_kit::NSFontAttributeName, objc2_app_kit::NSForegroundColorAttributeName) };
+    let fv: &AnyObject = f;
+    let cv: &AnyObject = color;
+    let dict = NSDictionary::<NSString, AnyObject>::from_slices(&[fk, ck], &[fv, cv]);
+    // SAFETY: the attributes have the documented value types.
+    unsafe { NSAttributedString::initWithString_attributes(NSAttributedString::alloc(), &ns(text), Some(&dict)) }
+}
+
+/// Borderless rounded button with an optional leading SF Symbol: the pill
+/// buttons of the design ("Output", "Clear", segment items).
+#[allow(clippy::too_many_arguments)]
+pub fn pill_button(
+    mtm: MainThreadMarker,
+    title: &str,
+    symbol: Option<&str>,
+    f: &NSFont,
+    fg: &NSColor,
+    bg: &NSColor,
+    radius: f64,
+    target: &ActionTarget,
+    frame: NSRect,
+) -> Retained<NSButton> {
+    let b = text_button(mtm, title, target, frame);
+    b.setBordered(false);
+    style_pill(&b, title, symbol, f, fg, bg, radius);
+    b.setFrame(frame);
+    b
+}
+
+/// Restyle a pill button (selection changes).
+pub fn style_pill(
+    b: &NSButton,
+    title: &str,
+    symbol: Option<&str>,
+    f: &NSFont,
+    fg: &NSColor,
+    bg: &NSColor,
+    radius: f64,
+) {
+    b.setAttributedTitle(&attributed(title, f, fg));
+    if let Some(sym) = symbol {
+        b.setImage(symbol_image(sym, f.pointSize() - 0.5, title).as_deref());
+        b.setImagePosition(objc2_app_kit::NSCellImagePosition::ImageLeading);
+        b.setImageHugsTitle(true);
+    }
+    b.setContentTintColor(Some(fg));
+    make_card(b, bg, radius);
+    set_accessibility_label(b, title);
+}
+
+/// Run `f` without Core Animation's implicit 0.25 s animations.
+pub fn without_animation(f: impl FnOnce()) {
+    objc2_quartz_core::CATransaction::begin();
+    objc2_quartz_core::CATransaction::setDisableActions(true);
+    f();
+    objc2_quartz_core::CATransaction::commit();
+}
+
+/// A gradient layer from `(r, g, b, a)` stops (sRGB 0–1).
+pub fn gradient_layer(
+    stops: &[(f64, f64, f64, f64)],
+    start: NSPoint,
+    end: NSPoint,
+) -> Retained<objc2_quartz_core::CAGradientLayer> {
+    let g = objc2_quartz_core::CAGradientLayer::layer();
+    set_gradient(&g, stops);
+    g.setStartPoint(start);
+    g.setEndPoint(end);
+    g
+}
+
+pub fn set_gradient(g: &objc2_quartz_core::CAGradientLayer, stops: &[(f64, f64, f64, f64)]) {
+    let colors: Vec<_> = stops.iter().map(|(r, gg, b, a)| rgba(*r, *gg, *b, *a).CGColor()).collect();
+    // SAFETY: CGColor is toll-free bridged to an Objective-C object.
+    let objs: Vec<&AnyObject> =
+        colors.iter().map(|c| unsafe { &*(&**c as *const objc2_core_graphics::CGColor as *const AnyObject) }).collect();
+    let arr = objc2_foundation::NSArray::from_slice(&objs);
+    // SAFETY: an array of CGColors, as CAGradientLayer expects.
+    unsafe { g.setColors(Some(&arr)) };
+}
+
+/// Callback with the slider's value (0–1).
+pub type SliderFn = Box<dyn Fn(f64)>;
+
+pub struct SliderIvars {
+    value: std::cell::Cell<f64>,
+    knob: bool,
+    on_change: RefCell<Option<SliderFn>>,
+    on_commit: RefCell<Option<SliderFn>>,
+    tracking: std::cell::Cell<bool>,
+    track: Retained<objc2_quartz_core::CALayer>,
+    fill: Retained<objc2_quartz_core::CALayer>,
+    knob_layer: Retained<objc2_quartz_core::CALayer>,
+}
+
+define_class!(
+    /// The design's thin slider: a 4 pt track, a white fill and an optional
+    /// 14 pt knob (volume, brightness) or none (playback progress).
+    // SAFETY: NSView subclass; ivars are plain Rust values; no Drop impl.
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = SliderIvars]
+    pub struct ThinSlider;
+
+    impl ThinSlider {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&objc2_app_kit::NSEvent>) -> bool {
+            true
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &objc2_app_kit::NSEvent) {
+            self.ivars().tracking.set(true);
+            self.track_event(event, false);
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &objc2_app_kit::NSEvent) {
+            self.track_event(event, false);
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &objc2_app_kit::NSEvent) {
+            self.track_event(event, true);
+            self.ivars().tracking.set(false);
+        }
+    }
+);
+
+impl ThinSlider {
+    pub fn new(mtm: MainThreadMarker, frame: NSRect, knob: bool, fill: &NSColor) -> Retained<Self> {
+        let track = objc2_quartz_core::CALayer::new();
+        let fill_layer = objc2_quartz_core::CALayer::new();
+        let knob_layer = objc2_quartz_core::CALayer::new();
+        track.setBackgroundColor(Some(&rgba(1.0, 1.0, 1.0, 0.16).CGColor()));
+        track.setCornerRadius(2.0);
+        fill_layer.setBackgroundColor(Some(&fill.CGColor()));
+        fill_layer.setCornerRadius(2.0);
+        knob_layer.setBackgroundColor(Some(&NSColor::whiteColor().CGColor()));
+        knob_layer.setCornerRadius(7.0);
+        knob_layer.setShadowOpacity(0.5);
+        knob_layer.setShadowRadius(2.0);
+        knob_layer.setShadowOffset(NSSize::new(0.0, 1.0));
+        knob_layer.setHidden(!knob);
+        let this = Self::alloc(mtm).set_ivars(SliderIvars {
+            value: std::cell::Cell::new(0.0),
+            knob,
+            on_change: RefCell::new(None),
+            on_commit: RefCell::new(None),
+            tracking: std::cell::Cell::new(false),
+            track,
+            fill: fill_layer,
+            knob_layer,
+        });
+        // SAFETY: NSView's designated initializer.
+        let this: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        this.setWantsLayer(true);
+        if let Some(root) = this.layer() {
+            let iv = this.ivars();
+            root.addSublayer(&iv.track);
+            root.addSublayer(&iv.fill);
+            root.addSublayer(&iv.knob_layer);
+        }
+        // SAFETY: setAccessibilityRole: exists on every NSView.
+        let _: () = unsafe { msg_send![&*this, setAccessibilityRole: &*ns("AXSlider")] };
+        this.layout_layers();
+        this
+    }
+
+    /// Called continuously while dragging.
+    pub fn set_on_change(&self, f: impl Fn(f64) + 'static) {
+        *self.ivars().on_change.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Called once when the drag ends.
+    pub fn set_on_commit(&self, f: impl Fn(f64) + 'static) {
+        *self.ivars().on_commit.borrow_mut() = Some(Box::new(f));
+    }
+
+    pub fn value(&self) -> f64 {
+        self.ivars().value.get()
+    }
+
+    pub fn is_tracking(&self) -> bool {
+        self.ivars().tracking.get()
+    }
+
+    /// Set the value programmatically (ignored while the user drags).
+    pub fn set_value(&self, v: f64) {
+        if self.is_tracking() {
+            return;
+        }
+        self.ivars().value.set(v.clamp(0.0, 1.0));
+        self.layout_layers();
+    }
+
+    pub fn set_fill_color(&self, c: &NSColor) {
+        self.ivars().fill.setBackgroundColor(Some(&c.CGColor()));
+    }
+
+    fn inset(&self) -> f64 {
+        if self.ivars().knob { 7.0 } else { 0.0 }
+    }
+
+    fn layout_layers(&self) {
+        let size = self.frame().size;
+        let iv = self.ivars();
+        let pad = self.inset();
+        let usable = (size.width - 2.0 * pad).max(1.0);
+        let y = (size.height - 4.0) / 2.0;
+        let x = pad + usable * iv.value.get();
+        without_animation(|| {
+            iv.track.setFrame(rect(pad, y, usable, 4.0));
+            iv.fill.setFrame(rect(pad, y, (x - pad).max(0.0), 4.0));
+            iv.knob_layer.setFrame(rect(x - 7.0, size.height / 2.0 - 7.0, 14.0, 14.0));
+        });
+        // SAFETY: accessibility value setter on NSView.
+        let pct = NSString::from_str(&format!("{:.0}%", iv.value.get() * 100.0));
+        let _: () = unsafe { msg_send![self, setAccessibilityValue: &*pct] };
+    }
+
+    fn track_event(&self, event: &objc2_app_kit::NSEvent, commit: bool) {
+        let p = self.convertPoint_fromView(event.locationInWindow(), None);
+        let pad = self.inset();
+        let usable = (self.frame().size.width - 2.0 * pad).max(1.0);
+        let v = ((p.x - pad) / usable).clamp(0.0, 1.0);
+        self.ivars().value.set(v);
+        self.layout_layers();
+        if let Some(f) = self.ivars().on_change.borrow().as_ref() {
+            f(v);
+        }
+        if commit {
+            if let Some(f) = self.ivars().on_commit.borrow().as_ref() {
+                f(v);
+            }
+        }
+    }
+}
+
+/// Several styled runs in one string ("Spotify · Playing on AirPods Pro").
+pub fn attributed_parts(parts: &[(&str, &NSFont, &NSColor)]) -> Retained<objc2_foundation::NSAttributedString> {
+    let m = objc2_foundation::NSMutableAttributedString::new();
+    for (t, f, c) in parts {
+        m.appendAttributedString(&attributed(t, f, c));
+    }
+    Retained::into_super(m)
+}
+
+/// Width the attributed string needs on one line.
+pub fn text_width(s: &objc2_foundation::NSAttributedString) -> f64 {
+    use objc2_app_kit::NSAttributedStringNSStringDrawing;
+    s.size().width.ceil()
+}
+
+/// A label showing an attributed string.
+pub fn rich_label(
+    mtm: MainThreadMarker,
+    s: &objc2_foundation::NSAttributedString,
+    frame: NSRect,
+) -> Retained<NSTextField> {
+    let l = NSTextField::labelWithAttributedString(s, mtm);
+    l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
+    l.setFrame(frame);
+    l
+}
+
+/// Plain layer-backed rounded rectangle (dots, tracks, chips).
+pub fn shape_view(mtm: MainThreadMarker, frame: NSRect, color: &NSColor, radius: f64) -> Retained<FlippedView> {
+    let v = FlippedView::new(mtm, frame);
+    make_card(&v, color, radius);
+    v
+}

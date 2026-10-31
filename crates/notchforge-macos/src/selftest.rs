@@ -297,6 +297,9 @@ pub fn png_from_view(view: &objc2_app_kit::NSView) -> Option<Vec<u8>> {
 
 /// Render the island as it is on screen right now, at 2×.
 fn screenshot(ctx: &Ctx, _mtm: MainThreadMarker, name: &str, _region: Option<Rect>) {
+    // Draw pending view content (scroll views draw lazily) and commit layers.
+    with_controller(|c| c.panel.displayIfNeeded());
+    objc2_quartz_core::CATransaction::flush();
     let Some((layer, island)) = with_controller(|c| (c.island_layer(), c.island_global())) else { return };
     let Some(layer) = layer else { return };
     match png_from_layer(&layer, island.width, island.height, 2.0) {
@@ -608,6 +611,116 @@ fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engi
         c.media_rerender();
         c.show_expanded_tab(Tab::Overview);
     });
+    overview_preview(ctx, mtm, snap);
+}
+
+/// The Overview with design-like sample data (CI hosts have no weather,
+/// accessories or agents), rendered for review, then the real data again.
+fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engine::Snapshot) {
+    use notchforge_core::model::{
+        BatteryComponent, BatteryStatus, DeviceBattery, DeviceKind, HourlyForecast, Notification, NotificationId,
+        TemperatureUnit, Weather, WeatherCondition,
+    };
+    let now = notchforge_core::time::now_ms();
+    let mut fake = snap.clone();
+    fake.generation = u64::MAX - 2;
+    fake.battery = Some(BatteryStatus {
+        percent: 82,
+        charging: false,
+        plugged_in: false,
+        minutes_remaining: Some(312),
+        present: true,
+    });
+    fake.weather = Some(Weather {
+        place: "Paris".into(),
+        temperature: 10.0,
+        feels_like: 8.0,
+        condition: WeatherCondition::PartlyCloudy,
+        is_day: true,
+        high: 14.0,
+        low: 7.0,
+        unit: TemperatureUnit::Celsius,
+        hourly: [
+            (22, 9.0, WeatherCondition::Cloudy),
+            (23, 8.0, WeatherCondition::Rain),
+            (0, 8.0, WeatherCondition::Rain),
+            (1, 7.0, WeatherCondition::Clear),
+        ]
+        .iter()
+        .map(|(h, t, c)| HourlyForecast {
+            hour: format!("{h:02}"),
+            temperature: *t,
+            condition: *c,
+            precipitation_chance: None,
+        })
+        .collect(),
+        fetched_at_ms: now,
+    });
+    fake.devices = vec![
+        DeviceBattery {
+            id: "a".into(),
+            name: "AirPods Pro".into(),
+            kind: DeviceKind::AirPods,
+            levels: vec![(BatteryComponent::Left, 80), (BatteryComponent::Right, 78), (BatteryComponent::Case, 18)],
+        },
+        DeviceBattery {
+            id: "m".into(),
+            name: "Magic Mouse".into(),
+            kind: DeviceKind::Mouse,
+            levels: vec![(BatteryComponent::Main, 64)],
+        },
+    ];
+    let note = |id: u64, app: KnownApp, kind: NotificationKind, prio: Priority, title: &str, body: &str, ago: i64| {
+        Notification {
+            id: NotificationId(id),
+            app: AppRef::known(app),
+            origin: Origin::Internal,
+            kind,
+            priority: prio,
+            title: title.into(),
+            subtitle: None,
+            body: body.into(),
+            timestamp_ms: now - ago,
+            thread: None,
+            url: None,
+            group_count: 1,
+            read: id > 1,
+        }
+    };
+    fake.notifications = vec![
+        note(
+            1,
+            KnownApp::Claude,
+            NotificationKind::NeedsInput,
+            Priority::High,
+            "Allow running cargo test?",
+            "notchforge · waiting for your approval",
+            5_000,
+        ),
+        note(
+            2,
+            KnownApp::Cursor,
+            NotificationKind::TaskFinished,
+            Priority::Normal,
+            "Settings refactor complete",
+            "4 files changed, all tests pass",
+            360_000,
+        ),
+        note(
+            3,
+            KnownApp::Messages,
+            NotificationKind::Message,
+            Priority::Normal,
+            "Léa",
+            "Dinner at 8? I booked the place on Rue Oberkampf",
+            720_000,
+        ),
+    ];
+    fake.unread = 1;
+    with_controller(|c| c.preview_overview(&fake));
+    check_pixels(ctx, "overview sample", true, true);
+    screenshot(ctx, mtm, "03c-overview-sample", None);
+    with_controller(|c| c.preview_overview(snap));
 }
 
 trait OrDefaultState {
