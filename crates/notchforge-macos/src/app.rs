@@ -245,7 +245,9 @@ pub fn run(boot: Boot) -> Result<(), String> {
     let block = RcBlock::new(|_t: NonNull<NSTimer>| crate::location::refresh());
     // SAFETY: documented NSTimer API.
     let location_timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(3600.0, true, &block) };
-    // Start the banner observer once Accessibility is granted (checked twice a minute).
+    // Start the banner observer once Accessibility is granted and the
+    // Notification Center UI process exists (macOS launches it lazily). Only does
+    // work while the observer is enabled but not yet attached.
     let block = RcBlock::new(|_t: NonNull<NSTimer>| {
         with_app(|a| {
             let cfg = a.config.borrow().clone();
@@ -255,7 +257,7 @@ pub fn run(boot: Boot) -> Result<(), String> {
         });
     });
     // SAFETY: documented NSTimer API.
-    let permission_timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(30.0, true, &block) };
+    let permission_timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(5.0, true, &block) };
 
     if boot.config.general.launch_at_login != crate::login_item::is_enabled() {
         if let Err(e) = crate::login_item::set_enabled(boot.config.general.launch_at_login) {

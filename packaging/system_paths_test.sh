@@ -17,6 +17,14 @@ trap 'kill $PID 2>/dev/null || true; echo "--- log"; cat "$LOG"' EXIT
 for _ in $(seq 1 60); do grep -q "NotchForge UI running" "$LOG" && break; sleep 0.5; done
 sleep 2
 
+# The first notification also wakes the Notification Center UI process, which
+# macOS launches lazily; the banner observer attaches to it within ~5 s.
+osascript -e 'display notification "warm-up" with title "NotchForge CI"'
+for _ in $(seq 1 30); do
+  grep -q "observing Notification Center banners via Accessibility" "$LOG" && break
+  sleep 0.5
+done
+sleep 1
 TOKEN="nf-$RANDOM-$RANDOM"
 osascript -e "display notification \"Body $TOKEN\" with title \"Title $TOKEN\""
 
