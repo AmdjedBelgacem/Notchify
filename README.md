@@ -25,12 +25,26 @@ control panel. It surfaces:
 It runs as an accessory app with no Dock icon, and adds a menu bar extra as a
 secondary entry point.
 
-> **Status:** every commit is built, linked, tested and launched on an
-> Apple Silicon macOS runner (`.github/workflows/ci.yml`, `packaging/smoke_test.sh`).
-> The smoke test starts the signed `.app`, waits for the UI, delivers agent
-> events over HTTP, a Claude Code hook payload and the inbox file, checks that
-> the engine ingested them, then sends SIGTERM and verifies a clean shutdown.
-> Measured on the runner: about 42 MB resident right after launch.
+> **Status:** every push is built, linked, tested and run on an Apple Silicon
+> macOS runner (`.github/workflows/ci.yml`):
+>
+> * **Smoke test** (`packaging/smoke_test.sh`). Launches the signed `.app`,
+>   delivers agent events over HTTP, as a Claude Code hook payload and through
+>   the inbox file, checks they are ingested, then sends SIGTERM and verifies a
+>   clean shutdown (agent socket removed). About 42 MB resident after launch.
+> * **System notification paths** (`packaging/system_paths_test.sh`). Posts a
+>   real macOS notification and verifies the Notification Center database
+>   watcher ingests it. The Accessibility banner check is skipped on hosts that
+>   never launch the Notification Center UI, which includes headless CI VMs.
+> * **UI self-test** (`notchforge --self-test <dir>`, 38 checks). Drives the
+>   running app with synthetic pointer, click and Escape events: hover-expand,
+>   click-to-pin, file drop into the tray, Escape-to-collapse, a notification
+>   peek, the Settings window and a screen re-layout. At each stage it asserts
+>   the state, island geometry and click-through behaviour. It also measures
+>   the springs (≈50–60 fps on a GPU-less VM) and saves screenshots
+>   (`ui-self-test` artifact).
+>
+> Run `notchforge --self-test /tmp/nf` on your own Mac to repeat it there.
 
 ---
 
@@ -457,9 +471,12 @@ AppKit.
 
 ## Known limitations
 
-- **Visual polish hasn't been reviewed by eye.** CI launches the real app
-  on macOS, but a headless runner has no notch and nobody looks at the pixels.
-  Expect some tuning of spacing, sizes and hover feel on a physical MacBook.
+- **Visual polish.** CI exercises every interaction and captures screenshots,
+  but on a virtual 1024×768 display without a notch. Expect some tuning of
+  spacing, sizes and hover feel on a physical notched MacBook.
+- **The Accessibility banner fallback** is implemented but can't be
+  exercised in CI: headless VMs never render banners. The primary
+  Notification Center database path is verified end to end.
 - **Apple Watch battery.** macOS has no public interface for it.
 - **External display brightness.** This needs DDC/CI, which isn't
   implemented. Only the built-in panel is supported.
