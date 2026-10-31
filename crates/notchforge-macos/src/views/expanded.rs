@@ -355,6 +355,7 @@ impl ExpandedView {
             &t,
             rect(c3x, body_y + 220.0, c3w, 26.0),
         );
+        resolution.setAlignment(NSTextAlignment::Left);
         set_accessibility_label(&resolution, "Display resolution");
         overview.addSubview(&resolution);
 
@@ -703,7 +704,7 @@ impl ExpandedView {
                 parts.push((text, if low { p.warning.clone() } else { p.secondary.clone() }));
             }
             let levels = attributed_parts(&runs(&parts, &f));
-            let lw = crate::ui::text_width(&levels).min(w * 0.55);
+            let lw = (crate::ui::text_width(&levels) + 8.0).min(w * 0.6);
             let lv = rich_label(mtm, &levels, rect(w - lw, y + 3.0, lw, 16.0));
             lv.setAlignment(NSTextAlignment::Right);
             set_accessibility_label(&lv, &format!("{} battery {}", d.name, super::device_levels(d)));

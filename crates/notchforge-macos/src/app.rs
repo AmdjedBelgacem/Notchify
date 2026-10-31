@@ -80,7 +80,7 @@ pub fn send(cmd: Command) {
 }
 
 pub(crate) fn apply_snapshot(snap: Arc<Snapshot>) {
-    with_app(|a| a.menubar.update(snap.paused, snap.unread));
+    with_app(|a| a.menubar.update(&snap));
     with_controller(|c| c.apply_snapshot(snap));
 }
 
@@ -131,6 +131,25 @@ pub fn show_settings() {
         let mtm = MainThreadMarker::from(&*a.controller.panel);
         s.get_or_insert_with(|| SettingsWindow::new(mtm)).show(&cfg);
     });
+}
+
+/// Update the menu bar extra from a snapshot and return its mini player view
+/// (self-test).
+pub fn menubar_preview(snap: &Snapshot) -> Option<Retained<objc2_app_kit::NSView>> {
+    with_app(|a| {
+        a.menubar.update(snap);
+        a.menubar.player_view()
+    })
+    .flatten()
+}
+
+/// Show Settings on a given pane.
+pub fn show_settings_pane(pane: crate::settings::Pane) {
+    with_app(|a| {
+        let mtm = MainThreadMarker::from(&*a.controller.panel);
+        a.settings.borrow_mut().get_or_insert_with(|| SettingsWindow::new(mtm)).set_pane(pane);
+    });
+    show_settings();
 }
 
 /// Re-open Settings shortly, after the engine has broadcast a config change.

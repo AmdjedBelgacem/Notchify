@@ -397,6 +397,15 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             check_pixels(ctx, "hover", true, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "02-hover", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
+            // The same glance with a playing track, as on the design board.
+            if let Some(real) = with_controller(|c| c.current_snapshot()) {
+                let mut fake = (*real).clone();
+                fake.media = sample_media();
+                fake.unread = 0;
+                with_controller(|c| c.preview_compact(&fake));
+                screenshot(ctx, mtm, "02b-hover-music", None);
+                with_controller(|c| c.preview_compact(&real));
+            }
         }
         // ── click to pin ──
         4 => {
@@ -508,7 +517,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             screenshot(ctx, mtm, "04-peek", Some(island.outset(40.0, 40.0, 30.0, 0.0)));
         }
         // ── settings window ──
-        13 => app::show_settings(),
+        13 => app::show_settings_pane(crate::settings::Pane::Media),
         14 => {
             let visible = app::settings_visible();
             ctx.report.borrow_mut().check("settings: window shown", visible, "");
@@ -537,7 +546,6 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
 /// through the real view code (title, playlists, pixels).
 fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engine::Snapshot) {
     use crate::views::expanded::Tab;
-    use notchforge_core::model::{MediaPlayer, MediaState, NowPlaying, PlaybackState, Playlist, PlaylistStatus};
     with_controller(|c| c.show_expanded_tab(Tab::Media));
     let shown = with_controller(|c| c.media_page_visible()).unwrap_or(false);
     {
@@ -566,37 +574,7 @@ fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engi
 
     let mut fake = snap.clone();
     fake.generation = u64::MAX - 1;
-    fake.media = MediaState {
-        players: vec![NowPlaying {
-            player: MediaPlayer::Spotify,
-            state: PlaybackState::Playing,
-            title: "Self-test track".into(),
-            artist: "NotchForge".into(),
-            album: "Diagnostics".into(),
-            duration: Some(215.0),
-            position: Some(42.0),
-            sampled_at_ms: notchforge_core::time::now_ms(),
-            track_id: Some("spotify:track:selftest".into()),
-            artwork_path: None,
-            shuffle: Some(true),
-            repeat: Some(false),
-            volume: Some(70),
-        }],
-        running: vec![MediaPlayer::Spotify],
-        playlists: (1..=3)
-            .map(|i| Playlist {
-                player: MediaPlayer::Spotify,
-                id: format!("spotify:playlist:{i}"),
-                name: format!("Self-test playlist {i}"),
-                track_count: Some(10 * i),
-                owner: Some("NotchForge".into()),
-                artwork_url: None,
-                artwork_path: None,
-            })
-            .collect(),
-        playlist_status: vec![(MediaPlayer::Spotify, PlaylistStatus::Loaded)],
-        automation_denied: vec![],
-    };
+    fake.media = sample_media();
     let (title, rows) = with_controller(|c| c.preview_media(&fake)).unwrap_or_default();
     {
         let mut r = ctx.report.borrow_mut();
@@ -604,6 +582,9 @@ fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engi
         r.check("music page: lists playlists", rows == 3, format!("{rows} rows"));
     }
     check_pixels(ctx, "music page", true, true);
+    if let Some(png) = app::menubar_preview(&fake).as_deref().and_then(png_from_view) {
+        emit_png(ctx, "06-menubar-player", png);
+    }
     let island = with_controller(|c| c.island_global()).unwrap_or_default();
     screenshot(ctx, mtm, "03b-music", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
     // Back to the real data and the overview page.
@@ -721,6 +702,42 @@ fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core
     check_pixels(ctx, "overview sample", true, true);
     screenshot(ctx, mtm, "03c-overview-sample", None);
     with_controller(|c| c.preview_overview(snap));
+}
+
+/// A playing Spotify track with three playlists (self-test renders).
+fn sample_media() -> notchforge_core::model::MediaState {
+    use notchforge_core::model::{MediaPlayer, MediaState, NowPlaying, PlaybackState, Playlist, PlaylistStatus};
+    MediaState {
+        players: vec![NowPlaying {
+            player: MediaPlayer::Spotify,
+            state: PlaybackState::Playing,
+            title: "Self-test track".into(),
+            artist: "NotchForge".into(),
+            album: "Diagnostics".into(),
+            duration: Some(215.0),
+            position: Some(42.0),
+            sampled_at_ms: notchforge_core::time::now_ms(),
+            track_id: Some("spotify:track:selftest".into()),
+            artwork_path: None,
+            shuffle: Some(true),
+            repeat: Some(false),
+            volume: Some(70),
+        }],
+        running: vec![MediaPlayer::Spotify],
+        playlists: (1..=3)
+            .map(|i| Playlist {
+                player: MediaPlayer::Spotify,
+                id: format!("spotify:playlist:{i}"),
+                name: format!("Self-test playlist {i}"),
+                track_count: Some(10 * i),
+                owner: Some("NotchForge".into()),
+                artwork_url: None,
+                artwork_path: None,
+            })
+            .collect(),
+        playlist_status: vec![(MediaPlayer::Spotify, PlaylistStatus::Loaded)],
+        automation_denied: vec![],
+    }
 }
 
 trait OrDefaultState {

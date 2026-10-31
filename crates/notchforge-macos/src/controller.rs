@@ -522,6 +522,12 @@ impl Controller {
         if matches!(self.machine.borrow().state(), State::Expanded | State::DropTarget { .. }) {
             return false;
         }
+        // The peek's Open button opens the notification itself.
+        if self.kind.get() == LayoutKind::Peek && self.views.borrow().peek.open_hit(window_point) {
+            self.views.borrow().peek.open_current();
+            self.handle(Event::ClickOutside);
+            return true;
+        }
         // Clicking the hover card's "now playing" opens straight on the music page.
         if self.kind.get() == LayoutKind::Compact && self.views.borrow().compact.media_hit(window_point) {
             self.views.borrow().expanded.show_tab(crate::views::expanded::Tab::Media);
@@ -544,6 +550,11 @@ impl Controller {
     /// 1 Hz tick from the music page (progress bar and clocks).
     pub fn media_tick(&self) {
         self.views.borrow().expanded.media.tick();
+    }
+
+    /// Render the hover glance from an arbitrary snapshot (self-test).
+    pub fn preview_compact(&self, snap: &Snapshot) {
+        self.views.borrow().compact.update(snap, &self.palette.borrow());
     }
 
     /// Render the Overview from an arbitrary snapshot (self-test).

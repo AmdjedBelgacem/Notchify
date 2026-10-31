@@ -172,7 +172,7 @@ fn seg_style(b: &NSButton, title: &str, on: bool) {
 }
 
 /// Three bars animated by Core Animation (render server: no CPU here).
-fn equalizer(
+pub fn equalizer_view(
     mtm: MainThreadMarker,
     frame: objc2_foundation::NSRect,
     color: &objc2_app_kit::NSColor,
@@ -225,7 +225,7 @@ impl MediaPage {
         wash.setType(&NSString::from_str("radial"));
         wash.setFrame(rect(0.0, 0.0, w, h));
         wash.setStartPoint(NSPoint::new(0.08, 0.0));
-        wash.setEndPoint(NSPoint::new(0.75, 0.9));
+        wash.setEndPoint(NSPoint::new(0.55, 0.85));
         wash.setOpacity(0.0);
         if let Some(layer) = root.layer() {
             layer.addSublayer(&wash);
@@ -720,7 +720,7 @@ impl MediaPage {
     fn set_wash(&self, color: Option<(f64, f64, f64)>) {
         match color {
             Some((r, g, b)) => {
-                set_gradient(&self.wash, &[(r, g, b, 0.42), (r, g, b, 0.0)]);
+                set_gradient(&self.wash, &[(r, g, b, 0.34), (r, g, b, 0.0)]);
                 self.wash.setOpacity(1.0);
             }
             None => self.wash.setOpacity(0.0),
@@ -832,7 +832,13 @@ impl MediaPage {
         };
         set_symbol(&self.output_icon, dev.symbol(), 14.0, &dev.name);
         set_text(&self.output_name, &dev.name);
-        set_text(&self.output_caps, &dev.capabilities());
+        let caps = dev.capabilities();
+        let avail = self.output_caps.frame().size.width - 4.0;
+        let fits = crate::ui::text_width(&crate::ui::attributed(&caps, &font(11.0, Weight::Regular), &self.p.tertiary))
+            <= avail;
+        // Drop the "up to …" tail before truncating mid-word.
+        let caps = if fits { caps } else { caps.split(" · up to").next().unwrap_or(&caps).to_owned() };
+        set_text(&self.output_caps, &caps);
         set_accessibility_label(&self.output_name, &format!("Output: {}, {}", dev.name, dev.capabilities()));
         self.output_button.setEnabled(audio.devices.len() > 1);
         match dev.volume {
@@ -1074,7 +1080,7 @@ impl MediaPage {
                 rect(54.0, 25.0, w - 84.0, 14.0),
             ));
             if is_active {
-                row.addSubview(&equalizer(self.mtm, rect(w - 26.0, 18.0, 12.0, 12.0), &brand));
+                row.addSubview(&equalizer_view(self.mtm, rect(w - 26.0, 18.0, 12.0, 12.0), &brand));
             }
             let (id, name) = (pl.id.clone(), pl.name.clone());
             let st = self.state.clone();
