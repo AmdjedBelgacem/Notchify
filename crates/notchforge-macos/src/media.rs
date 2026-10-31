@@ -20,6 +20,7 @@ use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType, NSRunningApplication, NSWorkspace};
 use objc2_foundation::{NSDistributedNotificationCenter, NSNotification, NSOperationQueue, NSPoint, NSString};
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 pub fn send(cmd: ProviderCommand) {
     app::send(Command::Provider(cmd));
@@ -203,9 +204,10 @@ fn automation_status(player: MediaPlayer, ask: bool) -> i32 {
     }
 }
 
-/// Combined Automation state for the running players. `Unknown` when neither
-/// is running (macOS can only answer for running targets).
-pub fn automation_state() -> PermissionState {
+/// Combined Automation state for the running players, computed from scratch.
+/// `AEDeterminePermissionToAutomateTarget` can block while a target app is
+/// busy, so this only ever runs on a background thread.
+fn compute_automation_state() -> PermissionState {
     let mut states = Vec::new();
     for p in MediaPlayer::ALL {
         match automation_status(p, false) {
@@ -224,6 +226,42 @@ pub fn automation_state() -> PermissionState {
     } else {
         PermissionState::Unknown
     }
+}
+
+static AUTOMATION: AtomicU8 = AtomicU8::new(0);
+static AUTOMATION_CHECKING: AtomicBool = AtomicBool::new(false);
+
+fn encode(s: PermissionState) -> u8 {
+    match s {
+        PermissionState::Unknown => 0,
+        PermissionState::Granted => 1,
+        PermissionState::Denied => 2,
+        PermissionState::NotDetermined => 3,
+        PermissionState::NotRequired => 4,
+    }
+}
+
+fn decode(v: u8) -> PermissionState {
+    match v {
+        1 => PermissionState::Granted,
+        2 => PermissionState::Denied,
+        3 => PermissionState::NotDetermined,
+        4 => PermissionState::NotRequired,
+        _ => PermissionState::Unknown,
+    }
+}
+
+/// Last known Automation state for the running players (`Unknown` until the
+/// first check, or when neither player runs). Never blocks: each call
+/// schedules a background re-check, so the next read is fresh.
+pub fn automation_state() -> PermissionState {
+    if !AUTOMATION_CHECKING.swap(true, Ordering::AcqRel) {
+        std::thread::spawn(|| {
+            AUTOMATION.store(encode(compute_automation_state()), Ordering::Release);
+            AUTOMATION_CHECKING.store(false, Ordering::Release);
+        });
+    }
+    decode(AUTOMATION.load(Ordering::Acquire))
 }
 
 /// Ask for Automation for every running player (background thread), then

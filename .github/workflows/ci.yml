@@ -41,6 +41,7 @@ jobs:
       - name: System notification paths (Notification Center DB + Accessibility banners)
         run: packaging/system_paths_test.sh
       - name: UI self-test (drives hover, click, drop, Escape, peek, settings)
+        timeout-minutes: 10
         run: |
           export NOTCHFORGE_HOME="$(mktemp -d)"
           # CI images enable "Reduce motion"; force springs on so the test measures them.
