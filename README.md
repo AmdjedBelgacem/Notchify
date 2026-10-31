@@ -25,11 +25,12 @@ control panel. It surfaces:
 It runs as an accessory app with no Dock icon, and adds a menu bar extra as a
 secondary entry point.
 
-> **Status:** the full architecture is implemented and the project compiles.
-> `notchforge-core`, `notchforge-providers` and the CLIs are unit- and
-> end-to-end-tested on Linux. The AppKit layer (`notchforge-macos`) is
-> type-checked and linted for `aarch64-apple-darwin`. CI (`.github/workflows/ci.yml`)
-> builds and bundles it on a macOS runner. See [Known limitations](#known-limitations).
+> **Status:** every commit is built, linked, tested and launched on an
+> Apple Silicon macOS runner (`.github/workflows/ci.yml`, `packaging/smoke_test.sh`).
+> The smoke test starts the signed `.app`, waits for the UI, delivers agent
+> events over HTTP, a Claude Code hook payload and the inbox file, checks that
+> the engine ingested them, then sends SIGTERM and verifies a clean shutdown.
+> Measured on the runner: about 42 MB resident right after launch.
 
 ---
 
@@ -456,11 +457,9 @@ AppKit.
 
 ## Known limitations
 
-- **Never run on Mac hardware.** This repository was developed in a Linux
-  environment. Every crate builds and lints for `aarch64-apple-darwin`, and the
-  platform-independent logic is tested. The AppKit UI itself has not been
-  launched on a Mac yet; the macOS CI job builds and bundles it. Expect some
-  visual tuning (spacing, font sizes) on first run.
+- **Visual polish hasn't been reviewed by eye.** CI launches the real app
+  on macOS, but a headless runner has no notch and nobody looks at the pixels.
+  Expect some tuning of spacing, sizes and hover feel on a physical MacBook.
 - **Apple Watch battery.** macOS has no public interface for it.
 - **External display brightness.** This needs DDC/CI, which isn't
   implemented. Only the built-in panel is supported.
