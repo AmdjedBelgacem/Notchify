@@ -137,13 +137,8 @@ pub fn battery_glyph(mtm: MainThreadMarker, frame: NSRect, b: &BatteryStatus, p:
         l.setBorderWidth(1.2);
         l.setBorderColor(Some(&white(0.45).CGColor()));
     }
-    let color = if b.charging {
-        p.success.clone()
-    } else if b.is_low() {
-        p.warning.clone()
-    } else {
-        white(0.92)
-    };
+    // Green as on the design board; orange when low.
+    let color = if b.is_low() && !b.charging { p.warning.clone() } else { p.success.clone() };
     let fw = ((w - 4.0) * b.percent as f64 / 100.0).max(1.5);
     v.addSubview(&outline);
     v.addSubview(&shape_view(mtm, rect(2.0, 2.0, fw, h - 4.0), &color, 1.6));
@@ -899,6 +894,7 @@ impl ExpandedView {
                 item.path.clone(),
             );
             let icon = NSImageView::imageViewWithImage(&crate::icons::file_icon(&item.path), mtm);
+            icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
             icon.setFrame(rect((cw - 54.0) / 2.0, 4.0, 54.0, 54.0));
             tile.addSubview(&icon);
             let name = label(mtm, &item.name, &font(11.0, Weight::Regular), &p.primary, rect(0.0, 64.0, cw, 14.0));
