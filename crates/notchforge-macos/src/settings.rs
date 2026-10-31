@@ -512,7 +512,9 @@ impl SettingsWindow {
     pub fn show(&self, config: &Config) {
         let mtm = MainThreadMarker::from(&*self.window);
         self.targets.clear();
-        let root = FlippedView::new(mtm, rect(0.0, 0.0, WIDTH, HEIGHT));
+        // The content draws its own dark ground (it must not depend on the
+        // window background, which offscreen renders and some transitions skip).
+        let root = shape_view(mtm, rect(0.0, 0.0, WIDTH, HEIGHT), &rgba(0.118, 0.118, 0.125, 1.0), 0.0);
         root.addSubview(&self.sidebar(mtm));
 
         // ── pane ──
