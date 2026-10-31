@@ -29,6 +29,7 @@ impl UiSink for LogSink {
             battery = ?s.battery.as_ref().map(|b| b.percent),
             devices = s.devices.len(),
             weather = ?s.weather.as_ref().map(|w| (w.place.clone(), w.temperature)),
+            providers = ?s.providers,
             "snapshot"
         );
     }
