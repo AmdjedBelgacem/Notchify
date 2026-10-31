@@ -30,7 +30,6 @@ use objc2_app_kit::{
     NSWorkspaceDidWakeNotification,
 };
 use objc2_foundation::{NSPoint, NSRunLoop, NSRunLoopCommonModes, NSTimer};
-use objc2_quartz_core::CACornerMask;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -113,8 +112,9 @@ impl Controller {
         if let Some(layer) = island.layer() {
             layer.setBackgroundColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
             layer.setMasksToBounds(true);
-            // Only the bottom corners are rounded; the top merges with the bezel.
-            layer.setMaskedCorners(CACornerMask::LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner);
+            // All corners are rounded, but the island extends one radius above
+            // the window's top edge (see `apply_frame`), so the window clips the
+            // top corners and the island merges squarely with the bezel.
         }
         root.addSubview(&island);
 
@@ -359,9 +359,12 @@ impl Controller {
         let (w, h) = (s.width.value.max(1.0), s.height.value.max(1.0));
         let g = self.layout.borrow().island_global(w, h);
         let win = self.panel.frame();
-        self.island.setFrame(rect(g.x - win.origin.x, g.y - win.origin.y, w, h));
+        let radius = s.radius.value.clamp(0.0, h / 2.0);
+        // Extra height above the window's top edge, clipped away by the window.
+        let overhang = radius.ceil();
+        self.island.setFrame(rect(g.x - win.origin.x, g.y - win.origin.y, w, h + overhang));
         if let Some(layer) = self.island.layer() {
-            layer.setCornerRadius(s.radius.value.clamp(0.0, h / 2.0));
+            layer.setCornerRadius(radius);
         }
         let views = self.views.borrow();
         let c = views.container(self.kind.get());
@@ -712,14 +715,17 @@ impl Controller {
     }
 
     /// Island rect in global coordinates as currently laid out.
+    /// Visible island rect in global coordinates (the part inside the window;
+    /// the overhang above the top edge is excluded).
     pub fn island_global(&self) -> notchforge_core::geometry::Rect {
         let win = self.panel.frame();
         let f = self.island.frame();
+        let visible_h = f.size.height.min(win.size.height - f.origin.y).max(0.0);
         notchforge_core::geometry::Rect::new(
             win.origin.x + f.origin.x,
             win.origin.y + f.origin.y,
             f.size.width,
-            f.size.height,
+            visible_h,
         )
     }
 
