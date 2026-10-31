@@ -13,7 +13,7 @@
 
 use super::{app_icon_view, set_app_icon};
 use crate::ui::{
-    FlippedView, Palette, Weight, attributed, font, label, pill_button, rect, rgba, set_accessibility_label,
+    FlippedView, Palette, Weight, attributed, font, label, pill_button, rect, rgb8, rgba, set_accessibility_label,
     set_gradient, set_text, shape_view, without_animation,
 };
 use notchforge_core::geometry::{LayoutKind, NotchLayout};
@@ -27,6 +27,7 @@ use std::cell::RefCell;
 pub struct PeekView {
     pub root: Retained<FlippedView>,
     glow: Retained<objc2_quartz_core::CAGradientLayer>,
+    tile: Retained<FlippedView>,
     icon: Retained<NSImageView>,
     dot: Retained<FlippedView>,
     summary: Retained<NSTextField>,
@@ -67,7 +68,8 @@ impl PeekView {
             l.addSublayer(&glow);
         }
 
-        let cy = nh + (h - nh) / 2.0;
+        // Content row: 8 pt below the notch, 36 pt tall (the board's top: 40 px).
+        let cy = nh + 26.0;
         let tile = shape_view(mtm, rect(16.0, cy - 18.0, 36.0, 36.0), &rgba(1.0, 1.0, 1.0, 0.08), 9.0);
         let icon = app_icon_view(mtm, rect(2.0, 2.0, 32.0, 32.0));
         tile.addSubview(&icon);
@@ -93,11 +95,24 @@ impl PeekView {
         for v in [&*tile as &objc2_app_kit::NSView, &dot, &summary, &title, &open] {
             root.addSubview(v);
         }
-        Self { root, glow, icon, dot, summary, title, open, _target: target, current: RefCell::new(None) }
+        Self { root, glow, tile, icon, dot, summary, title, open, _target: target, current: RefCell::new(None) }
     }
 
     pub fn show(&self, n: &Notification, p: &Palette) {
         set_app_icon(&self.icon, &n.app);
+        // Without a real app icon, the glyph sits white on a brand-colour tile.
+        let branded = crate::icons::app_icon(&n.app).is_none();
+        let tile_color = if branded { rgb8(crate::icons::accent(&n.app)) } else { rgba(1.0, 1.0, 1.0, 0.08) };
+        if branded {
+            self.icon.setImage(crate::ui::symbol_image(crate::icons::fallback_symbol(&n.app), 19.0, "").as_deref());
+            self.icon.setContentTintColor(Some(&objc2_app_kit::NSColor::whiteColor()));
+            self.icon.setFrame(rect(8.0, 8.0, 20.0, 20.0));
+        } else {
+            self.icon.setFrame(rect(2.0, 2.0, 32.0, 32.0));
+        }
+        if let Some(l) = self.tile.layer() {
+            without_animation(|| l.setBackgroundColor(Some(&tile_color.CGColor())));
+        }
         let urgent = is_urgent(n);
         let summary = match n.kind {
             NotificationKind::NeedsInput => format!("{} needs your input", n.app.display_name),

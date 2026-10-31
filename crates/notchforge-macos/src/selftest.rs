@@ -712,6 +712,9 @@ fn notched_previews(ctx: &Rc<Ctx>, overview: &notchforge_core::engine::Snapshot)
     let mut music = overview.clone();
     music.generation = u64::MAX - 3;
     music.media = sample_media();
+    // The Hover board shows music with nothing unread (unread would lead).
+    music.notifications.clear();
+    music.unread = 0;
     let Some(peek) = overview.notifications.first().cloned() else { return };
     let mut sizes = Vec::new();
     with_controller(|c| {

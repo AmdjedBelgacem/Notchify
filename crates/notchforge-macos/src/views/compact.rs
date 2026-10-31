@@ -129,10 +129,10 @@ impl CompactView {
             "--°",
             &mono_digits(26.0, Weight::Semibold),
             &p.primary,
-            rect(12.0, ch - 46.0, col - 18.0, 30.0),
+            rect(12.0, ch - 57.0, col - 18.0, 30.0),
         );
         let weather_place =
-            label(mtm, "", &font(11.0, Weight::Regular), &white(0.7), rect(12.0, ch - 19.0, col - 18.0, 14.0));
+            label(mtm, "", &font(11.0, Weight::Regular), &white(0.7), rect(12.0, ch - 26.0, col - 18.0, 14.0));
         for v in [&*weather_icon as &NSView, &weather_temp, &weather_place] {
             weather_card.addSubview(v);
         }
@@ -148,9 +148,9 @@ impl CompactView {
         let accessory_icon =
             symbol_view(mtm, "airpodspro", 12.0, &white(0.6), rect(col - 12.0 - 16.0, 13.0, 16.0, 15.0), "Accessory");
         let battery_pct =
-            label(mtm, "--", &mono_digits(26.0, Weight::Semibold), &p.primary, rect(12.0, ch - 46.0, col - 18.0, 30.0));
+            label(mtm, "--", &mono_digits(26.0, Weight::Semibold), &p.primary, rect(12.0, ch - 57.0, col - 18.0, 30.0));
         let battery_detail =
-            label(mtm, "", &font(11.0, Weight::Regular), &white(0.7), rect(12.0, ch - 19.0, col - 18.0, 14.0));
+            label(mtm, "", &font(11.0, Weight::Regular), &white(0.7), rect(12.0, ch - 26.0, col - 18.0, 14.0));
         for v in [&*battery_glyph_host as &NSView, &accessory_icon, &battery_pct, &battery_detail] {
             battery_card.addSubview(v);
         }

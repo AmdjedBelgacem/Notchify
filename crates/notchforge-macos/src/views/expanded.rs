@@ -651,7 +651,9 @@ impl ExpandedView {
                 ("Now".to_owned(), w.condition.symbol(w.is_day), w.temperature)
             } else {
                 let hf = &w.hourly[i - 1];
-                (hf.hour.clone(), hf.condition.symbol(true), hf.temperature)
+                // Night icons (moon) outside 06:00–19:59, as on the board.
+                let night = hf.hour.parse::<u32>().is_ok_and(|h| !(6..20).contains(&h));
+                (hf.hour.clone(), hf.condition.symbol(!night), hf.temperature)
             };
             let x = 8.0 + i as f64 * cw;
             let hl = label(mtm, &hour, &font(10.5, Weight::Regular), &white(0.65), rect(x, 48.0, cw, 13.0));
@@ -839,10 +841,6 @@ impl ExpandedView {
                 rect(tx, 41.0, w - tx - 12.0, 15.0),
             ));
         }
-        if !n.read {
-            row.addSubview(&shape_view(mtm, rect(4.0, frame.size.height / 2.0 - 2.5, 5.0, 5.0), &p.accent, 2.5));
-        }
-
         // Click opens; right-click offers Open, Copy and Dismiss.
         let id = n.id;
         let (url, bundle) = (n.url.clone(), n.app.bundle_id.clone());
