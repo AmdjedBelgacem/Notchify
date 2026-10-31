@@ -36,13 +36,15 @@ secondary entry point.
 >   real macOS notification and verifies the Notification Center database
 >   watcher ingests it. The Accessibility banner check is skipped on hosts that
 >   never launch the Notification Center UI, which includes headless CI VMs.
-> * **UI self-test** (`notchforge --self-test <dir>`, 38 checks). Drives the
+> * **UI self-test** (`notchforge --self-test <dir>`, 53 checks). Drives the
 >   running app with synthetic pointer, click and Escape events: hover-expand,
 >   click-to-pin, file drop into the tray, Escape-to-collapse, a notification
 >   peek, the Settings window and a screen re-layout. At each stage it asserts
 >   the state, island geometry and click-through behaviour. It also measures
->   the springs (≈50–60 fps on a GPU-less VM) and saves screenshots
->   (`ui-self-test` artifact).
+>   the springs (≈50–60 fps on a GPU-less VM) and renders the island's own layers to
+>   check its pixels: an opaque black shape, content actually drawn, a square
+>   top edge and rounded bottom corners. ASCII previews of each stage go to
+>   the CI log.
 >
 > Run `notchforge --self-test /tmp/nf` on your own Mac to repeat it there.
 

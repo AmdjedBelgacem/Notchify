@@ -48,6 +48,10 @@ impl Raster {
         use objc2_core_graphics::{CGBitmapContextCreate, CGColorSpace, CGImageAlphaInfo};
         let (layer, island) = with_controller(|c| (c.island_layer(), c.island_global()))?;
         let layer = layer?;
+        // The bitmap is sized to the *visible* island. The layer is taller (it
+        // overhangs the window's top edge by one corner radius); in CoreGraphics'
+        // y-up space that overhang lies above the bitmap and is clipped, exactly
+        // as the window clips it on screen.
         let (w, h) = (island.width.round() as usize, island.height.round() as usize);
         if w == 0 || h == 0 {
             return None;
