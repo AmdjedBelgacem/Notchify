@@ -181,6 +181,12 @@ pub fn confirm_with_timeout(title: &str, message: &str, yes: &str, no: &str, sec
     response == NSAlertFirstButtonReturn
 }
 
+/// Quit from any thread (used for SIGINT/SIGTERM): hops to the main queue and
+/// runs the normal [`quit`] path so providers and the tray shut down cleanly.
+pub fn request_quit() {
+    dispatch2::DispatchQueue::main().exec_async(quit);
+}
+
 pub fn quit() {
     let Some(mtm) = MainThreadMarker::new() else { return };
     if let Some(app) = APP.with(|a| a.borrow_mut().take()) {

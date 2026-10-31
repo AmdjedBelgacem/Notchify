@@ -31,7 +31,13 @@ echo "--- RSS (KB): $(ps -o rss= -p $PID)"
 echo "--- CPU (%):  $(ps -o %cpu= -p $PID)"
 cat "$LOG"
 [ "$(grep -c "notification ingested" "$LOG")" -ge 3 ] || { echo "expected 3 ingested notifications"; exit 1; }
-kill -INT $PID
-for _ in $(seq 1 20); do kill -0 $PID 2>/dev/null || break; sleep 0.25; done
-if kill -0 $PID 2>/dev/null; then echo "app did not exit on SIGINT (expected under AppKit; killing)"; fi
+SOCK="$NOTCHFORGE_HOME/agent.sock"
+[ -S "$SOCK" ] || { echo "agent socket missing"; exit 1; }
+kill -TERM $PID
+for _ in $(seq 1 40); do kill -0 $PID 2>/dev/null || break; sleep 0.25; done
+if kill -0 $PID 2>/dev/null; then echo "app did not exit on SIGTERM"; cat "$LOG"; exit 1; fi
+trap - EXIT
+[ ! -e "$SOCK" ] || { echo "agent socket not cleaned up on quit"; exit 1; }
+grep -q "shutting down" "$LOG" || { echo "no clean shutdown logged"; cat "$LOG"; exit 1; }
+echo "clean shutdown OK"
 echo "smoke test passed"
