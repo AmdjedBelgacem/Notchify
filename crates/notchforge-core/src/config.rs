@@ -103,10 +103,10 @@ impl Default for AppearanceConfig {
         Self {
             reduced_motion: ReducedMotion::System,
             animation_speed: 1.0,
-            compact_width: 460.0,
-            compact_height: 112.0,
-            expanded_width: 680.0,
-            expanded_height: 320.0,
+            compact_width: 520.0,
+            compact_height: 144.0,
+            expanded_width: 720.0,
+            expanded_height: 340.0,
             show_wings: true,
             high_contrast: false,
         }

@@ -204,9 +204,9 @@ impl NotchLayout {
                 IslandShape { width: n.width + 2.0 * WING_WIDTH, height: n.height, corner_radius: base_radius }
             }
             LayoutKind::Peek => IslandShape {
-                width: (n.width + 2.0 * WING_WIDTH + 80.0).max(380.0).min(a.compact_width),
-                height: n.height + 52.0,
-                corner_radius: 20.0,
+                width: (n.width + 2.0 * WING_WIDTH + 80.0).max(440.0).min(a.compact_width),
+                height: n.height + 64.0,
+                corner_radius: 24.0,
             },
             LayoutKind::Compact => IslandShape {
                 width: a.compact_width.max(n.width + 2.0 * WING_WIDTH),
@@ -216,7 +216,7 @@ impl NotchLayout {
             LayoutKind::Expanded => IslandShape {
                 width: a.expanded_width.max(n.width + 2.0 * WING_WIDTH),
                 height: n.height + a.expanded_height,
-                corner_radius: 30.0,
+                corner_radius: 28.0,
             },
         }
     }

@@ -386,6 +386,10 @@ impl ExpandedView {
         let media = MediaPage::new(mtm, w, h, body_y, p);
         media.root.setHidden(true);
         root.addSubview(&media.root);
+        // Segmented track behind the two page buttons.
+        let track = FlippedView::new(mtm, rect(PAD, ty - 4.0, 62.0, 24.0));
+        make_card(&track, &crate::ui::rgba(1.0, 1.0, 1.0, 0.08), 9.0);
+        root.addSubview(&track);
         let tabs: [(&str, &str, Tab); 2] =
             [("square.grid.2x2.fill", "Overview", Tab::Overview), ("music.note", "Now Playing", Tab::Media)];
         let tab_buttons: Vec<Retained<objc2_app_kit::NSButton>> = tabs
@@ -403,7 +407,7 @@ impl ExpandedView {
                     tip,
                     &p.tertiary,
                     &t,
-                    rect(PAD + i as f64 * 26.0, ty - 3.0, 24.0, 22.0),
+                    rect(PAD + 2.0 + i as f64 * 30.0, ty - 2.0, 28.0, 20.0),
                 );
                 root.addSubview(&b);
                 b
@@ -463,7 +467,10 @@ impl ExpandedView {
         self.overview.setHidden(tab != Tab::Overview);
         self.media.root.setHidden(tab != Tab::Media);
         for (b, t) in self.tab_buttons.iter().zip([Tab::Overview, Tab::Media]) {
-            b.setContentTintColor(Some(if t == tab { &self.palette.primary } else { &self.palette.tertiary }));
+            let on = t == tab;
+            b.setContentTintColor(Some(if on { &self.palette.primary } else { &self.palette.tertiary }));
+            // Selected segment: a lighter pill inside the shared track.
+            crate::ui::make_card(b, &crate::ui::rgba(1.0, 1.0, 1.0, if on { 0.18 } else { 0.0 }), 7.0);
         }
         self.media.set_active(self.visible.get() && tab == Tab::Media);
         if tab == Tab::Media && previous != Tab::Media {

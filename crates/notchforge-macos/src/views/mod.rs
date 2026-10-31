@@ -34,11 +34,13 @@ pub struct Views {
 impl Views {
     pub fn new(mtm: MainThreadMarker, layout: &NotchLayout, config: &Arc<Config>, engine: &EngineHandle) -> Self {
         let palette = Palette::new(config.appearance.high_contrast || system_increase_contrast());
+        let expanded = expanded::ExpandedView::new(mtm, layout, palette.clone(), config.clone(), engine.clone());
+        expanded.show_tab(expanded::Tab::Overview);
         Self {
             collapsed: collapsed::CollapsedView::new(mtm, layout, &palette),
             peek: peek::PeekView::new(mtm, layout, &palette),
             compact: compact::CompactView::new(mtm, layout, &palette),
-            expanded: expanded::ExpandedView::new(mtm, layout, palette, config.clone(), engine.clone()),
+            expanded,
         }
     }
 

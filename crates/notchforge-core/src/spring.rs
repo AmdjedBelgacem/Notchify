@@ -28,12 +28,12 @@ impl SpringParams {
 
     /// Opening: slightly bouncy, feels alive.
     pub fn open() -> Self {
-        Self::with_response(0.42, 0.78)
+        Self::with_response(0.38, 0.82)
     }
 
     /// Closing: no overshoot so the island never pokes below the notch.
     pub fn close() -> Self {
-        Self::with_response(0.36, 1.0)
+        Self::with_response(0.26, 1.0)
     }
 
     /// Scale "speed" (stiffness) keeping the damping fraction constant.
