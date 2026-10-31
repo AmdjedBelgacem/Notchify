@@ -37,7 +37,8 @@ kill -TERM $PID
 for _ in $(seq 1 40); do kill -0 $PID 2>/dev/null || break; sleep 0.25; done
 if kill -0 $PID 2>/dev/null; then echo "app did not exit on SIGTERM"; cat "$LOG"; exit 1; fi
 trap - EXIT
-[ ! -e "$SOCK" ] || { echo "agent socket not cleaned up on quit"; exit 1; }
+[ ! -e "$SOCK" ] || { echo "agent socket not cleaned up on quit"; cat "$LOG"; exit 1; }
 grep -q "shutting down" "$LOG" || { echo "no clean shutdown logged"; cat "$LOG"; exit 1; }
+cat "$LOG" | tail -5
 echo "clean shutdown OK"
 echo "smoke test passed"
