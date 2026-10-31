@@ -35,6 +35,7 @@ for _ in $(seq 1 30); do
 done
 sleep 2   # give the AX observer time to report the same banner
 
+echo "--- notification-related processes:"; ps -axo pid,comm | grep -i -E "notification|usernoted" | grep -v grep || true
 DB=$(grep -c "notification ingested.*NotificationCenterDb" "$LOG" || true)
 AX=$(grep -c "notification ingested.*AccessibilityBanner" "$LOG" || true)
 OBS=$(grep -c "observing Notification Center banners via Accessibility" "$LOG" || true)
