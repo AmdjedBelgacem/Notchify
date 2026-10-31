@@ -323,8 +323,9 @@ impl Engine {
         let flags = PipelineFlags { paused: self.state.paused, focus_active: self.state.focus.active == Some(true) };
         let from_system = matches!(n.origin, Origin::NotificationCenterDb | Origin::AccessibilityBanner);
         let now = now_ms();
+        let (origin, app) = (n.origin, n.app.display_name.clone());
         let outcome = self.state.pipeline.ingest(n, &cfg.notifications, flags, now);
-        tracing::debug!(?outcome, "notification ingested");
+        tracing::debug!(?outcome, ?origin, %app, "notification ingested");
         let (id, peekable) = match outcome {
             Outcome::Accepted { id, priority } => (id, priority >= cfg.general.peek_min_priority),
             Outcome::Grouped { id, rate_limited } => (id, !rate_limited),
