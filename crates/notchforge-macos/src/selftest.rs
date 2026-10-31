@@ -284,6 +284,9 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 r.metrics.insert("close_animation".into(), anim_json(anim));
             }
             check_settled(ctx, "collapse", &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings]);
+            // Park the pointer well away from the notch: a pointer resting under
+            // the notch would (correctly) turn the upcoming peek into a hover.
+            post_mouse(mtm, cg::kCGEventMouseMoved, NSPoint::new(center.x, center.y - 400.0));
         }
         // ── a notification peeks out ──
         11 => app::send(Command::Inject(Box::new(NewNotification {
