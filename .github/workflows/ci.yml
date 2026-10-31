@@ -36,6 +36,8 @@ jobs:
       - run: cargo test --workspace
       - run: packaging/bundle.sh
       - run: packaging/smoke_test.sh
+      - name: Live providers (weather, batteries, agents, Notification Center, Focus)
+        run: packaging/providers_test.sh
       - name: System notification paths (Notification Center DB + Accessibility banners)
         run: packaging/system_paths_test.sh
       - name: UI self-test (drives hover, click, drop, Escape, peek, settings)
