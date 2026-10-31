@@ -103,13 +103,18 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
         tasks.push(runtime.spawn(watch_config_file(paths.clone(), config_rx, handle.clone(), shutdown.clone())));
     }
 
+    // Removed again after shutdown as a safety net (the socket provider normally
+    // deletes it itself), so a stale socket never outlives the process.
+    let socket_path = paths.socket_path(&config.agents);
+
     if headless {
         if !args.headless {
             tracing::warn!("the notch UI needs macOS; running headless");
         }
         tracing::info!(port = config.agents.http_port, "headless mode: press Ctrl-C to quit");
-        runtime.block_on(wait_for_termination());
-        stop(&trigger, runtime, tasks);
+        let termination = runtime.block_on(async { Termination::install() });
+        runtime.block_on(termination.wait());
+        stop(&trigger, runtime, tasks, &socket_path);
         return Ok(());
     }
 
@@ -123,29 +128,67 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
         runtime,
         tasks,
         self_test: args.self_test,
+        socket_path,
     })
 }
 
-/// Resolves on SIGINT (Ctrl-C) or SIGTERM (`kill`, launchd, logout).
-async fn wait_for_termination() {
+/// SIGINT (Ctrl-C) / SIGTERM (`kill`, launchd, logout) listener.
+///
+/// The handlers are installed when this is *created* (synchronously, before
+/// the UI starts), so there is no window in which the default action could kill
+/// the process without a clean shutdown.
+struct Termination {
     #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-        match signal(SignalKind::terminate()) {
-            Ok(mut term) => {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {}
-                    _ = term.recv() => {}
-                }
-            }
-            Err(_) => {
-                let _ = tokio::signal::ctrl_c().await;
-            }
+    int: Option<tokio::signal::unix::Signal>,
+    #[cfg(unix)]
+    term: Option<tokio::signal::unix::Signal>,
+}
+
+impl Termination {
+    /// Must be called inside the runtime.
+    fn install() -> Self {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let int = signal(SignalKind::interrupt()).map_err(|e| tracing::warn!(error = %e, "no SIGINT handler")).ok();
+            let term =
+                signal(SignalKind::terminate()).map_err(|e| tracing::warn!(error = %e, "no SIGTERM handler")).ok();
+            Self { int, term }
+        }
+        #[cfg(not(unix))]
+        {
+            Self {}
         }
     }
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
+
+    async fn wait(mut self) {
+        #[cfg(unix)]
+        {
+            let int = async {
+                match self.int.as_mut() {
+                    Some(s) => {
+                        s.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            let term = async {
+                match self.term.as_mut() {
+                    Some(s) => {
+                        s.recv().await;
+                    }
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            tokio::select! {
+                _ = int => {}
+                _ = term => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
     }
 }
 
@@ -161,11 +204,17 @@ struct Launch {
     runtime: tokio::runtime::Runtime,
     tasks: Vec<JoinHandle<()>>,
     self_test: Option<std::path::PathBuf>,
+    socket_path: std::path::PathBuf,
 }
 
 /// Signal shutdown and give every task up to a second to finish cleanly
 /// (providers remove their socket, the engine persists the tray).
-fn stop(trigger: &ShutdownTrigger, runtime: tokio::runtime::Runtime, tasks: Vec<JoinHandle<()>>) {
+fn stop(
+    trigger: &ShutdownTrigger,
+    runtime: tokio::runtime::Runtime,
+    tasks: Vec<JoinHandle<()>>,
+    socket: &std::path::Path,
+) {
     tracing::info!("shutting down");
     trigger.trigger();
     runtime.block_on(async {
@@ -180,6 +229,10 @@ fn stop(trigger: &ShutdownTrigger, runtime: tokio::runtime::Runtime, tasks: Vec<
         }
     });
     runtime.shutdown_timeout(Duration::from_millis(200));
+    if socket.exists() {
+        tracing::debug!(path = %socket.display(), "removing leftover agent socket");
+        let _ = std::fs::remove_file(socket);
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -195,14 +248,17 @@ fn ui_sink(_headless: bool) -> Arc<dyn UiSink> {
 #[cfg(target_os = "macos")]
 fn run_ui(l: Launch) -> anyhow::Result<()> {
     // AppKit owns the main thread, so turn Ctrl-C / SIGTERM into a regular quit.
-    l.runtime.spawn(async {
-        wait_for_termination().await;
+    let termination = l.runtime.block_on(async { Termination::install() });
+    l.runtime.spawn(async move {
+        termination.wait().await;
+        tracing::info!("termination signal received");
         notchforge_macos::app::request_quit();
     });
+    let socket = l.socket_path;
     let state = std::cell::RefCell::new(Some((l.trigger, l.runtime, l.tasks)));
     let on_quit = Box::new(move || {
         if let Some((trigger, rt, tasks)) = state.borrow_mut().take() {
-            stop(&trigger, rt, tasks);
+            stop(&trigger, rt, tasks, &socket);
         }
     });
     notchforge_macos::app::run(notchforge_macos::app::Boot {
