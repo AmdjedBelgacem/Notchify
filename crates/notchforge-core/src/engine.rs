@@ -9,18 +9,18 @@
 use crate::apps::AppRef;
 use crate::config::{Config, Paths};
 use crate::model::{
-    BatteryStatus, DeviceBattery, FocusState, NewNotification, Notification, NotificationId, NotificationKind, Origin,
-    Priority, ProviderStatus, TrayItem, TrayItemId, Weather,
+    AudioState, BatteryStatus, DeviceBattery, FocusState, MediaState, NewNotification, Notification, NotificationId,
+    NotificationKind, Origin, Priority, ProviderStatus, TrayItem, TrayItemId, Weather,
 };
 use crate::pipeline::{Outcome, Pipeline, PipelineFlags};
-use crate::provider::{ProviderEvent, Shutdown};
+use crate::provider::{ProviderCommand, ProviderEvent, Shutdown};
 use crate::time::now_ms;
 use crate::tray::Tray;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Notify, mpsc, watch};
+use tokio::sync::{Notify, broadcast, mpsc, watch};
 use tokio::time::Instant;
 
 /// Minimum interval between two published snapshots.
@@ -48,6 +48,8 @@ pub enum Command {
     Refresh,
     /// Inject a notification (used by the UI for internal alerts and tests).
     Inject(Box<NewNotification>),
+    /// Forward a request to the providers (media controls, output switching…).
+    Provider(ProviderCommand),
 }
 
 /// Immutable view of the state handed to the UI.
@@ -59,6 +61,8 @@ pub struct Snapshot {
     pub devices: Vec<DeviceBattery>,
     pub weather: Option<Weather>,
     pub focus: FocusState,
+    pub audio: AudioState,
+    pub media: MediaState,
     /// Ranked: priority, then recency.
     pub notifications: Vec<Notification>,
     pub latest: Option<Notification>,
@@ -71,7 +75,15 @@ pub struct Snapshot {
 impl Snapshot {
     /// Whether the collapsed notch should show live indicators either side.
     pub fn wants_wings(&self) -> bool {
-        self.unread > 0 || !self.tray.is_empty() || self.battery.as_ref().is_some_and(|b| b.charging || b.is_low())
+        self.wants_wings_with(true)
+    }
+
+    /// Like [`Snapshot::wants_wings`], optionally ignoring playing media.
+    pub fn wants_wings_with(&self, media: bool) -> bool {
+        self.unread > 0
+            || !self.tray.is_empty()
+            || (media && self.media.is_playing())
+            || self.battery.as_ref().is_some_and(|b| b.charging || b.is_low())
     }
 }
 
@@ -94,6 +106,8 @@ struct AppState {
     devices: Vec<DeviceBattery>,
     weather: Option<Weather>,
     focus: FocusState,
+    audio: AudioState,
+    media: MediaState,
     pipeline: Pipeline,
     tray: Tray,
     providers: BTreeMap<&'static str, ProviderStatus>,
@@ -121,6 +135,7 @@ pub struct Engine {
     paths: Arc<Paths>,
     sink: Arc<dyn UiSink>,
     refresh: Arc<Notify>,
+    provider_commands: broadcast::Sender<ProviderCommand>,
     events: mpsc::Receiver<ProviderEvent>,
     commands: mpsc::UnboundedReceiver<Command>,
     generation: u64,
@@ -133,6 +148,7 @@ impl Engine {
         paths: Arc<Paths>,
         sink: Arc<dyn UiSink>,
         refresh: Arc<Notify>,
+        provider_commands: broadcast::Sender<ProviderCommand>,
         events: mpsc::Receiver<ProviderEvent>,
     ) -> (Self, EngineHandle) {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -149,6 +165,7 @@ impl Engine {
             paths,
             sink,
             refresh,
+            provider_commands,
             events,
             commands: cmd_rx,
             generation: 0,
@@ -212,6 +229,8 @@ impl Engine {
             devices: s.devices.clone(),
             weather: s.weather.clone(),
             focus: s.focus.clone(),
+            audio: s.audio.clone(),
+            media: s.media.clone(),
             notifications: s.pipeline.ranked(),
             latest: s.pipeline.latest().cloned(),
             unread: s.pipeline.unread_count(),
@@ -249,6 +268,16 @@ impl Engine {
             ProviderEvent::Focus(f) => {
                 let changed = self.state.focus != f;
                 self.state.focus = f;
+                changed
+            }
+            ProviderEvent::Audio(a) => {
+                let changed = self.state.audio != a;
+                self.state.audio = a;
+                changed
+            }
+            ProviderEvent::Media(m) => {
+                let changed = self.state.media != m;
+                self.state.media = m;
                 changed
             }
             ProviderEvent::Status { provider, status } => {
@@ -315,6 +344,11 @@ impl Engine {
                 pruned
             }
             Command::Inject(n) => self.ingest(*n),
+            Command::Provider(c) => {
+                // No receivers just means the relevant provider is disabled.
+                let _ = self.provider_commands.send(c);
+                false
+            }
         }
     }
 
@@ -395,7 +429,7 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::apps::KnownApp;
-    use crate::model::{BatteryComponent, DeviceKind};
+    use crate::model::{BatteryComponent, DeviceKind, MediaAction, MediaPlayer, NowPlaying, PlaybackState};
     use crate::provider::shutdown_pair;
     use std::sync::Mutex;
 
@@ -420,7 +454,8 @@ mod tests {
         let (cfg_tx, _rx) = watch::channel(Arc::new(Config::default()));
         let rec = Arc::new(Recorder::default());
         let (ev_tx, ev_rx) = mpsc::channel(1024);
-        let (e, h) = Engine::new(cfg_tx, paths, rec.clone(), Arc::new(Notify::new()), ev_rx);
+        let (e, h) =
+            Engine::new(cfg_tx, paths, rec.clone(), Arc::new(Notify::new()), crate::provider::command_channel(), ev_rx);
         (e, h, rec, ev_tx)
     }
 
@@ -516,6 +551,59 @@ mod tests {
         e.apply_command(Command::TrayRemove(snap.tray[0].id));
         assert!(e.snapshot().tray.is_empty());
         let _ = std::fs::remove_file(f);
+    }
+
+    fn track(player: MediaPlayer, state: PlaybackState, at: i64) -> NowPlaying {
+        NowPlaying {
+            player,
+            state,
+            title: "Song".into(),
+            artist: "Artist".into(),
+            album: "Album".into(),
+            duration: Some(200.0),
+            position: Some(10.0),
+            sampled_at_ms: at,
+            track_id: None,
+            artwork_path: None,
+            shuffle: None,
+            repeat: None,
+            volume: None,
+        }
+    }
+
+    #[test]
+    fn media_events_update_snapshot_and_wings() {
+        let (mut e, _h, _rec, _tx) = engine();
+        let media = MediaState {
+            players: vec![track(MediaPlayer::Spotify, PlaybackState::Playing, 1)],
+            running: vec![MediaPlayer::Spotify],
+            ..MediaState::default()
+        };
+        assert!(e.apply_event(ProviderEvent::Media(media.clone())));
+        assert!(!e.apply_event(ProviderEvent::Media(media)), "identical media state is not a change");
+        let snap = e.snapshot();
+        assert!(snap.wants_wings());
+        assert_eq!(snap.media.primary().map(|p| p.player), Some(MediaPlayer::Spotify));
+    }
+
+    #[test]
+    fn provider_commands_are_forwarded() {
+        let dir = std::env::temp_dir().join(format!("nf-engine-cmd-{}-{}", std::process::id(), now_ms()));
+        let (cfg_tx, _rx) = watch::channel(Arc::new(Config::default()));
+        let (_ev_tx, ev_rx) = mpsc::channel(4);
+        let commands = crate::provider::command_channel();
+        let mut sub = commands.subscribe();
+        let (mut e, _h) = Engine::new(
+            cfg_tx,
+            Arc::new(Paths::rooted(&dir)),
+            Arc::new(Recorder::default()),
+            Arc::new(Notify::new()),
+            commands,
+            ev_rx,
+        );
+        let cmd = ProviderCommand::Media { player: MediaPlayer::Music, action: MediaAction::Next };
+        e.apply_command(Command::Provider(cmd.clone()));
+        assert_eq!(sub.try_recv().expect("forwarded"), cmd);
     }
 
     #[tokio::test]

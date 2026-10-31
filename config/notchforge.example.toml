@@ -41,6 +41,8 @@ agents = true                  # HTTP webhook, Unix socket, JSONL inbox
 notification_center = true     # needs Full Disk Access
 accessibility_banners = false  # fallback banner reader, needs Accessibility
 focus = true                   # Focus/DND state, needs Full Disk Access
+audio = true                   # output devices, capabilities, apps playing audio (CoreAudio)
+media = true                   # Spotify & Apple Music player + playlists, needs Automation
 
 [weather]
 # "auto" uses CoreLocation (needs Location permission); or a place name.
@@ -117,3 +119,19 @@ focus_on_shortcut = "NotchForge Focus On"
 focus_off_shortcut = "NotchForge Focus Off"
 # Resolution changes revert automatically unless confirmed within this time.
 resolution_confirm_secs = 15
+
+[media]
+# Show the playing track's cover (left) and an equaliser (right) beside the
+# notch while Spotify or Apple Music plays.
+show_in_wings = true
+# Safety-net refresh while a player is running. Players announce track and
+# play/pause changes themselves, so the notch updates instantly anyway.
+poll_seconds = 10
+# Optional: client ID of your own Spotify app (developer.spotify.com/dashboard),
+# needed only to list Spotify playlists. Register the redirect URI
+# http://127.0.0.1:47816/callback, paste the ID here (or in Settings › Media)
+# and click "Connect…". Playback controls work without it.
+spotify_client_id = ""
+spotify_redirect_port = 47816
+# Maximum playlists listed per player.
+max_playlists = 100

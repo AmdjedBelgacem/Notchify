@@ -21,6 +21,8 @@ pub mod location;
 #[cfg(target_os = "macos")]
 pub mod login_item;
 #[cfg(target_os = "macos")]
+pub mod media;
+#[cfg(target_os = "macos")]
 pub mod menubar;
 #[cfg(target_os = "macos")]
 pub mod panel;

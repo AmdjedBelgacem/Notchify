@@ -127,6 +127,7 @@ pub fn rgb8((r, g, b): (u8, u8, u8)) -> Retained<NSColor> {
 }
 
 /// Text colours tuned for the black island.
+#[derive(Clone)]
 pub struct Palette {
     pub primary: Retained<NSColor>,
     pub secondary: Retained<NSColor>,
@@ -269,6 +270,40 @@ pub fn icon_button(
     set_accessibility_label(&b, tooltip);
     b.setFrame(frame);
     b
+}
+
+/// Invisible button covering `frame`: makes a composite row clickable.
+pub fn click_overlay(mtm: MainThreadMarker, target: &ActionTarget, frame: NSRect, label: &str) -> Retained<NSButton> {
+    // SAFETY: valid target/selector; target is kept alive by the caller.
+    let b = unsafe {
+        NSButton::buttonWithTitle_target_action(&ns(""), Some(target.as_any()), Some(ActionTarget::action()), mtm)
+    };
+    b.setBordered(false);
+    b.setTransparent(true);
+    b.setFrame(frame);
+    set_accessibility_label(&b, label);
+    b
+}
+
+/// [`icon_button`] with a custom symbol size.
+pub fn symbol_button(
+    mtm: MainThreadMarker,
+    symbol: &str,
+    point_size: f64,
+    tooltip: &str,
+    tint: &NSColor,
+    target: &ActionTarget,
+    frame: NSRect,
+) -> Retained<NSButton> {
+    let b = icon_button(mtm, symbol, tooltip, tint, target, frame);
+    b.setImage(symbol_image(symbol, point_size, tooltip).as_deref());
+    b
+}
+
+pub fn set_button_symbol(b: &NSButton, symbol: &str, point_size: f64, tooltip: &str) {
+    b.setImage(symbol_image(symbol, point_size, tooltip).as_deref());
+    b.setToolTip(Some(&ns(tooltip)));
+    set_accessibility_label(b, tooltip);
 }
 
 pub fn text_button(mtm: MainThreadMarker, title: &str, target: &ActionTarget, frame: NSRect) -> Retained<NSButton> {

@@ -13,13 +13,14 @@
 //! └──────────────────────────────────────────────────────────┘
 //! ```
 
+use super::media::MediaPage;
 use super::{app_icon_view, battery_text, device_levels, set_app_icon, temperature};
 use crate::app::with_controller;
 use crate::controls::{brightness, display_modes, volume};
 use crate::panel::TrayItemView;
 use crate::ui::{
     FlippedView, Palette, Targets, Weight, font, icon_button, label, make_card, mono_digits, rect, remove_all_subviews,
-    set_accessibility_label, set_symbol, set_text, symbol_view, wrapping_label,
+    set_accessibility_label, set_symbol, set_text, symbol_button, symbol_view, wrapping_label,
 };
 use notchforge_core::config::Config;
 use notchforge_core::engine::{Command, EngineHandle, Snapshot};
@@ -49,8 +50,21 @@ const TILE: f64 = 72.0;
 type TrayAction = Box<dyn Fn(Vec<PathBuf>, &EngineHandle)>;
 type Action = Box<dyn Fn()>;
 
+/// Pages of the expanded panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Overview,
+    Media,
+}
+
 pub struct ExpandedView {
     pub root: Retained<FlippedView>,
+    overview: Retained<FlippedView>,
+    pub media: MediaPage,
+    tab: Cell<Tab>,
+    tab_buttons: Vec<Retained<objc2_app_kit::NSButton>>,
+    /// The panel is expanded (drives the music page's ticker).
+    visible: Cell<bool>,
     mtm: MainThreadMarker,
     palette: Palette,
     engine: EngineHandle,
@@ -122,8 +136,13 @@ impl ExpandedView {
         // ── top row beside the notch ──
         let side = (w - layout.notch.rect.width) / 2.0 - PAD - 12.0;
         let ty = (nh - 16.0) / 2.0;
-        let top_left =
-            label(mtm, "", &mono_digits(12.5, Weight::Semibold), &p.primary, rect(PAD + 6.0, ty, side, 16.0));
+        let top_left = label(
+            mtm,
+            "",
+            &mono_digits(12.5, Weight::Semibold),
+            &p.primary,
+            rect(PAD + 58.0, ty, (side - 52.0).max(40.0), 16.0),
+        );
         let top_right = label(
             mtm,
             "",
@@ -134,6 +153,11 @@ impl ExpandedView {
         top_right.setAlignment(NSTextAlignment::Right);
         root.addSubview(&top_left);
         root.addSubview(&top_right);
+
+        // Overview content lives in its own container so the music page can
+        // replace it; both share the root's coordinate space.
+        let overview = FlippedView::new(mtm, rect(0.0, 0.0, w, h));
+        root.addSubview(&overview);
 
         let body_y = nh + 8.0;
         let body_h = h - body_y - 14.0;
@@ -152,10 +176,10 @@ impl ExpandedView {
             &p.secondary,
             rect(c1x + 2.0, body_y, c1w - 60.0, 16.0),
         );
-        root.addSubview(&notif_header);
+        overview.addSubview(&notif_header);
         let eng = engine.clone();
         let t = targets.add(mtm, move |_| eng.send(Command::ClearNotifications));
-        root.addSubview(&icon_button(
+        overview.addSubview(&icon_button(
             mtm,
             "trash",
             "Clear all notifications",
@@ -165,12 +189,12 @@ impl ExpandedView {
         ));
         let notif_doc = FlippedView::new(mtm, rect(0.0, 0.0, c1w, body_h - 22.0));
         let notif_scroll = scroll_view(mtm, rect(c1x, body_y + 22.0, c1w, body_h - 22.0), &notif_doc);
-        root.addSubview(&notif_scroll);
+        overview.addSubview(&notif_scroll);
 
         // ── tray column ──
         let tray_header =
             label(mtm, "Tray", &font(12.0, Weight::Semibold), &p.secondary, rect(c2x + 2.0, body_y, c2w - 4.0, 16.0));
-        root.addSubview(&tray_header);
+        overview.addSubview(&tray_header);
         let box_h = body_h - 22.0 - 30.0;
         let tray_box = FlippedView::new(mtm, rect(c2x, body_y + 22.0, c2w, box_h));
         make_card(&tray_box, &p.card, 14.0);
@@ -197,7 +221,7 @@ impl ExpandedView {
         hint.setAlignment(NSTextAlignment::Center);
         tray_empty.addSubview(&hint);
         tray_box.addSubview(&tray_empty);
-        root.addSubview(&tray_box);
+        overview.addSubview(&tray_box);
 
         let by = body_y + 22.0 + box_h + 6.0;
         let bw = 26.0;
@@ -220,7 +244,7 @@ impl ExpandedView {
                 let paths = with_controller(|c| c.tray_paths()).unwrap_or_default();
                 action(paths, &eng);
             });
-            root.addSubview(&icon_button(
+            overview.addSubview(&icon_button(
                 mtm,
                 sym,
                 tip,
@@ -242,10 +266,10 @@ impl ExpandedView {
         for v in [&*weather_icon as &NSView, &weather_temp, &weather_desc, &hourly] {
             weather_card.addSubview(v);
         }
-        root.addSubview(&weather_card);
+        overview.addSubview(&weather_card);
 
         let devices = FlippedView::new(mtm, rect(c3x, body_y + 110.0, c3w, 50.0));
-        root.addSubview(&devices);
+        overview.addSubview(&devices);
 
         let mut y = body_y + 164.0;
         let slider_row = |sym: &str, tip: &str, action: Box<dyn Fn(f32)>, y: f64| {
@@ -272,7 +296,7 @@ impl ExpandedView {
             slider.setFrame(rect(24.0, 2.0, c3w - 26.0, 18.0));
             set_accessibility_label(&slider, tip);
             row.addSubview(&slider);
-            root.addSubview(&row);
+            overview.addSubview(&row);
             (row, slider)
         };
         let (brightness_row, brightness_slider) = slider_row(
@@ -313,7 +337,7 @@ impl ExpandedView {
             resolution.setTarget(Some(t.as_any()));
             resolution.setAction(Some(crate::ui::ActionTarget::action()));
         }
-        root.addSubview(&resolution);
+        overview.addSubview(&resolution);
         y += 30.0;
 
         let buttons: [(&str, &str, Action); 4] = [
@@ -355,11 +379,43 @@ impl ExpandedView {
             if i == 1 {
                 *pause_button.borrow_mut() = Some(b.clone());
             }
-            root.addSubview(&b);
+            overview.addSubview(&b);
         }
 
+        // ── music page + tab buttons (added last so they sit on top) ──
+        let media = MediaPage::new(mtm, w, h, body_y, p);
+        media.root.setHidden(true);
+        root.addSubview(&media.root);
+        let tabs: [(&str, &str, Tab); 2] =
+            [("square.grid.2x2.fill", "Overview", Tab::Overview), ("music.note", "Now Playing", Tab::Media)];
+        let tab_buttons: Vec<Retained<objc2_app_kit::NSButton>> = tabs
+            .iter()
+            .enumerate()
+            .map(|(i, (sym, tip, tab))| {
+                let tab = *tab;
+                let t = targets.add(mtm, move |_| {
+                    with_controller(|c| c.show_expanded_tab(tab));
+                });
+                let b = symbol_button(
+                    mtm,
+                    sym,
+                    11.0,
+                    tip,
+                    &p.tertiary,
+                    &t,
+                    rect(PAD + i as f64 * 26.0, ty - 3.0, 24.0, 22.0),
+                );
+                root.addSubview(&b);
+                b
+            })
+            .collect();
         Self {
             root,
+            overview,
+            media,
+            tab: Cell::new(Tab::Overview),
+            tab_buttons,
+            visible: Cell::new(false),
             mtm,
             palette,
             engine,
@@ -394,6 +450,34 @@ impl ExpandedView {
             display_id: Cell::new(layout.screen.id),
             pause_button,
             last_rendered: Cell::new(0),
+        }
+    }
+
+    pub fn tab(&self) -> Tab {
+        self.tab.get()
+    }
+
+    /// Switch pages. Opening the music page asks the providers for fresh data.
+    pub fn show_tab(&self, tab: Tab) {
+        let previous = self.tab.replace(tab);
+        self.overview.setHidden(tab != Tab::Overview);
+        self.media.root.setHidden(tab != Tab::Media);
+        for (b, t) in self.tab_buttons.iter().zip([Tab::Overview, Tab::Media]) {
+            b.setContentTintColor(Some(if t == tab { &self.palette.primary } else { &self.palette.tertiary }));
+        }
+        self.media.set_active(self.visible.get() && tab == Tab::Media);
+        if tab == Tab::Media && previous != Tab::Media {
+            crate::media::send(notchforge_core::provider::ProviderCommand::MediaChanged(None));
+            crate::media::send(notchforge_core::provider::ProviderCommand::ReloadPlaylists);
+        }
+    }
+
+    /// The panel opened or closed.
+    pub fn set_visible(&self, visible: bool) {
+        self.visible.set(visible);
+        self.media.set_active(visible && self.tab.get() == Tab::Media);
+        if visible && self.tab.get() == Tab::Media {
+            crate::media::send(notchforge_core::provider::ProviderCommand::MediaChanged(None));
         }
     }
 
@@ -437,6 +521,7 @@ impl ExpandedView {
             .unwrap_or_default();
         set_text(&self.top_right, &right);
 
+        self.media.update(snap);
         self.render_notifications(snap);
         self.render_tray(snap);
 

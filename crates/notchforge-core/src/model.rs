@@ -452,6 +452,369 @@ pub struct FocusState {
 }
 
 // ---------------------------------------------------------------------------
+// Audio & media
+// ---------------------------------------------------------------------------
+
+/// How an audio device is attached (CoreAudio `kAudioDevicePropertyTransportType`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioTransport {
+    BuiltIn,
+    Bluetooth,
+    Usb,
+    AirPlay,
+    Hdmi,
+    DisplayPort,
+    Thunderbolt,
+    Pci,
+    Virtual,
+    Aggregate,
+    #[default]
+    Other,
+}
+
+impl AudioTransport {
+    /// Map a CoreAudio transport four-char code.
+    pub fn from_fourcc(code: u32) -> AudioTransport {
+        match &code.to_be_bytes() {
+            b"bltn" => AudioTransport::BuiltIn,
+            b"blue" | b"blea" => AudioTransport::Bluetooth,
+            b"usb " => AudioTransport::Usb,
+            b"airp" => AudioTransport::AirPlay,
+            b"hdmi" => AudioTransport::Hdmi,
+            b"dprt" => AudioTransport::DisplayPort,
+            b"thun" => AudioTransport::Thunderbolt,
+            b"pci " => AudioTransport::Pci,
+            b"virt" => AudioTransport::Virtual,
+            b"grup" | b"agrp" => AudioTransport::Aggregate,
+            _ => AudioTransport::Other,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AudioTransport::BuiltIn => "Built-in",
+            AudioTransport::Bluetooth => "Bluetooth",
+            AudioTransport::Usb => "USB",
+            AudioTransport::AirPlay => "AirPlay",
+            AudioTransport::Hdmi => "HDMI",
+            AudioTransport::DisplayPort => "DisplayPort",
+            AudioTransport::Thunderbolt => "Thunderbolt",
+            AudioTransport::Pci => "PCI",
+            AudioTransport::Virtual => "Virtual",
+            AudioTransport::Aggregate => "Aggregate",
+            AudioTransport::Other => "Other",
+        }
+    }
+}
+
+/// An audio output device and what it can do.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioDevice {
+    /// CoreAudio object id (valid for this boot only).
+    pub id: u32,
+    /// Persistent device UID; used to switch outputs.
+    pub uid: String,
+    pub name: String,
+    pub transport: AudioTransport,
+    /// Current nominal sample rate in Hz.
+    pub sample_rate: Option<f64>,
+    /// Highest sample rate the device supports, in Hz.
+    pub max_sample_rate: Option<f64>,
+    /// Bits per channel of the physical stream format.
+    pub bit_depth: Option<u32>,
+    pub output_channels: u32,
+    pub volume: Option<f32>,
+    pub muted: Option<bool>,
+    /// The current default output device.
+    pub is_default: bool,
+}
+
+impl AudioDevice {
+    pub fn symbol(&self) -> &'static str {
+        let n = self.name.to_ascii_lowercase();
+        match self.transport {
+            AudioTransport::Bluetooth if n.contains("airpods max") => "airpodsmax",
+            AudioTransport::Bluetooth if n.contains("airpods pro") => "airpodspro",
+            AudioTransport::Bluetooth if n.contains("airpods") => "airpods",
+            AudioTransport::Bluetooth if n.contains("homepod") => "homepod.fill",
+            AudioTransport::Bluetooth => "headphones",
+            AudioTransport::AirPlay if n.contains("homepod") => "homepod.fill",
+            AudioTransport::AirPlay if n.contains("tv") => "appletv.fill",
+            AudioTransport::AirPlay => "airplayaudio",
+            AudioTransport::Hdmi | AudioTransport::DisplayPort | AudioTransport::Thunderbolt => "tv",
+            AudioTransport::Usb => "hifispeaker.fill",
+            AudioTransport::BuiltIn if n.contains("headphone") => "headphones",
+            AudioTransport::BuiltIn => "laptopcomputer",
+            _ => "speaker.wave.2.fill",
+        }
+    }
+
+    /// Short capability line, e.g. "Bluetooth · 48 kHz · 24-bit · Stereo".
+    pub fn capabilities(&self) -> String {
+        let mut parts = vec![self.transport.label().to_owned()];
+        if let Some(sr) = self.sample_rate {
+            parts.push(format_khz(sr));
+        }
+        if let Some(b) = self.bit_depth.filter(|b| *b > 0) {
+            parts.push(format!("{b}-bit"));
+        }
+        parts.push(match self.output_channels {
+            0 => "No outputs".into(),
+            1 => "Mono".into(),
+            2 => "Stereo".into(),
+            n => format!("{n} ch"),
+        });
+        if let Some(max) = self.max_sample_rate.filter(|m| self.sample_rate.is_none_or(|sr| *m > sr + 1.0)) {
+            parts.push(format!("up to {}", format_khz(max)));
+        }
+        parts.join(" · ")
+    }
+}
+
+/// `48000.0` → `"48 kHz"`, `44100.0` → `"44.1 kHz"`.
+pub fn format_khz(hz: f64) -> String {
+    let k = hz / 1000.0;
+    if (k - k.round()).abs() < 0.05 { format!("{:.0} kHz", k) } else { format!("{:.1} kHz", k) }
+}
+
+/// An application currently producing audio, and where it is going.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioSource {
+    /// The app the user would recognise (helpers are mapped to their parent app).
+    pub pid: i32,
+    pub name: String,
+    pub bundle_id: Option<String>,
+    /// Path of the `.app` bundle, used for the icon.
+    pub app_path: Option<String>,
+    /// UIDs of the output devices this app is playing to (empty when unknown).
+    pub device_uids: Vec<String>,
+}
+
+/// Output devices plus the apps playing audio right now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct AudioState {
+    pub devices: Vec<AudioDevice>,
+    pub sources: Vec<AudioSource>,
+    /// Per-app audio activity needs macOS 14.2+; older systems only report devices.
+    pub sources_supported: bool,
+}
+
+impl AudioState {
+    pub fn default_device(&self) -> Option<&AudioDevice> {
+        self.devices.iter().find(|d| d.is_default)
+    }
+
+    pub fn device(&self, uid: &str) -> Option<&AudioDevice> {
+        self.devices.iter().find(|d| d.uid == uid)
+    }
+
+    /// "Spotify → AirPods Pro" style summary of one source.
+    pub fn route_label(&self, source: &AudioSource) -> String {
+        let names: Vec<&str> =
+            source.device_uids.iter().filter_map(|u| self.device(u).map(|d| d.name.as_str())).collect();
+        match (names.is_empty(), self.default_device()) {
+            (false, _) => names.join(", "),
+            (true, Some(d)) => d.name.clone(),
+            (true, None) => "Unknown output".into(),
+        }
+    }
+}
+
+/// Media players with a rich integration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaPlayer {
+    Spotify,
+    Music,
+}
+
+impl MediaPlayer {
+    pub const ALL: [MediaPlayer; 2] = [MediaPlayer::Spotify, MediaPlayer::Music];
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            MediaPlayer::Spotify => "Spotify",
+            MediaPlayer::Music => "Apple Music",
+        }
+    }
+
+    pub fn bundle_id(self) -> &'static str {
+        match self {
+            MediaPlayer::Spotify => "com.spotify.client",
+            MediaPlayer::Music => "com.apple.Music",
+        }
+    }
+
+    pub fn from_bundle_id(id: &str) -> Option<MediaPlayer> {
+        MediaPlayer::ALL.into_iter().find(|p| p.bundle_id().eq_ignore_ascii_case(id))
+    }
+
+    /// Brand colour (sRGB).
+    pub fn color(self) -> (u8, u8, u8) {
+        match self {
+            MediaPlayer::Spotify => (30, 215, 96),
+            MediaPlayer::Music => (250, 45, 72),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackState {
+    Playing,
+    Paused,
+    #[default]
+    Stopped,
+}
+
+/// What a player is doing right now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NowPlaying {
+    pub player: MediaPlayer,
+    pub state: PlaybackState,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    /// Track length in seconds.
+    pub duration: Option<f64>,
+    /// Playback position in seconds at `sampled_at_ms`.
+    pub position: Option<f64>,
+    pub sampled_at_ms: i64,
+    /// Player-specific track identifier (Spotify URI / Music persistent ID).
+    pub track_id: Option<String>,
+    /// Local file holding the cover art, once downloaded/exported.
+    pub artwork_path: Option<PathBuf>,
+    pub shuffle: Option<bool>,
+    pub repeat: Option<bool>,
+    /// Player's own volume, 0–100.
+    pub volume: Option<u8>,
+}
+
+impl NowPlaying {
+    pub fn is_playing(&self) -> bool {
+        self.state == PlaybackState::Playing
+    }
+
+    /// Position extrapolated to `now_ms` while playing, clamped to the duration.
+    pub fn position_at(&self, now_ms: i64) -> Option<f64> {
+        let p = self.position?;
+        let elapsed = if self.is_playing() { (now_ms - self.sampled_at_ms).max(0) as f64 / 1000.0 } else { 0.0 };
+        let p = p + elapsed;
+        Some(match self.duration {
+            Some(d) if d > 0.0 => p.min(d),
+            _ => p,
+        })
+    }
+
+    /// "Artist — Album", skipping empty parts.
+    pub fn subtitle(&self) -> String {
+        [self.artist.as_str(), self.album.as_str()]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" — ")
+    }
+
+    /// Same track (ignoring position/state), so the UI can skip artwork reloads.
+    pub fn same_track(&self, other: &NowPlaying) -> bool {
+        self.player == other.player
+            && match (&self.track_id, &other.track_id) {
+                (Some(a), Some(b)) => a == b,
+                _ => self.title == other.title && self.artist == other.artist && self.album == other.album,
+            }
+    }
+}
+
+/// A playlist from Spotify or Apple Music.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Playlist {
+    pub player: MediaPlayer,
+    /// Spotify URI (`spotify:playlist:…`) or Music persistent ID.
+    pub id: String,
+    pub name: String,
+    pub track_count: Option<u32>,
+    pub owner: Option<String>,
+    /// Remote cover art (Spotify).
+    pub artwork_url: Option<String>,
+    /// Cover art cached locally by the provider.
+    pub artwork_path: Option<PathBuf>,
+}
+
+/// Playlist availability per player.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case", tag = "state", content = "detail")]
+pub enum PlaylistStatus {
+    #[default]
+    Unknown,
+    Loaded,
+    /// Spotify needs a Web API client ID / sign-in to list playlists.
+    NeedsSpotifyLogin,
+    /// macOS Automation permission was denied for this player.
+    NeedsAutomation,
+    Failed(String),
+}
+
+/// Rich media state: every running player plus playlists.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MediaState {
+    /// One entry per *running* player that has a current track.
+    pub players: Vec<NowPlaying>,
+    /// Which supported players are running at all.
+    pub running: Vec<MediaPlayer>,
+    pub playlists: Vec<Playlist>,
+    pub playlist_status: Vec<(MediaPlayer, PlaylistStatus)>,
+    /// Players whose Automation permission was denied.
+    pub automation_denied: Vec<MediaPlayer>,
+}
+
+impl MediaState {
+    /// The player to feature: whichever is playing (the most recently sampled
+    /// wins a tie), else the most recently sampled paused one.
+    pub fn primary(&self) -> Option<&NowPlaying> {
+        let latest = |a: &&NowPlaying, b: &&NowPlaying| a.sampled_at_ms.cmp(&b.sampled_at_ms);
+        self.players
+            .iter()
+            .filter(|p| p.is_playing())
+            .max_by(latest)
+            .or_else(|| self.players.iter().filter(|p| p.state == PlaybackState::Paused).max_by(latest))
+    }
+
+    pub fn player(&self, player: MediaPlayer) -> Option<&NowPlaying> {
+        self.players.iter().find(|p| p.player == player)
+    }
+
+    pub fn playlists_for(&self, player: MediaPlayer) -> impl Iterator<Item = &Playlist> {
+        self.playlists.iter().filter(move |p| p.player == player)
+    }
+
+    pub fn playlist_status(&self, player: MediaPlayer) -> PlaylistStatus {
+        self.playlist_status.iter().find(|(p, _)| *p == player).map(|(_, s)| s.clone()).unwrap_or_default()
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.players.iter().any(NowPlaying::is_playing)
+    }
+}
+
+/// Transport controls for a player.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "action", content = "value")]
+pub enum MediaAction {
+    PlayPause,
+    Next,
+    Previous,
+    /// Seek to an absolute position in seconds.
+    Seek(f64),
+    SetShuffle(bool),
+    SetRepeat(bool),
+    /// Player volume 0–100.
+    SetVolume(u8),
+    /// Play a playlist by [`Playlist::id`].
+    PlayPlaylist(String),
+}
+
+// ---------------------------------------------------------------------------
 // Permissions & provider status
 // ---------------------------------------------------------------------------
 
@@ -463,15 +826,18 @@ pub enum Permission {
     Location,
     Notifications,
     Bluetooth,
+    /// Apple Events to Spotify / Music (System Settings › Privacy › Automation).
+    Automation,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 5] = [
+    pub const ALL: [Permission; 6] = [
         Permission::Accessibility,
         Permission::FullDiskAccess,
         Permission::Location,
         Permission::Notifications,
         Permission::Bluetooth,
+        Permission::Automation,
     ];
 
     pub fn title(self) -> &'static str {
@@ -481,6 +847,7 @@ impl Permission {
             Permission::Location => "Location",
             Permission::Notifications => "Notifications",
             Permission::Bluetooth => "Bluetooth",
+            Permission::Automation => "Automation (Spotify & Music)",
         }
     }
 
@@ -503,6 +870,10 @@ impl Permission {
             Permission::Bluetooth => {
                 "Not required: accessory batteries are read from the system registry. Listed \
                  for transparency."
+            }
+            Permission::Automation => {
+                "Lets NotchForge ask Spotify and Apple Music what is playing, control playback \
+                 and list your playlists. macOS asks once per app."
             }
         }
     }
@@ -566,6 +937,84 @@ mod tests {
         };
         assert_eq!(d.min_level(), Some(60));
         assert_eq!(DeviceKind::guess("Magic Trackpad"), DeviceKind::Trackpad);
+    }
+
+    fn np(player: MediaPlayer, state: PlaybackState, at: i64) -> NowPlaying {
+        NowPlaying {
+            player,
+            state,
+            title: "Teardrop".into(),
+            artist: "Massive Attack".into(),
+            album: "Mezzanine".into(),
+            duration: Some(330.0),
+            position: Some(100.0),
+            sampled_at_ms: at,
+            track_id: Some("t1".into()),
+            artwork_path: None,
+            shuffle: None,
+            repeat: None,
+            volume: None,
+        }
+    }
+
+    #[test]
+    fn primary_player_prefers_playing_then_latest() {
+        let mut m = MediaState::default();
+        assert!(m.primary().is_none());
+        m.players = vec![
+            np(MediaPlayer::Music, PlaybackState::Paused, 50),
+            np(MediaPlayer::Spotify, PlaybackState::Paused, 10),
+        ];
+        assert_eq!(m.primary().map(|p| p.player), Some(MediaPlayer::Music));
+        m.players.push(np(MediaPlayer::Spotify, PlaybackState::Playing, 5));
+        m.players.remove(1);
+        assert_eq!(m.primary().map(|p| p.player), Some(MediaPlayer::Spotify));
+        assert!(m.is_playing());
+    }
+
+    #[test]
+    fn position_extrapolates_only_while_playing() {
+        let playing = np(MediaPlayer::Spotify, PlaybackState::Playing, 1_000);
+        assert_eq!(playing.position_at(6_000), Some(105.0));
+        assert_eq!(playing.position_at(10_000_000), Some(330.0), "clamped to duration");
+        let paused = np(MediaPlayer::Spotify, PlaybackState::Paused, 1_000);
+        assert_eq!(paused.position_at(6_000), Some(100.0));
+        assert_eq!(playing.subtitle(), "Massive Attack — Mezzanine");
+        assert!(playing.same_track(&paused));
+    }
+
+    #[test]
+    fn audio_capabilities_and_routes() {
+        let dev = AudioDevice {
+            id: 7,
+            uid: "BT-1".into(),
+            name: "AirPods Pro".into(),
+            transport: AudioTransport::from_fourcc(u32::from_be_bytes(*b"blue")),
+            sample_rate: Some(48_000.0),
+            max_sample_rate: Some(48_000.0),
+            bit_depth: Some(24),
+            output_channels: 2,
+            volume: Some(0.5),
+            muted: Some(false),
+            is_default: true,
+        };
+        assert_eq!(dev.transport, AudioTransport::Bluetooth);
+        assert_eq!(dev.capabilities(), "Bluetooth · 48 kHz · 24-bit · Stereo");
+        assert_eq!(dev.symbol(), "airpodspro");
+        assert_eq!(format_khz(44_100.0), "44.1 kHz");
+        let state = AudioState {
+            devices: vec![dev],
+            sources: vec![AudioSource {
+                pid: 1,
+                name: "Spotify".into(),
+                bundle_id: Some("com.spotify.client".into()),
+                app_path: None,
+                device_uids: vec![],
+            }],
+            sources_supported: true,
+        };
+        assert_eq!(state.route_label(&state.sources[0]), "AirPods Pro");
+        assert_eq!(MediaPlayer::from_bundle_id("COM.SPOTIFY.CLIENT"), Some(MediaPlayer::Spotify));
     }
 
     #[test]

@@ -25,6 +25,7 @@ pub struct Config {
     pub notifications: NotificationsConfig,
     pub tray: TrayConfig,
     pub controls: ControlsConfig,
+    pub media: MediaConfig,
 }
 
 /// Which screen hosts the notch UI.
@@ -124,6 +125,10 @@ pub struct ProvidersConfig {
     /// Accessibility banner observer (needs Accessibility).
     pub accessibility_banners: bool,
     pub focus: bool,
+    /// Output devices and which apps are playing audio (CoreAudio).
+    pub audio: bool,
+    /// Spotify & Apple Music now playing, controls and playlists.
+    pub media: bool,
 }
 
 impl Default for ProvidersConfig {
@@ -136,6 +141,8 @@ impl Default for ProvidersConfig {
             notification_center: true,
             accessibility_banners: false,
             focus: true,
+            audio: true,
+            media: true,
         }
     }
 }
@@ -308,6 +315,45 @@ pub struct ControlsConfig {
     pub resolution_confirm_secs: u64,
 }
 
+/// Default loopback port for the Spotify sign-in redirect.
+pub const DEFAULT_SPOTIFY_REDIRECT_PORT: u16 = 47816;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MediaConfig {
+    /// Show the playing track's cover and an equaliser in the collapsed notch.
+    pub show_in_wings: bool,
+    /// How often players are re-read while one is running (seconds). Changes
+    /// announced by the players themselves are picked up immediately.
+    pub poll_seconds: u64,
+    /// Client ID of *your* Spotify Web API app (developer.spotify.com). Needed
+    /// only to list Spotify playlists; playback works without it.
+    pub spotify_client_id: String,
+    /// Loopback port for the sign-in redirect. Register
+    /// `http://127.0.0.1:<port>/callback` as the app's redirect URI.
+    pub spotify_redirect_port: u16,
+    /// Maximum playlists listed per player.
+    pub max_playlists: usize,
+}
+
+impl Default for MediaConfig {
+    fn default() -> Self {
+        Self {
+            show_in_wings: true,
+            poll_seconds: 10,
+            spotify_client_id: String::new(),
+            spotify_redirect_port: DEFAULT_SPOTIFY_REDIRECT_PORT,
+            max_playlists: 100,
+        }
+    }
+}
+
+impl MediaConfig {
+    pub fn spotify_redirect_uri(&self) -> String {
+        format!("http://127.0.0.1:{}/callback", self.spotify_redirect_port)
+    }
+}
+
 impl Default for ControlsConfig {
     fn default() -> Self {
         Self {
@@ -376,6 +422,9 @@ impl Config {
         n.rate_limit_refill_secs = n.rate_limit_refill_secs.max(1);
         n.db_poll_interval_ms = n.db_poll_interval_ms.clamp(250, 60_000);
         self.weather.refresh_minutes = self.weather.refresh_minutes.clamp(5, 24 * 60);
+        self.media.poll_seconds = self.media.poll_seconds.clamp(2, 300);
+        self.media.max_playlists = self.media.max_playlists.clamp(1, 500);
+        self.media.spotify_client_id = self.media.spotify_client_id.trim().to_owned();
         self.tray.max_items = self.tray.max_items.clamp(1, 500);
         self.controls.resolution_confirm_secs = self.controls.resolution_confirm_secs.clamp(5, 120);
         self.general.hover_delay_ms = self.general.hover_delay_ms.min(2000);
@@ -392,6 +441,12 @@ impl Config {
         }
         if self.weather.latitude.is_some() != self.weather.longitude.is_some() {
             return Err(CoreError::InvalidConfig("weather.latitude and weather.longitude must be set together".into()));
+        }
+        if self.media.spotify_redirect_port < 1024 {
+            return Err(CoreError::InvalidConfig("media.spotify_redirect_port must be ≥ 1024".into()));
+        }
+        if !self.media.spotify_client_id.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(CoreError::InvalidConfig("media.spotify_client_id must be alphanumeric".into()));
         }
         if self.agents.http_enabled && self.agents.http_port < 1024 {
             return Err(CoreError::InvalidConfig("agents.http_port must be ≥ 1024".into()));
@@ -443,6 +498,16 @@ impl Paths {
 
     pub fn tray_state(&self) -> PathBuf {
         self.data_dir.join("tray.json")
+    }
+
+    /// Cached cover art (safe to delete).
+    pub fn artwork_dir(&self) -> PathBuf {
+        self.data_dir.join("artwork")
+    }
+
+    /// Spotify Web API refresh token (mode 0600).
+    pub fn spotify_token(&self) -> PathBuf {
+        self.data_dir.join("spotify-token.json")
     }
 
     pub fn ensure(&self) -> Result<()> {
@@ -497,6 +562,17 @@ mod tests {
         let err = Config::from_toml("[weather]\nlatitude = 120.0\nlongitude = 3.0");
         assert!(matches!(err, Err(CoreError::InvalidConfig(_))));
         let err = Config::from_toml("[weather]\nlatitude = 12.0");
+        assert!(matches!(err, Err(CoreError::InvalidConfig(_))));
+    }
+
+    #[test]
+    fn media_section_defaults_and_validation() {
+        let cfg = Config::from_toml("[media]\nspotify_client_id = \" abc123 \"\npoll_seconds = 0").expect("parse");
+        assert_eq!(cfg.media.spotify_client_id, "abc123");
+        assert_eq!(cfg.media.poll_seconds, 2);
+        assert!(cfg.providers.media && cfg.providers.audio);
+        assert_eq!(cfg.media.spotify_redirect_uri(), "http://127.0.0.1:47816/callback");
+        let err = Config::from_toml("[media]\nspotify_client_id = \"bad id&\"");
         assert!(matches!(err, Err(CoreError::InvalidConfig(_))));
     }
 

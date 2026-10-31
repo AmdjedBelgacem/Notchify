@@ -29,6 +29,13 @@ impl UiSink for LogSink {
             battery = ?s.battery.as_ref().map(|b| b.percent),
             devices = s.devices.len(),
             weather = ?s.weather.as_ref().map(|w| (w.place.clone(), w.temperature)),
+            output = ?s.audio.default_device().map(|d| format!("{} ({})", d.name, d.capabilities())),
+            outputs = s.audio.devices.len(),
+            playing = ?s.audio.sources.iter().map(|a| format!("{} -> {}", a.name, s.audio.route_label(a))).collect::<Vec<_>>(),
+            now_playing = ?s.media.primary().map(|n| format!("{:?} {:?}: {} - {}", n.player, n.state, n.title, n.artist)),
+            playlists = s.media.playlists.len(),
+            playlist_status = ?s.media.playlist_status,
+            running_players = ?s.media.running,
             providers = ?s.providers,
             "snapshot"
         );

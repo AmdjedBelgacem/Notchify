@@ -260,3 +260,33 @@ explains *why* each one is needed next to the button.
 | Notch geometry API only on macOS 12+ | `safeAreaInsets`/`auxiliaryTopLeftArea` with a synthetic pill fallback for non-notched screens |
 | Can't run AppKit on Linux CI | All logic lives in `notchforge-core` with tests; the UI is type-checked via `cargo check --target aarch64-apple-darwin` |
 | Main-thread stalls | Providers never touch AppKit; snapshots are coalesced; `system_profiler` runs in `spawn_blocking` |
+
+## 13. Addendum: audio & music
+
+**Goal.** Show the output device and its capabilities, show which apps are
+playing audio and through which device, offer switching and transport
+controls, and give Spotify and Apple Music a rich player with playlists.
+
+| Concern | Choice | Why |
+|---|---|---|
+| Devices, capabilities, default output | CoreAudio `AudioObject*` (`providers/src/sys/coreaudio.rs`) | Public, permission-free, fast in-process reads; property listeners make it push-based |
+| Which app plays where | CoreAudio process objects (`kAudioHardwarePropertyProcessObjectList`, `…IsRunningOutput`, `…Devices`, macOS 14.2+) | The only public per-app signal; helpers are mapped to their app via the responsible pid and the outer `.app` bundle |
+| Spotify / Music state and controls | AppleScript through `osascript` (`providers/src/media/script.rs`) | Stable public scripting dictionaries; keeps providers AppKit-free; guarded by a process check so we never launch a player |
+| Instant updates | `com.spotify.client.PlaybackStateChanged` and `com.apple.Music.playerInfo` distributed notifications, plus NSWorkspace launch/quit, forwarded as `ProviderCommand::MediaChanged` | Event-driven; the poll is only a 10 s safety net |
+| Spotify playlists | Spotify Web API with OAuth PKCE and a loopback redirect (`media/spotify.rs`) | AppleScript has no playlist access; PKCE needs no stored secret |
+| Other apps' controls | System media keys (`NSEvent` system-defined → `CGEventPost`) | Universal, public; MediaRemote is private and closed to third parties since 15.4 |
+| UI → provider requests | `Command::Provider(ProviderCommand)` → engine → `broadcast` to providers | Keeps the engine as the single entry point; any provider can opt in |
+
+UI changes:
+- The expanded panel gets a **Now Playing** page next to the overview.
+- The hover card shows the current track when nothing is unread.
+- The collapsed wings show the cover and an equaliser animated by Core
+  Animation, so it costs no CPU in-process.
+
+Risks:
+
+| Risk | Mitigation |
+|---|---|
+| Automation prompt or denial | The prompt is explained in Settings. A denial is detected (-1743) and surfaced with an *Allow…* button. |
+| AppleScript formats numbers with the user's locale | Values cross as integers (ms, 0–100) and arguments travel as `argv`, never spliced into source. |
+| Spotify API shape changes | Defensive parsing (`tracks` or `items` totals). On failure the previous list is kept. |

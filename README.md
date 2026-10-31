@@ -21,6 +21,13 @@ control panel. It surfaces:
   to anywhere, AirDrop them, reveal them in Finder or copy their paths.
 - **Quick controls**: brightness, volume, display resolution (with a safe
   automatic revert) and a Focus / Do Not Disturb toggle.
+- **Audio & music.** Shows the current output device and what it can do
+  (Bluetooth · 48 kHz · 24-bit · Stereo…), lets you switch outputs, and lists
+  which apps are playing sound and through which device. Spotify and Apple
+  Music get a full player: cover art, a seekable progress bar, play/pause,
+  skip, shuffle and repeat, plus your playlists, which you can start with one
+  click. Other apps (browsers, podcasts…) get play/pause and skip through the
+  system media keys.
 
 It runs as an accessory app with no Dock icon, and adds a menu bar extra as a
 secondary entry point.
@@ -35,14 +42,17 @@ secondary entry point.
 > * **Live providers** (`packaging/providers_test.sh`). Runs every provider
 >   against real macOS and the network. A forecast is fetched from Open-Meteo
 >   for a geocoded city, and the battery, accessory, agent, Notification
->   Center and Focus providers must all report `Running`.
+>   Center, Focus, audio (CoreAudio) and media (Spotify / Apple Music)
+>   providers must all report `Running`. Apple Music is launched so its
+>   AppleScript bridge runs against the real app.
 > * **System notification paths** (`packaging/system_paths_test.sh`). Posts a
 >   real macOS notification and verifies the Notification Center database
 >   watcher ingests it. The Accessibility banner check is skipped on hosts that
 >   never launch the Notification Center UI, which includes headless CI VMs.
-> * **UI self-test** (`notchforge --self-test <dir>`, 53 checks). Drives the
+> * **UI self-test** (`notchforge --self-test <dir>`). Drives the
 >   running app with synthetic pointer, click and Escape events: hover-expand,
->   click-to-pin, file drop into the tray, Escape-to-collapse, a notification
+>   click-to-pin, file drop into the tray, the music page (with a synthetic
+>   Spotify track and playlists), Escape-to-collapse, a notification
 >   peek, the Settings window and a screen re-layout. At each stage it asserts
 >   the state, island geometry and click-through behaviour. It also measures
 >   the springs (≈50–60 fps on a GPU-less VM) and renders the island's own layers to
@@ -62,13 +72,14 @@ secondary entry point.
 4. [Permissions](#permissions)
 5. [Connecting coding agents](#connecting-coding-agents)
 6. [Messaging apps](#messaging-apps)
-7. [Configuration](#configuration)
-8. [Adding a new provider](#adding-a-new-provider)
-9. [Performance](#performance)
-10. [Testing](#testing)
-11. [Fragile / private APIs](#fragile--private-apis)
-12. [Known limitations](#known-limitations)
-13. [Project layout](#project-layout)
+7. [Audio & music](#audio--music)
+8. [Configuration](#configuration)
+9. [Adding a new provider](#adding-a-new-provider)
+10. [Performance](#performance)
+11. [Testing](#testing)
+12. [Fragile / private APIs](#fragile--private-apis)
+13. [Known limitations](#known-limitations)
+14. [Project layout](#project-layout)
 
 ---
 
@@ -76,10 +87,10 @@ secondary entry point.
 
 | State | Trigger | What you see |
 |---|---|---|
-| **Collapsed** | idle | The black island exactly covers the notch. With *wings* on, small live indicators sit either side: charging, low battery, number of tray files, unread count with the latest app's icon, and Focus. |
+| **Collapsed** | idle | The black island exactly covers the notch. With *wings* on, small live indicators sit either side: charging, low battery, number of tray files, unread count with the latest app's icon, and Focus. While music plays, the left wing shows the cover and the right wing an equaliser. |
 | **Peek** | a notification at or above `peek_min_priority` arrives | A short banner drops out of the notch for 4 s. A burst of notifications extends one peek; it doesn't flap. |
-| **Hover** (compact) | the pointer rests near the notch for 120 ms | Three cards: weather, battery (plus your lowest accessory), and the latest notification. |
-| **Expanded** (pinned) | click | Notification list with open, copy and dismiss actions; the file tray; weather with an hourly forecast; accessory batteries; brightness and volume sliders; a resolution picker; Focus, pause and settings buttons. |
+| **Hover** (compact) | the pointer rests near the notch for 120 ms | Three cards: weather, battery (plus your lowest accessory), and the latest notification, or what's playing when nothing is unread. Clicking the now-playing card opens the music page. |
+| **Expanded** (pinned) | click | Two pages, picked with the buttons at the top left. **Overview**: notification list with open, copy and dismiss actions; the file tray; weather with an hourly forecast; accessory batteries; brightness and volume sliders; a resolution picker; Focus, pause and settings buttons. **Now Playing**: see [Audio & music](#audio--music). |
 | **Drop target** | dragging files toward the notch | The panel opens with the tray highlighted. Dropping pins it open. |
 
 Press <kbd>Esc</kbd> or click anywhere outside to collapse.
@@ -128,7 +139,11 @@ bindings to all of them with no web engine or GPU pipeline of our own.
  │                                              ├─ agents.http / .socket / │
  │                                              │  .inbox                  │
  │                                              ├─ notification_center (DB)│
- │                                              └─ focus     (DND state)   │
+ │                                              ├─ focus     (DND state)   │
+ │                                              ├─ audio     (CoreAudio)   │
+ │                                              └─ media     (AppleScript, │
+ │                                                 Spotify Web API)        │
+ │          ▼ ProviderCommand (broadcast: media controls, output switch)   │
  └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -234,6 +249,10 @@ and *Open Settings* buttons.
 | **Location** | "auto" weather location | Type a city in Settings, or set `latitude` and `longitude` |
 | **Notifications** | NotchForge's own fallback alerts | Not needed |
 | **Bluetooth** | *Not required.* Accessory batteries come from the IORegistry and `system_profiler`. | — |
+| **Automation** (Spotify, Music) | Ask the players what's playing, control them and list Music playlists. macOS asks once per player. | The music page shows an *Allow…* button; other apps still work through media keys |
+
+Media keys for apps without a scripting interface (browsers…) are posted as
+keyboard events, which uses **Accessibility**.
 
 To grant Full Disk Access manually: **System Settings › Privacy & Security ›
 Full Disk Access**, then **+**, then choose `NotchForge.app` (or your
@@ -319,6 +338,62 @@ banners. The reliable recipe is to set an app's alert style to **None** under
 it still reaches the notch, but macOS no longer shows its own banner. An
 experimental Accessibility-based "close the native banner" option exists
 (`suppress_native_banners`), and it's off by default.
+
+---
+
+## Audio & music
+
+**Outputs and what's playing** come from CoreAudio, which is public API and
+needs no permission. CoreAudio listeners push changes, so nothing is polled
+while the audio setup is unchanged.
+
+- The current output with its capabilities: transport (built-in, Bluetooth,
+  AirPlay, USB, HDMI…), sample rate, bit depth, channels and the highest rate
+  the device supports.
+- A picker to switch the system output (also used for alert sounds when the
+  device allows it), and the output volume.
+- **Playing audio**: every app currently producing sound and the device it
+  plays through, for example *Spotify → AirPods Pro* or *Google Chrome →
+  MacBook Pro Speakers*. Helper processes such as Chrome's renderers or
+  WebKit's GPU process are attributed to the app you know. This needs macOS
+  14.2 or later; older systems show devices only.
+
+**Spotify and Apple Music** get the full player in **Now Playing**: cover
+art, title, artist and album, a seekable progress bar, play/pause, previous
+and next, shuffle and repeat. The backdrop is tinted with the cover's colour.
+Players are queried through their AppleScript dictionaries, but only while
+they're running, so NotchForge never launches a player by asking about it. Both
+players announce track changes, and the notch updates instantly.
+
+**Playlists**: click a playlist to start it.
+
+- **Apple Music** playlists are read from the app itself, so Music needs to be running.
+- **Spotify** playlists need the Spotify Web API, because Spotify's scripting
+  dictionary has no playlists. Playback itself never needs the API.
+  1. Create an app at <https://developer.spotify.com/dashboard>.
+  2. Add the redirect URI `http://127.0.0.1:47816/callback`.
+  3. Paste the client ID in **Settings › Media** and click **Connect…**.
+
+  Sign-in uses OAuth PKCE with no client secret. Only the refresh token is
+  stored, in `spotify-token.json` (mode 0600).
+
+**Other apps** (browsers, podcast apps, video players) appear in *Playing
+audio*. The page's play/pause and skip buttons then send the system media keys
+(which needs Accessibility), and macOS routes them to whichever app is the
+current "Now Playing" app.
+
+```toml
+[providers]
+audio = true
+media = true
+
+[media]
+show_in_wings = true          # cover + equaliser beside the notch while playing
+poll_seconds = 10             # safety-net refresh; players announce changes themselves
+spotify_client_id = ""        # optional, for Spotify playlists
+spotify_redirect_port = 47816
+max_playlists = 100
+```
 
 ---
 
@@ -468,10 +543,14 @@ one.
 | Built-in brightness | `DisplayServices` private framework (`dlopen`) | `macos/src/private_api/display_services.rs` | Slider hidden |
 | Focus state | `~/Library/DoNotDisturb/DB/*.json` | `providers/src/focus.rs` | State shows as unknown |
 | Focus toggle | User-created Shortcuts via the `shortcuts` CLI | `macos/src/controls/focus.rs` | Guided setup alert |
+| Helper → app attribution | `responsibility_get_pid_responsible_for_pid` (private libsystem symbol, `dlsym`) | `providers/src/sys/process.rs` | Helpers listed under their own name |
+| Spotify / Music | AppleScript dictionaries via `osascript` | `providers/src/media/script.rs` | Player shows as idle; other apps still work via media keys |
 
 The other APIs used are public: IOKit power sources, CoreGraphics display
-modes, CoreAudio, CoreLocation, `SMAppService`, `NSSharingService` and
-AppKit.
+modes, CoreAudio (devices and, on 14.2+, process objects), CoreLocation,
+`SMAppService`, `NSSharingService`, the Spotify Web API and AppKit.
+NotchForge deliberately doesn't use the private MediaRemote framework. Since
+macOS 15.4 it no longer serves third-party apps.
 
 ---
 
@@ -499,6 +578,16 @@ AppKit.
   bundle, and privacy permissions are attributed to the terminal.
 - **Apple Silicon is the primary target.** Intel builds via `UNIVERSAL=1` but
   isn't tested.
+- **Music beyond Spotify and Apple Music.** Other apps playing audio are listed
+  with their output device and get play/pause and skip via media keys, but no
+  track title or artwork. Without MediaRemote, macOS offers no public way to
+  read another app's "Now Playing" info.
+- **Spotify playlists** need your own (free) Spotify developer app; see
+  [Audio & music](#audio--music). Apple Music streaming tracks that aren't in
+  your library may have no exportable artwork.
+- **Per-app audio routing** (which device each app uses) is read-only. macOS
+  plays every app through the system output, so switching the output moves all
+  apps.
 
 ---
 
@@ -507,9 +596,11 @@ AppKit.
 ```
 app/                       notchforge binary (thin): CLI, logging, runtime wiring, headless sink
 crates/notchforge-core/    models, config, geometry, spring, state machine, pipeline, tray, provider trait, engine
-crates/notchforge-providers/ battery, bluetooth, weather, agents/{http,socket,inbox,payload}, usernoted, focus, sys/ (IOKit FFI)
+crates/notchforge-providers/ battery, bluetooth, weather, agents/{http,socket,inbox,payload}, usernoted, focus,
+                           audio (CoreAudio), media/{script,spotify}, sys/ (IOKit, CoreAudio, process FFI)
 crates/notchforge-macos/   AppKit UI: app, bridge, controller, panel, views/, menubar, settings, permissions,
-                           login_item, location, accessibility, sharing, icons, controls/, private_api/, ffi/
+                           login_item, location, accessibility, sharing, icons, media (observers, media keys,
+                           Automation), controls/, private_api/, ffi/; views/media.rs is the Now Playing page
 crates/notchforge-notify/  agent CLI (std-only networking; HTTP → socket → inbox fallback)
 config/                    documented example configuration
 integrations/              Claude Code hooks, Codex CLI, OpenCode plugin, shell helpers

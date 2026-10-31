@@ -334,6 +334,7 @@ mod tests {
             paths: Arc::new(Paths::rooted(&std::env::temp_dir())),
             refresh: Arc::new(Notify::new()),
             location: loc_rx,
+            commands: notchforge_core::provider::command_channel().subscribe(),
             shutdown,
         };
         let task = tokio::spawn(Box::new(HttpAgentProvider).run(ctx));

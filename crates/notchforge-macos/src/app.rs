@@ -52,6 +52,7 @@ struct AppState {
     provider_events: mpsc::Sender<ProviderEvent>,
     on_quit: Box<dyn Fn()>,
     _timers: [Retained<NSTimer>; 2],
+    _media_observers: crate::media::Observers,
 }
 
 thread_local! {
@@ -67,6 +68,11 @@ fn with_app<R>(f: impl FnOnce(&AppState) -> R) -> Option<R> {
 pub fn with_controller<R>(f: impl FnOnce(&Controller) -> R) -> Option<R> {
     let c = APP.with(|a| a.borrow().as_ref().map(|s| s.controller.clone()))?;
     Some(f(&c))
+}
+
+/// Run `f` with the current config.
+pub fn with_config<R>(f: impl FnOnce(&Config) -> R) -> Option<R> {
+    with_app(|a| f(&a.config.borrow()))
 }
 
 pub fn send(cmd: Command) {
@@ -131,6 +137,11 @@ pub fn show_settings() {
 pub fn show_settings_soon() {
     let when = dispatch2::DispatchTime::NOW.time(300_000_000);
     let _ = dispatch2::DispatchQueue::main().after(when, show_settings);
+}
+
+/// A Spotify Web API token is stored.
+pub fn spotify_signed_in() -> bool {
+    with_app(|a| a.paths.spotify_token().exists()).unwrap_or(false)
 }
 
 pub fn open_config_file() {
@@ -275,6 +286,7 @@ pub fn run(boot: Boot) -> Result<(), String> {
         provider_events: boot.provider_events,
         on_quit: boot.on_quit,
         _timers: [location_timer, permission_timer],
+        _media_observers: crate::media::install_observers(),
     });
     sync_accessibility_observer(&boot.config, &state.provider_events);
     APP.with(|a| *a.borrow_mut() = Some(state));

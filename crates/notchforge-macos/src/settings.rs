@@ -350,6 +350,10 @@ impl SettingsWindow {
             |cfg, on| cfg.providers.accessibility_banners = on,
         );
         form.checkbox("Focus state (needs Full Disk Access)", c.providers.focus, |cfg, on| cfg.providers.focus = on);
+        form.checkbox("Audio outputs and apps playing sound", c.providers.audio, |cfg, on| cfg.providers.audio = on);
+        form.checkbox("Spotify & Apple Music (needs Automation)", c.providers.media, |cfg, on| {
+            cfg.providers.media = on
+        });
 
         form.section("Weather");
         form.text("Location", &c.weather.location, "auto, or a city name", |cfg, v| {
@@ -473,6 +477,57 @@ impl SettingsWindow {
         form.note(
             "Create these in the Shortcuts app with the “Set Focus” action; NotchForge runs them to toggle Focus.",
         );
+
+        form.section("Media");
+        form.checkbox("Show the playing track beside the notch", c.media.show_in_wings, |cfg, on| {
+            cfg.media.show_in_wings = on
+        });
+        let polls = [5u64, 10, 30, 60];
+        form.popup(
+            "Re-read players every",
+            &["5 seconds", "10 seconds", "30 seconds", "1 minute"],
+            index_of(&polls, &c.media.poll_seconds),
+            move |cfg, i| cfg.media.poll_seconds = polls[i],
+        );
+        form.note(
+            "Spotify and Music announce track changes themselves, so this only matters for the progress bar's accuracy.",
+        );
+        form.text("Spotify client ID", &c.media.spotify_client_id, "From developer.spotify.com", |cfg, v| {
+            cfg.media.spotify_client_id = v
+        });
+        form.note(&format!(
+            "Optional, only needed to list Spotify playlists (playback works without it). Create an app at \
+             developer.spotify.com/dashboard, add the redirect URI {} and paste its client ID here.",
+            c.media.spotify_redirect_uri()
+        ));
+        let signed_in = app::spotify_signed_in();
+        form.row_label("Spotify account");
+        let status_color = if signed_in { NSColor::systemGreenColor() } else { NSColor::secondaryLabelColor() };
+        let status = crate::ui::label(
+            mtm,
+            if signed_in { "Connected" } else { "Not connected" },
+            &font(12.0, Weight::Medium),
+            &status_color,
+            rect(CONTROL_X, form.y.get() + 3.0, 110.0, 16.0),
+        );
+        doc.addSubview(&status);
+        if signed_in {
+            form.button("Disconnect", CONTROL_X + 114.0, 110.0, || {
+                crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyDisconnect);
+                app::show_settings_soon();
+            });
+        } else {
+            let connect = form.button("Connect…", CONTROL_X + 114.0, 110.0, || {
+                crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyConnect);
+            });
+            connect.setEnabled(!c.media.spotify_client_id.is_empty());
+        }
+        form.button("Developer Dashboard", CONTROL_X + 228.0, 150.0, || {
+            if let Some(url) = objc2_foundation::NSURL::URLWithString(&ns("https://developer.spotify.com/dashboard")) {
+                objc2_app_kit::NSWorkspace::sharedWorkspace().openURL(&url);
+            }
+        });
+        form.advance(34.0);
 
         form.section("Permissions");
         for p in Permission::ALL {

@@ -16,6 +16,9 @@ plist = { workspace = true }
 reqwest = { workspace = true }
 dirs = { workspace = true }
 libc = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
 
 # On macOS link the system libsqlite3 (always present, no C toolchain needed);
 # elsewhere bundle SQLite so headless development builds work everywhere.

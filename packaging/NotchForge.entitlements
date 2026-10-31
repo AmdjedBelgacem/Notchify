@@ -14,5 +14,8 @@
     <!-- Hardened Runtime resource access: CoreLocation for weather. -->
     <key>com.apple.security.personal-information.location</key>
     <true/>
+    <!-- Hardened Runtime: send Apple Events to Spotify / Music (Automation). -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
 </dict>
 </plist>

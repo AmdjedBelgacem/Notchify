@@ -1,4 +1,5 @@
-//! Hover state: weather · battery · latest notification at a glance.
+//! Hover state: weather · battery · latest notification (or what's playing)
+//! at a glance.
 
 use super::{app_icon_view, battery_spoken, battery_text, device_levels, set_app_icon, temperature};
 use crate::ui::{
@@ -28,6 +29,12 @@ pub struct CompactView {
     notif_header: Retained<NSTextField>,
     notif_title: Retained<NSTextField>,
     notif_body: Retained<NSTextField>,
+    media_card: Retained<FlippedView>,
+    media_art: Retained<NSImageView>,
+    media_badge: Retained<NSTextField>,
+    media_title: Retained<NSTextField>,
+    media_subtitle: Retained<NSTextField>,
+    media_state: Retained<NSImageView>,
 }
 
 impl CompactView {
@@ -82,7 +89,32 @@ impl CompactView {
             notif_card.addSubview(v);
         }
 
-        for v in [&weather_card, &battery_card, &notif_card] {
+        // Now playing (same slot as the notification card; shown when nothing is unread).
+        let media_card = FlippedView::new(mtm, rect(nx, top, nw, ch));
+        make_card(&media_card, &p.card, 14.0);
+        let art_side = (ch - 20.0).min(60.0);
+        let art_box = FlippedView::new(mtm, rect(10.0, (ch - art_side) / 2.0, art_side, art_side));
+        make_card(&art_box, &p.card, 8.0);
+        if let Some(l) = art_box.layer() {
+            l.setMasksToBounds(true);
+        }
+        let media_art = NSImageView::new(mtm);
+        media_art.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
+        media_art.setFrame(rect(0.0, 0.0, art_side, art_side));
+        art_box.addSubview(&media_art);
+        let mx = 10.0 + art_side + 10.0;
+        let mw = nw - mx - 30.0;
+        let media_badge = label(mtm, "", &font(10.5, Weight::Semibold), &p.secondary, rect(mx, 12.0, mw, 14.0));
+        let media_title = label(mtm, "", &font(13.0, Weight::Semibold), &p.primary, rect(mx, 30.0, mw + 20.0, 17.0));
+        let media_subtitle =
+            label(mtm, "", &font(11.5, Weight::Regular), &p.secondary, rect(mx, 49.0, mw + 20.0, 15.0));
+        let media_state = symbol_view(mtm, "waveform", 12.0, &p.success, rect(nw - 26.0, 11.0, 16.0, 16.0), "Playing");
+        for v in [&*art_box as &NSView, &media_badge, &media_title, &media_subtitle, &media_state] {
+            media_card.addSubview(v);
+        }
+        media_card.setHidden(true);
+
+        for v in [&weather_card, &battery_card, &notif_card, &media_card] {
             root.addSubview(v);
         }
         Self {
@@ -101,7 +133,84 @@ impl CompactView {
             notif_header,
             notif_title,
             notif_body,
+            media_card,
+            media_art,
+            media_badge,
+            media_title,
+            media_subtitle,
+            media_state,
         }
+    }
+
+    /// Is `window_point` on the visible now-playing card?
+    pub fn media_hit(&self, window_point: objc2_foundation::NSPoint) -> bool {
+        if self.media_card.isHidden() || self.root.isHidden() {
+            return false;
+        }
+        let local = self.media_card.convertPoint_fromView(window_point, None);
+        let size = self.media_card.frame().size;
+        (0.0..=size.width).contains(&local.x) && (0.0..=size.height).contains(&local.y)
+    }
+
+    /// Show what's playing instead of "All caught up". Returns whether shown.
+    fn render_media(&self, snap: &Snapshot, p: &Palette) -> bool {
+        use super::media::{Featured, featured};
+        let show = match featured(&snap.media, &snap.audio) {
+            Featured::Player(pl) => {
+                let Some(n) = snap.media.player(pl) else { return false };
+                let img = n.artwork_path.as_deref().and_then(crate::icons::file_image);
+                match img {
+                    Some(img) => {
+                        self.media_art.setImage(Some(&img));
+                        self.media_art.setContentTintColor(None);
+                    }
+                    None => {
+                        self.media_art.setImage(crate::ui::symbol_image("music.note", 20.0, "Music").as_deref());
+                        self.media_art.setContentTintColor(Some(&crate::ui::rgb8(pl.color())));
+                    }
+                }
+                self.media_badge.setTextColor(Some(&crate::ui::rgb8(pl.color())));
+                set_text(&self.media_badge, pl.display_name());
+                set_text(&self.media_title, &n.title);
+                set_text(&self.media_subtitle, &n.subtitle());
+                let playing = n.is_playing();
+                set_symbol(
+                    &self.media_state,
+                    if playing { "waveform" } else { "pause.fill" },
+                    12.0,
+                    if playing { "Playing" } else { "Paused" },
+                );
+                self.media_state.setContentTintColor(Some(if playing { &p.success } else { &p.tertiary }));
+                set_accessibility_label(
+                    &self.media_card,
+                    &format!("{}: {}, {}. Click to open the player.", pl.display_name(), n.title, n.subtitle()),
+                );
+                true
+            }
+            Featured::App { name, bundle_id, app_path } => {
+                let icon = crate::icons::source_icon(bundle_id.as_deref(), app_path.as_deref());
+                self.media_art.setImage(icon.as_deref());
+                self.media_art.setContentTintColor(None);
+                self.media_badge.setTextColor(Some(&p.secondary));
+                set_text(&self.media_badge, "Playing audio");
+                set_text(&self.media_title, &name);
+                let route = snap
+                    .audio
+                    .sources
+                    .iter()
+                    .find(|s| s.name == name)
+                    .map(|s| snap.audio.route_label(s))
+                    .unwrap_or_default();
+                set_text(&self.media_subtitle, &route);
+                set_symbol(&self.media_state, "waveform", 12.0, "Playing");
+                self.media_state.setContentTintColor(Some(&p.success));
+                set_accessibility_label(&self.media_card, &format!("{name} is playing audio through {route}"));
+                true
+            }
+            Featured::Nothing => false,
+        };
+        self.media_card.setHidden(!show);
+        show
     }
 
     pub fn update(&self, snap: &Snapshot, p: &Palette) {
@@ -152,6 +261,12 @@ impl CompactView {
             .unwrap_or_default();
         set_text(&self.device_line, &dev);
 
+        self.notif_card.setHidden(false);
+        self.media_card.setHidden(true);
+        if snap.unread == 0 && self.render_media(snap, p) {
+            self.notif_card.setHidden(true);
+            return;
+        }
         match &snap.latest {
             Some(n) => {
                 set_app_icon(&self.notif_icon, &n.app);

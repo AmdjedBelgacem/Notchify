@@ -21,7 +21,7 @@ use notchforge_core::apps::{AppRef, KnownApp};
 use notchforge_core::engine::Command;
 use notchforge_core::geometry::{LayoutKind, Rect};
 use notchforge_core::machine::State;
-use notchforge_core::model::{NewNotification, NotificationKind, Origin, Permission, Priority};
+use notchforge_core::model::{NewNotification, NotificationKind, Origin, Permission, Priority, ProviderStatus};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSEventModifierFlags, NSScreen};
 use objc2_foundation::{NSPoint, NSTimer};
@@ -398,6 +398,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             check_pixels(ctx, "expanded", true, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "03-expanded", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
+            music_page(ctx, mtm, &snap);
         }
         // ── Escape collapses ──
         8 => post_key(KEY_ESCAPE),
@@ -471,6 +472,86 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
         }
         _ => finish(ctx),
     }
+}
+
+/// Music page: live audio metrics, then a synthetic Spotify session rendered
+/// through the real view code (title, playlists, pixels).
+fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engine::Snapshot) {
+    use crate::views::expanded::Tab;
+    use notchforge_core::model::{MediaPlayer, MediaState, NowPlaying, PlaybackState, Playlist, PlaylistStatus};
+    with_controller(|c| c.show_expanded_tab(Tab::Media));
+    let shown = with_controller(|c| c.media_page_visible()).unwrap_or(false);
+    {
+        let mut r = ctx.report.borrow_mut();
+        r.check("music page: shown", shown, "");
+        let audio_ok = snap.providers.get("audio").is_some_and(|s| s.is_healthy());
+        r.check("audio provider: healthy", audio_ok, format!("{:?}", snap.providers.get("audio")));
+        let media_ok = snap
+            .providers
+            .get("media")
+            .is_some_and(|s| s.is_healthy() || matches!(s, ProviderStatus::NeedsPermission(Permission::Automation)));
+        r.check("media provider: healthy", media_ok, format!("{:?}", snap.providers.get("media")));
+        r.metrics.insert(
+            "audio".into(),
+            json!({
+                "outputs": snap.audio.devices.iter().map(|d| json!({
+                    "name": d.name, "capabilities": d.capabilities(), "default": d.is_default,
+                })).collect::<Vec<_>>(),
+                "per_app_supported": snap.audio.sources_supported,
+                "playing": snap.audio.sources.iter().map(|s| format!("{} -> {}", s.name, snap.audio.route_label(s))).collect::<Vec<_>>(),
+                "players_running": snap.media.running.iter().map(|p| p.display_name()).collect::<Vec<_>>(),
+                "now_playing": snap.media.primary().map(|n| format!("{} - {}", n.title, n.artist)),
+            }),
+        );
+    }
+
+    let mut fake = snap.clone();
+    fake.generation = u64::MAX - 1;
+    fake.media = MediaState {
+        players: vec![NowPlaying {
+            player: MediaPlayer::Spotify,
+            state: PlaybackState::Playing,
+            title: "Self-test track".into(),
+            artist: "NotchForge".into(),
+            album: "Diagnostics".into(),
+            duration: Some(215.0),
+            position: Some(42.0),
+            sampled_at_ms: notchforge_core::time::now_ms(),
+            track_id: Some("spotify:track:selftest".into()),
+            artwork_path: None,
+            shuffle: Some(true),
+            repeat: Some(false),
+            volume: Some(70),
+        }],
+        running: vec![MediaPlayer::Spotify],
+        playlists: (1..=3)
+            .map(|i| Playlist {
+                player: MediaPlayer::Spotify,
+                id: format!("spotify:playlist:{i}"),
+                name: format!("Self-test playlist {i}"),
+                track_count: Some(10 * i),
+                owner: Some("NotchForge".into()),
+                artwork_url: None,
+                artwork_path: None,
+            })
+            .collect(),
+        playlist_status: vec![(MediaPlayer::Spotify, PlaylistStatus::Loaded)],
+        automation_denied: vec![],
+    };
+    let (title, rows) = with_controller(|c| c.preview_media(&fake)).unwrap_or_default();
+    {
+        let mut r = ctx.report.borrow_mut();
+        r.check("music page: renders track", title == "Self-test track", title);
+        r.check("music page: lists playlists", rows == 3, format!("{rows} rows"));
+    }
+    check_pixels(ctx, "music page", true, true);
+    let island = with_controller(|c| c.island_global()).unwrap_or_default();
+    screenshot(ctx, mtm, "03b-music", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
+    // Back to the real data and the overview page.
+    with_controller(|c| {
+        c.media_rerender();
+        c.show_expanded_tab(Tab::Overview);
+    });
 }
 
 trait OrDefaultState {

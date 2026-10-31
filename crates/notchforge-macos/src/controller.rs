@@ -290,6 +290,7 @@ impl Controller {
         } else {
             self.views.borrow().expanded.set_drop_highlight(false);
         }
+        self.views.borrow().expanded.set_visible(kind == LayoutKind::Expanded);
         if kind == LayoutKind::Compact {
             let snap = self.snapshot.borrow().clone();
             self.views.borrow().compact.update(&snap, &self.palette.borrow());
@@ -409,11 +410,14 @@ impl Controller {
         for v in self.views.borrow().all() {
             v.removeFromSuperview();
         }
+        let tab = self.views.borrow().expanded.tab();
         let views = Views::new(self.mtm, &self.layout.borrow(), &cfg, &self.engine);
         for v in views.all() {
             v.setHidden(true);
             self.island.addSubview(v);
         }
+        views.expanded.show_tab(tab);
+        views.expanded.set_visible(self.kind.get() == LayoutKind::Expanded);
         *self.views.borrow_mut() = views;
         self.expanded_dirty.set(true);
         let snap = self.snapshot.borrow().clone();
@@ -518,8 +522,46 @@ impl Controller {
         if matches!(self.machine.borrow().state(), State::Expanded | State::DropTarget { .. }) {
             return false;
         }
+        // Clicking the hover card's "now playing" opens straight on the music page.
+        if self.kind.get() == LayoutKind::Compact && self.views.borrow().compact.media_hit(window_point) {
+            self.views.borrow().expanded.show_tab(crate::views::expanded::Tab::Media);
+        }
         self.root_mouse_down(window_point);
         true
+    }
+
+    // ── media page ───────────────────────────────────────────────────────
+
+    pub fn show_expanded_tab(&self, tab: crate::views::expanded::Tab) {
+        self.views.borrow().expanded.show_tab(tab);
+    }
+
+    /// 1 Hz tick from the music page (progress bar and clocks).
+    pub fn media_tick(&self) {
+        self.views.borrow().expanded.media.tick();
+    }
+
+    pub fn media_page_visible(&self) -> bool {
+        let views = self.views.borrow();
+        views.expanded.tab() == crate::views::expanded::Tab::Media && !views.expanded.media.root.isHidden()
+    }
+
+    /// Render the music page from an arbitrary snapshot (self-test). Returns
+    /// the displayed title and the number of playlist rows.
+    pub fn preview_media(&self, snap: &Snapshot) -> (String, usize) {
+        let views = self.views.borrow();
+        views.expanded.media.invalidate();
+        views.expanded.media.update(snap);
+        views.expanded.media.debug_summary()
+    }
+
+    /// Re-render the music page from the current snapshot (after a local
+    /// choice such as switching the playlist source).
+    pub fn media_rerender(&self) {
+        let snap = self.snapshot.borrow().clone();
+        let views = self.views.borrow();
+        views.expanded.media.invalidate();
+        views.expanded.media.update(&snap);
     }
 
     pub fn key_down(&self, key: u16, flags: NSEventModifierFlags) -> bool {
@@ -632,7 +674,10 @@ impl Controller {
     pub fn apply_snapshot(&self, snap: Arc<Snapshot>) {
         *self.snapshot.borrow_mut() = snap.clone();
         self.render_small(&snap);
-        let wings = self.config.borrow().appearance.show_wings && snap.wants_wings();
+        let wings = {
+            let cfg = self.config.borrow();
+            cfg.appearance.show_wings && snap.wants_wings_with(cfg.media.show_in_wings)
+        };
         self.handle(Event::WingsChanged(wings));
         self.expanded_dirty.set(true);
         if self.kind.get() == LayoutKind::Expanded {
@@ -643,7 +688,11 @@ impl Controller {
     fn render_small(&self, snap: &Snapshot) {
         let views = self.views.borrow();
         let palette = self.palette.borrow();
-        views.collapsed.update(snap, &palette);
+        let opts = crate::views::collapsed::WingOptions {
+            media: self.config.borrow().media.show_in_wings,
+            animate: !self.reduce_motion(),
+        };
+        views.collapsed.update(snap, &palette, opts);
         if self.kind.get() == LayoutKind::Compact {
             views.compact.update(snap, &palette);
         }
@@ -688,7 +737,7 @@ impl Controller {
             self.show_container(self.kind.get());
             self.settle_window();
         }
-        let wings = cfg.appearance.show_wings && self.snapshot.borrow().wants_wings();
+        let wings = cfg.appearance.show_wings && self.snapshot.borrow().wants_wings_with(cfg.media.show_in_wings);
         self.handle(Event::WingsChanged(wings));
     }
 

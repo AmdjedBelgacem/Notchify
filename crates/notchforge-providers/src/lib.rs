@@ -6,9 +6,11 @@
 //! [`ProviderSpec`] below.
 
 pub mod agents;
+pub mod audio;
 pub mod battery;
 pub mod bluetooth;
 pub mod focus;
+pub mod media;
 pub mod sys;
 pub mod usernoted;
 pub mod util;
@@ -39,7 +41,9 @@ unit_default!(
     agents::SocketAgentProvider,
     agents::InboxAgentProvider,
     usernoted::UsernotedProvider,
-    focus::FocusProvider
+    focus::FocusProvider,
+    audio::AudioProvider,
+    media::MediaProvider
 );
 
 /// Every built-in provider. The macOS layer adds platform-bound ones
@@ -63,6 +67,8 @@ pub fn registry() -> Vec<ProviderSpec> {
         ),
         spec::<usernoted::UsernotedProvider>(|c| c.providers.notification_center, |_| String::new()),
         spec::<focus::FocusProvider>(|c| c.providers.focus, |_| String::new()),
+        spec::<audio::AudioProvider>(|c| c.providers.audio, |_| String::new()),
+        spec::<media::MediaProvider>(|c| c.providers.media, |_| String::new()),
     ]
 }
 

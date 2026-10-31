@@ -39,6 +39,6 @@
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>NotchForge shows the battery level of your connected accessories. It reads them from the system and does not connect to devices.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>NotchForge can open apps and files you choose from the notch.</string>
+    <string>NotchForge asks Spotify and Apple Music what is playing so it can show the track, artwork and playlists in the notch, and sends them play, pause, skip and playlist commands you choose.</string>
 </dict>
 </plist>

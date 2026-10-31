@@ -33,13 +33,14 @@
 
 use crate::config::{Config, Paths};
 use crate::model::{
-    BatteryStatus, Coordinates, DeviceBattery, FocusState, NewNotification, Permission, ProviderStatus, Weather,
+    AudioState, BatteryStatus, Coordinates, DeviceBattery, FocusState, MediaAction, MediaPlayer, MediaState,
+    NewNotification, Permission, ProviderStatus, Weather,
 };
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Notify, mpsc, watch};
+use tokio::sync::{Notify, broadcast, mpsc, watch};
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -78,7 +79,34 @@ pub enum ProviderEvent {
     Devices(Vec<DeviceBattery>),
     Weather(Weather),
     Focus(FocusState),
+    Audio(AudioState),
+    Media(MediaState),
     Status { provider: &'static str, status: ProviderStatus },
+}
+
+/// Requests routed from the UI (through the engine) to running providers.
+/// Every provider sees every command and ignores the ones it does not handle.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProviderCommand {
+    /// Control a media player.
+    Media { player: MediaPlayer, action: MediaAction },
+    /// A player announced a change (distributed notification); re-read it now.
+    MediaChanged(Option<MediaPlayer>),
+    /// Reload playlists (e.g. the music page was opened).
+    ReloadPlaylists,
+    /// Make this device (by UID) the default output.
+    SetOutputDevice(String),
+    /// Start the Spotify Web API sign-in flow (opens the browser).
+    SpotifyConnect,
+    /// Forget the stored Spotify token.
+    SpotifyDisconnect,
+}
+
+/// Capacity of the provider command broadcast; commands are rare and tiny.
+pub const COMMAND_CAPACITY: usize = 64;
+
+pub fn command_channel() -> broadcast::Sender<ProviderCommand> {
+    broadcast::channel(COMMAND_CAPACITY).0
 }
 
 /// Cooperative cancellation signal shared by every task.
@@ -132,6 +160,8 @@ pub struct ProviderContext {
     pub refresh: Arc<Notify>,
     /// Latest location from CoreLocation (if permitted).
     pub location: watch::Receiver<Option<Coordinates>>,
+    /// Commands from the UI; see [`ProviderCommand`].
+    pub commands: broadcast::Receiver<ProviderCommand>,
     pub shutdown: Shutdown,
 }
 
@@ -159,6 +189,26 @@ impl ProviderContext {
             _ = tokio::time::sleep(dur) => Wake::Timeout,
             _ = refresh.notified() => Wake::Refresh,
             _ = self.shutdown.wait() => Wake::Shutdown,
+        }
+    }
+
+    /// Wait for the next command. Returns `None` on shutdown. Lagged
+    /// receivers skip the commands they missed.
+    pub async fn next_command(&mut self) -> Option<ProviderCommand> {
+        loop {
+            tokio::select! {
+                r = self.commands.recv() => match r {
+                    Ok(c) => return Some(c),
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::debug!(provider = self.id, skipped = n, "provider commands lagged");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        self.shutdown.wait().await;
+                        return None;
+                    }
+                },
+                _ = self.shutdown.wait() => return None,
+            }
         }
     }
 
@@ -202,6 +252,7 @@ pub struct ProviderChannels {
     pub paths: Arc<Paths>,
     pub refresh: Arc<Notify>,
     pub location: watch::Receiver<Option<Coordinates>>,
+    pub commands: broadcast::Sender<ProviderCommand>,
     pub shutdown: Shutdown,
 }
 
@@ -254,6 +305,7 @@ impl Supervisor {
                 paths: ch.paths.clone(),
                 refresh: ch.refresh.clone(),
                 location: ch.location.clone(),
+                commands: ch.commands.subscribe(),
                 shutdown: ch.shutdown.clone(),
             };
             let fut = (spec.make)().run(ctx);
@@ -355,6 +407,7 @@ mod tests {
             paths: Arc::new(Paths::rooted(&std::env::temp_dir())),
             refresh: Arc::new(Notify::new()),
             location: loc_rx,
+            commands: command_channel(),
             shutdown,
         };
         std::mem::forget(_loc_tx);

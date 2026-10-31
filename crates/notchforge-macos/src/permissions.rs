@@ -85,6 +85,7 @@ pub fn state(p: Permission) -> PermissionState {
             }
         }
         Permission::Bluetooth => PermissionState::NotRequired,
+        Permission::Automation => crate::media::automation_state(),
     }
 }
 
@@ -105,6 +106,7 @@ fn settings_url(p: Permission) -> &'static str {
         Permission::Location => "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",
         Permission::Notifications => "x-apple.systempreferences:com.apple.preference.notifications",
         Permission::Bluetooth => "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
+        Permission::Automation => "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
     }
 }
 
@@ -131,6 +133,7 @@ pub fn request(p: Permission) {
             }
         }
         Permission::Location => crate::location::request_authorization(),
+        Permission::Automation => crate::media::request_automation(),
         Permission::Notifications if is_bundled() => {
             let block = RcBlock::new(|granted: Bool, _err: *mut NSError| {
                 NOTIFICATION_STATE.store(if granted.as_bool() { 1 } else { 2 }, Ordering::Relaxed);

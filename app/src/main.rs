@@ -12,7 +12,7 @@ mod sinks;
 use anyhow::Context;
 use notchforge_core::config::{Config, Paths};
 use notchforge_core::engine::{Command, Engine, EngineHandle, UiSink};
-use notchforge_core::provider::{ProviderChannels, ShutdownTrigger, Supervisor, shutdown_pair};
+use notchforge_core::provider::{ProviderChannels, ShutdownTrigger, Supervisor, command_channel, shutdown_pair};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -80,10 +80,12 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
     let (location_tx, location_rx) = watch::channel(None);
     let refresh = Arc::new(Notify::new());
     let (trigger, shutdown) = shutdown_pair();
+    let provider_commands = command_channel();
 
     let headless = args.headless || !cfg!(target_os = "macos");
     let sink: Arc<dyn UiSink> = ui_sink(headless);
-    let (engine, handle) = Engine::new(config_tx, paths.clone(), sink, refresh.clone(), events_rx);
+    let (engine, handle) =
+        Engine::new(config_tx, paths.clone(), sink, refresh.clone(), provider_commands.clone(), events_rx);
 
     let mut tasks = Vec::new();
     {
@@ -97,6 +99,7 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
                 paths: paths.clone(),
                 refresh,
                 location: location_rx,
+                commands: provider_commands,
                 shutdown: shutdown.clone(),
             },
         ));

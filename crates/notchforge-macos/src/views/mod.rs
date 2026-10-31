@@ -8,6 +8,7 @@
 pub mod collapsed;
 pub mod compact;
 pub mod expanded;
+pub mod media;
 pub mod peek;
 
 use crate::ui::{FlippedView, Palette, rgb8, symbol_image};
