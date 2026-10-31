@@ -562,6 +562,88 @@ impl Controller {
         self.views.borrow().expanded.update(snap);
     }
 
+    /// Build every view for a simulated 14-inch MacBook Pro (1512 × 982,
+    /// 185 × 32 pt notch: the geometry the design boards use), draw them from
+    /// the given snapshots and hand each island, hosted in an offscreen
+    /// window, to `render` (self-test).
+    pub fn notched_previews(
+        &self,
+        overview: &Snapshot,
+        music: &Snapshot,
+        peek: &Notification,
+        render: &mut dyn FnMut(&str, &NSView, f64, f64),
+    ) {
+        use crate::views::expanded::Tab;
+        use notchforge_core::geometry::{Rect, ScreenInfo};
+        use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
+        let screen = ScreenInfo {
+            id: 0,
+            frame: Rect::new(0.0, 0.0, 1512.0, 982.0),
+            visible_frame: Rect::new(0.0, 0.0, 1512.0, 950.0),
+            safe_area_top: 32.0,
+            aux_top_left: Some(Rect::new(0.0, 950.0, 663.5, 32.0)),
+            aux_top_right: Some(Rect::new(848.5, 950.0, 663.5, 32.0)),
+            backing_scale: 2.0,
+            is_builtin: true,
+            is_main: false,
+        };
+        let cfg = self.config.borrow().clone();
+        let layout = NotchLayout::new(screen, cfg.appearance.clone());
+        let views = Views::new(self.mtm, &layout, &cfg, &self.engine);
+        let palette = self.palette.borrow().clone();
+
+        let mut show = |name: &str, kind: LayoutKind, content: &NSView| {
+            let s = layout.shape(kind);
+            // SAFETY: a plain borderless window; it is closed and dropped
+            // below and nothing else holds it, so it must not self-release.
+            let window = unsafe {
+                let w = NSWindow::initWithContentRect_styleMask_backing_defer(
+                    NSWindow::alloc(self.mtm),
+                    rect(-20000.0, -20000.0, s.width, s.height),
+                    NSWindowStyleMask::Borderless,
+                    NSBackingStoreType::Buffered,
+                    false,
+                );
+                w.setReleasedWhenClosed(false);
+                w
+            };
+            let island = NSView::initWithFrame(NSView::alloc(self.mtm), rect(0.0, 0.0, s.width, s.height));
+            island.setWantsLayer(true);
+            if let Some(l) = island.layer() {
+                l.setBackgroundColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
+                l.setMasksToBounds(true);
+                // On screen the top corners sit above the display edge; only
+                // the lower two are visible.
+                l.setCornerRadius(s.corner_radius);
+                l.setMaskedCorners(
+                    objc2_quartz_core::CACornerMask::LayerMinXMinYCorner
+                        | objc2_quartz_core::CACornerMask::LayerMaxXMinYCorner,
+                );
+            }
+            content.setHidden(false);
+            island.addSubview(content);
+            window.setContentView(Some(&island));
+            window.displayIfNeeded();
+            objc2_quartz_core::CATransaction::flush();
+            render(name, &island, s.width, s.height);
+            content.removeFromSuperview();
+            window.close();
+        };
+
+        views.expanded.update(overview);
+        views.expanded.show_tab(Tab::Overview);
+        show("07a-notched-overview", LayoutKind::Expanded, &views.expanded.root);
+        views.expanded.media.invalidate();
+        views.expanded.media.update(music);
+        views.expanded.show_tab(Tab::Media);
+        show("07b-notched-music", LayoutKind::Expanded, &views.expanded.root);
+        views.compact.update(music, &palette);
+        show("07c-notched-hover", LayoutKind::Compact, &views.compact.root);
+        views.peek.show(peek, &palette);
+        show("07d-notched-peek", LayoutKind::Peek, &views.peek.root);
+        views.expanded.media.set_active(false);
+    }
+
     pub fn media_page_visible(&self) -> bool {
         let views = self.views.borrow();
         views.expanded.tab() == crate::views::expanded::Tab::Media && !views.expanded.media.root.isHidden()

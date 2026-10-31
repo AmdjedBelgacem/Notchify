@@ -702,6 +702,41 @@ fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core
     check_pixels(ctx, "overview sample", true, true);
     screenshot(ctx, mtm, "03c-overview-sample", None);
     with_controller(|c| c.preview_overview(snap));
+    notched_previews(ctx, &fake);
+}
+
+/// The same sample data on a simulated 14-inch MacBook Pro notch (185 × 32
+/// pt), the geometry the design boards are drawn at. CI Macs have no notch
+/// and a 25 pt menu bar, so the live screenshots above sit 7 pt shorter.
+fn notched_previews(ctx: &Rc<Ctx>, overview: &notchforge_core::engine::Snapshot) {
+    let mut music = overview.clone();
+    music.generation = u64::MAX - 3;
+    music.media = sample_media();
+    let Some(peek) = overview.notifications.first().cloned() else { return };
+    let mut sizes = Vec::new();
+    with_controller(|c| {
+        c.notched_previews(overview, &music, &peek, &mut |name, view, w, h| {
+            sizes.push((name.to_string(), w, h));
+            match view.layer().and_then(|l| png_from_layer(&l, w, h, 2.0)) {
+                Some(png) => emit_png(ctx, name, png),
+                None => tracing::warn!(name, "could not render the notched preview"),
+            }
+        })
+    });
+    let mut r = ctx.report.borrow_mut();
+    let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
+    r.check("notched: four views rendered", sizes.len() == 4, format!("{sizes:?}"));
+    r.metrics.insert("notched_sizes".into(), json!(sizes));
+    // Island sizes on the design boards (Overview, Main, Hover, Peek).
+    for (name, bw, bh) in [
+        ("07a-notched-overview", 720.0, 372.0),
+        ("07b-notched-music", 720.0, 372.0),
+        ("07c-notched-hover", 520.0, 176.0),
+        ("07d-notched-peek", 440.0, 96.0),
+    ] {
+        let got = size(name);
+        r.check(&format!("notched: {name} is {bw} × {bh} like its board"), got == Some((bw, bh)), format!("{got:?}"));
+    }
 }
 
 /// A playing Spotify track with three playlists (self-test renders).
