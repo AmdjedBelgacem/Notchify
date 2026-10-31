@@ -1101,6 +1101,11 @@ impl MediaPage {
     }
 
     /// Force the next update to rebuild lists (e.g. the user switched player).
+    /// Mark a playlist as the one playing (self-test renders of the board).
+    pub fn set_active_playlist(&self, id: Option<String>) {
+        self.state.borrow_mut().active_playlist = id;
+    }
+
     pub fn invalidate(&self) {
         let mut st = self.state.borrow_mut();
         st.playlists_key = 0;

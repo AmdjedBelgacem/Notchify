@@ -992,6 +992,25 @@ impl ExpandedView {
         }
     }
 
+    /// Show fixed control values instead of reading the hardware (self-test
+    /// renders of the design boards).
+    pub fn preview_controls(&self, brightness: f64, volume: f64, resolution: &str) {
+        self.brightness_row.setHidden(false);
+        self.brightness.set_value(brightness);
+        self.volume_row.setHidden(false);
+        self.volume.set_value(volume);
+        style_pill(
+            &self.resolution,
+            resolution,
+            Some("display"),
+            &font(12.0, Weight::Medium),
+            &self.palette.primary,
+            &white(0.08),
+            8.0,
+        );
+        self.resolution.setHidden(false);
+    }
+
     /// The resolution pill's menu: every usable mode, current one checked.
     pub fn resolution_menu(&self, anchor: &NSButton) {
         let Some(info) = self.display.borrow().clone() else { return };

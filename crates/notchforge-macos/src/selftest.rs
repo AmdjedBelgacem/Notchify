@@ -708,17 +708,13 @@ fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core
 /// The same sample data on a simulated 14-inch MacBook Pro notch (185 × 32
 /// pt), the geometry the design boards are drawn at. CI Macs have no notch
 /// and a 25 pt menu bar, so the live screenshots above sit 7 pt shorter.
-fn notched_previews(ctx: &Rc<Ctx>, overview: &notchforge_core::engine::Snapshot) {
-    let mut music = overview.clone();
-    music.generation = u64::MAX - 3;
-    music.media = sample_media();
-    // The Hover board shows music with nothing unread (unread would lead).
-    music.notifications.clear();
-    music.unread = 0;
+fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
+    let (overview, music) = board_snapshots(ctx, sample);
     let Some(peek) = overview.notifications.first().cloned() else { return };
+    let (overview, music) = (&overview, &music);
     let mut sizes = Vec::new();
     with_controller(|c| {
-        c.notched_previews(overview, &music, &peek, &mut |name, view, w, h| {
+        c.notched_previews(overview, music, &peek, &mut |name, view, w, h| {
             sizes.push((name.to_string(), w, h));
             match view.layer().and_then(|l| png_from_layer(&l, w, h, 2.0)) {
                 Some(png) => emit_png(ctx, name, png),
@@ -740,6 +736,256 @@ fn notched_previews(ctx: &Rc<Ctx>, overview: &notchforge_core::engine::Snapshot)
         let got = size(name);
         r.check(&format!("notched: {name} is {bw} × {bh} like its board"), got == Some((bw, bh)), format!("{got:?}"));
     }
+}
+
+/// The exact content of the design boards (Overview, Now Playing, Hover),
+/// so the notched renders differ from the boards only where the UI does.
+fn board_snapshots(
+    ctx: &Ctx,
+    sample: &notchforge_core::engine::Snapshot,
+) -> (notchforge_core::engine::Snapshot, notchforge_core::engine::Snapshot) {
+    use notchforge_core::model::{
+        AudioDevice, AudioSource, AudioState, AudioTransport, FocusState, MediaPlayer, MediaState, Notification,
+        NotificationId, NowPlaying, PlaybackState, Playlist, PlaylistStatus, TrayItem, TrayItemId,
+    };
+    let now = notchforge_core::time::now_ms();
+    let dir = ctx.dir.join("board");
+    let _ = std::fs::create_dir_all(dir.join("Assets"));
+
+    // Overview: four notifications, three tray items, Focus on.
+    let mut overview = sample.clone();
+    overview.generation = u64::MAX - 4;
+    let mut claude_code = AppRef::known(KnownApp::Claude);
+    claude_code.display_name = "Claude Code".into();
+    let note = |id: u64, app: AppRef, kind: NotificationKind, prio: Priority, title: &str, body: &str, ago: i64| {
+        Notification {
+            id: NotificationId(id),
+            app,
+            origin: Origin::Internal,
+            kind,
+            priority: prio,
+            title: title.into(),
+            subtitle: None,
+            body: body.into(),
+            timestamp_ms: now - ago,
+            thread: None,
+            url: None,
+            group_count: 1,
+            read: true,
+        }
+    };
+    overview.notifications = vec![
+        note(
+            11,
+            claude_code,
+            NotificationKind::NeedsInput,
+            Priority::High,
+            "Allow running cargo test?",
+            "notchforge · waiting for your approval",
+            5_000,
+        ),
+        note(
+            12,
+            AppRef::known(KnownApp::Cursor),
+            NotificationKind::TaskFinished,
+            Priority::Normal,
+            "Settings refactor complete",
+            "4 files changed, all tests pass",
+            360_000,
+        ),
+        note(
+            13,
+            AppRef::known(KnownApp::Messages),
+            NotificationKind::Message,
+            Priority::Normal,
+            "Léa",
+            "Dinner at 8? I booked the place on Rue Oberkampf",
+            720_000,
+        ),
+        note(
+            14,
+            AppRef::known(KnownApp::Slack),
+            NotificationKind::Message,
+            Priority::Normal,
+            "Mira",
+            "#design · New onboarding mockups are up",
+            1_500_000,
+        ),
+    ];
+    overview.unread = 1;
+    let report = dir.join("Report.pdf");
+    let _ = std::fs::write(&report, b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n");
+    let mockup = dir.join("Mockup.png");
+    if let Some(png) =
+        art_png(220.0, 220.0, &[(0.0, (0.36, 0.66, 1.0)), (1.0, (0.18, 0.31, 0.85))], (0.2, 0.0), &[], None)
+    {
+        let _ = std::fs::write(&mockup, png);
+    }
+    let item = |id: u64, path: std::path::PathBuf, is_dir: bool| TrayItem {
+        id: TrayItemId(id),
+        name: path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        path,
+        is_dir,
+        bytes: None,
+        added_at_ms: now,
+    };
+    overview.tray = vec![item(1, report, false), item(2, mockup, false), item(3, dir.join("Assets"), true)];
+    overview.focus = FocusState { active: Some(true), mode_name: Some("Do Not Disturb".into()) };
+
+    // Now Playing: Afterglow on AirPods Pro, Spotify and Safari playing, five playlists.
+    let mut music = overview.clone();
+    music.generation = u64::MAX - 5;
+    music.notifications.clear();
+    music.unread = 0;
+    let airpods = "board-airpods".to_string();
+    music.audio = AudioState {
+        devices: vec![AudioDevice {
+            id: 1,
+            uid: airpods.clone(),
+            name: "AirPods Pro".into(),
+            transport: AudioTransport::Bluetooth,
+            sample_rate: Some(48_000.0),
+            max_sample_rate: Some(48_000.0),
+            bit_depth: Some(24),
+            output_channels: 2,
+            volume: Some(0.62),
+            muted: Some(false),
+            is_default: true,
+        }],
+        sources: [("Spotify", "com.spotify.client"), ("Safari", "com.apple.Safari")]
+            .iter()
+            .enumerate()
+            .map(|(i, (name, bundle))| AudioSource {
+                pid: 100 + i as i32,
+                name: (*name).into(),
+                bundle_id: Some((*bundle).into()),
+                app_path: None,
+                device_uids: vec![airpods.clone()],
+            })
+            .collect(),
+        sources_supported: true,
+    };
+    let cover = dir.join("afterglow.png");
+    if let Some(png) = art_png(
+        272.0,
+        272.0,
+        &[(0.0, (0.357, 0.114, 0.420)), (0.72, (0.114, 0.059, 0.227)), (1.0, (0.114, 0.059, 0.227))],
+        (0.15, 0.0),
+        &[((0.30, 0.28), 0.52, (1.0, 0.365, 0.561)), ((0.70, 0.78), 0.36, (1.0, 0.702, 0.420))],
+        Some("NIGHT TRANSIT"),
+    ) {
+        let _ = std::fs::write(&cover, png);
+    }
+    let lists: [(&str, u32, &str, [(f64, f64, f64); 3]); 5] = [
+        ("Night Drive", 64, "You", [(1.0, 0.365, 0.561), (0.357, 0.114, 0.420), (0.078, 0.043, 0.18)]),
+        ("Deep Focus", 120, "You", [(0.243, 0.78, 0.761), (0.106, 0.302, 0.42), (0.043, 0.102, 0.165)]),
+        ("Sunday Slow", 38, "Léa", [(1.0, 0.824, 0.478), (0.878, 0.478, 0.247), (0.353, 0.141, 0.071)]),
+        ("Run Club", 45, "You", [(0.71, 1.0, 0.42), (0.184, 0.561, 0.306), (0.051, 0.165, 0.094)]),
+        ("Rainy Paris", 52, "You", [(0.616, 0.706, 1.0), (0.29, 0.333, 0.788), (0.086, 0.102, 0.267)]),
+    ];
+    let playlists = lists
+        .iter()
+        .enumerate()
+        .map(|(i, (name, count, owner, c))| {
+            let path = dir.join(format!("playlist-{i}.png"));
+            if let Some(png) = art_png(96.0, 96.0, &[(0.0, c[0]), (0.58, c[1]), (1.0, c[2])], (0.0, 0.0), &[], None) {
+                let _ = std::fs::write(&path, png);
+            }
+            Playlist {
+                player: MediaPlayer::Spotify,
+                id: format!("spotify:playlist:board{i}"),
+                name: (*name).into(),
+                track_count: Some(*count),
+                owner: Some((*owner).into()),
+                artwork_url: None,
+                artwork_path: Some(path),
+            }
+        })
+        .collect();
+    music.media = MediaState {
+        players: vec![NowPlaying {
+            player: MediaPlayer::Spotify,
+            state: PlaybackState::Playing,
+            title: "Afterglow".into(),
+            artist: "Neon Harbor".into(),
+            album: "Night Transit".into(),
+            duration: Some(221.0),
+            position: Some(84.0),
+            sampled_at_ms: now,
+            track_id: Some("spotify:track:afterglow".into()),
+            artwork_path: Some(cover),
+            shuffle: Some(true),
+            repeat: Some(false),
+            volume: Some(62),
+        }],
+        running: vec![MediaPlayer::Spotify],
+        playlists,
+        playlist_status: vec![(MediaPlayer::Spotify, PlaylistStatus::Loaded)],
+        automation_denied: vec![],
+    };
+    (overview, music)
+}
+
+/// A square of cover art like the boards' CSS: an axial gradient from
+/// `start` (unit point, top-left origin) to the opposite corner, radial
+/// glows (centre, radius, colour) and an optional letter-spaced caption.
+#[allow(clippy::type_complexity)]
+fn art_png(
+    w: f64,
+    h: f64,
+    stops: &[(f64, (f64, f64, f64))],
+    start: (f64, f64),
+    glows: &[((f64, f64), f64, (f64, f64, f64))],
+    caption: Option<&str>,
+) -> Option<Vec<u8>> {
+    use objc2_foundation::{NSNumber, NSString};
+    use objc2_quartz_core::{CAGradientLayer, CALayer, CATextLayer};
+    let cg = |r: f64, g: f64, b: f64, a: f64| crate::ui::rgba(r, g, b, a).CGColor();
+    let root = CALayer::layer();
+    root.setFrame(crate::ui::rect(0.0, 0.0, w, h));
+    // Layer space is y-up; the boards' CSS is y-down.
+    let base = CAGradientLayer::layer();
+    base.setFrame(root.bounds());
+    base.setStartPoint(NSPoint::new(start.0, 1.0 - start.1));
+    base.setEndPoint(NSPoint::new(1.0 - start.0, start.1));
+    crate::ui::set_gradient(&base, &stops.iter().map(|(_, (r, g, b))| (*r, *g, *b, 1.0)).collect::<Vec<_>>());
+    let locs: Vec<_> = stops.iter().map(|(l, _)| NSNumber::new_f64(*l)).collect();
+    base.setLocations(Some(&objc2_foundation::NSArray::from_retained_slice(&locs)));
+    root.addSublayer(&base);
+    for ((cx, cy), r, (cr, cgc, cb)) in glows {
+        let g = CAGradientLayer::layer();
+        g.setType(&NSString::from_str("radial"));
+        g.setFrame(root.bounds());
+        g.setStartPoint(NSPoint::new(*cx, 1.0 - cy));
+        g.setEndPoint(NSPoint::new(cx + r, 1.0 - cy + r));
+        crate::ui::set_gradient(&g, &[(*cr, *cgc, *cb, 1.0), (*cr, *cgc, *cb, 0.0)]);
+        root.addSublayer(&g);
+    }
+    if let Some(text) = caption {
+        // Two thin rings and a spaced caption, as on the Now Playing board.
+        for (d, a) in [(0.68, 0.22), (0.36, 0.18)] {
+            let ring = CALayer::layer();
+            let side = w * d;
+            ring.setFrame(crate::ui::rect((w - side) / 2.0, h * 0.5 - side / 2.0 + h * 0.03, side, side));
+            ring.setCornerRadius(side / 2.0);
+            ring.setBorderWidth(w / 136.0);
+            ring.setBorderColor(Some(&cg(1.0, 1.0, 1.0, a)));
+            root.addSublayer(&ring);
+        }
+        let t = CATextLayer::layer();
+        t.setFrame(crate::ui::rect(0.0, h * 0.10, w, h * 0.09));
+        let spaced: String = text.chars().map(|c| c.to_string()).collect::<Vec<_>>().join("\u{200A}\u{2009}");
+        let font = crate::ui::font(h * 0.066, crate::ui::Weight::Semibold);
+        let string = crate::ui::attributed(&spaced, &font, &crate::ui::rgba(1.0, 1.0, 1.0, 0.85));
+        let string: &objc2::runtime::AnyObject = &string;
+        // SAFETY: CATextLayer takes an NSAttributedString as its string.
+        unsafe {
+            t.setString(Some(string));
+            t.setAlignmentMode(objc2_quartz_core::kCAAlignmentCenter);
+        }
+        root.addSublayer(&t);
+    }
+    png_from_layer(&root, w, h, 1.0)
 }
 
 /// A playing Spotify track with three playlists (self-test renders).

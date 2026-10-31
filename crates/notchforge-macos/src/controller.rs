@@ -631,9 +631,11 @@ impl Controller {
         };
 
         views.expanded.update(overview);
+        views.expanded.preview_controls(0.72, 0.62, "1512 × 982");
         views.expanded.show_tab(Tab::Overview);
         show("07a-notched-overview", LayoutKind::Expanded, &views.expanded.root);
         views.expanded.media.invalidate();
+        views.expanded.media.set_active_playlist(music.media.playlists.first().map(|p| p.id.clone()));
         views.expanded.media.update(music);
         views.expanded.show_tab(Tab::Media);
         show("07b-notched-music", LayoutKind::Expanded, &views.expanded.root);
