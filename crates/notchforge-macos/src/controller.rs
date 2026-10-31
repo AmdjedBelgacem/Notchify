@@ -727,6 +727,10 @@ impl Controller {
         screen::to_rect(self.panel.frame())
     }
 
+    pub fn island_layer(&self) -> Option<Retained<objc2_quartz_core::CALayer>> {
+        self.island.layer()
+    }
+
     pub fn ignores_mouse(&self) -> bool {
         self.panel.ignoresMouseEvents()
     }

@@ -33,6 +33,140 @@ use std::rc::Rc;
 
 const KEY_ESCAPE: u16 = 53;
 
+/// The island's own layer tree rendered to an RGBA bitmap (1 px per point).
+/// Rendering our own layers needs no Screen Recording permission, unlike
+/// `screencapture`, which only sees the wallpaper without it.
+struct Raster {
+    w: usize,
+    h: usize,
+    /// Premultiplied RGBA, first row = top of the island.
+    px: Vec<u8>,
+}
+
+impl Raster {
+    fn capture() -> Option<Raster> {
+        use objc2_core_graphics::{CGBitmapContextCreate, CGColorSpace, CGImageAlphaInfo};
+        let (layer, island) = with_controller(|c| (c.island_layer(), c.island_global()))?;
+        let layer = layer?;
+        let (w, h) = (island.width.round() as usize, island.height.round() as usize);
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let mut px = vec![0u8; w * h * 4];
+        let space = CGColorSpace::new_device_rgb()?;
+        // SAFETY: `px` outlives the context (dropped at the end of the block)
+        // and is exactly w*h*4 bytes with a w*4 stride.
+        unsafe {
+            let ctx = CGBitmapContextCreate(
+                px.as_mut_ptr().cast(),
+                w,
+                h,
+                8,
+                w * 4,
+                Some(&space),
+                CGImageAlphaInfo::PremultipliedLast.0,
+            )?;
+            layer.renderInContext(&ctx);
+        }
+        Some(Raster { w, h, px })
+    }
+
+    fn at(&self, x: usize, y: usize) -> (f64, f64) {
+        let i = (y * self.w + x) * 4;
+        let a = self.px[i + 3] as f64 / 255.0;
+        let lum =
+            (0.2126 * self.px[i] as f64 + 0.7152 * self.px[i + 1] as f64 + 0.0722 * self.px[i + 2] as f64) / 255.0;
+        (a, lum)
+    }
+
+    /// (opaque fraction, fraction of bright "content" pixels)
+    fn stats(&self) -> (f64, f64) {
+        let (mut opaque, mut bright) = (0usize, 0usize);
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let (a, l) = self.at(x, y);
+                if a > 0.8 {
+                    opaque += 1;
+                    if l > 0.35 {
+                        bright += 1;
+                    }
+                }
+            }
+        }
+        let n = (self.w * self.h) as f64;
+        (opaque as f64 / n, bright as f64 / n)
+    }
+
+    /// Coarse text rendering: ' ' transparent, '.' black island, ':' 'o' '@' brighter content.
+    fn ascii(&self, cols: usize) -> Vec<String> {
+        let cols = cols.min(self.w).max(1);
+        let cw = self.w as f64 / cols as f64;
+        let rows = ((self.h as f64 / cw) * 0.5).round().max(1.0) as usize;
+        let ch = self.h as f64 / rows as f64;
+        (0..rows)
+            .map(|r| {
+                (0..cols)
+                    .map(|c| {
+                        let (x0, y0) = ((c as f64 * cw) as usize, (r as f64 * ch) as usize);
+                        let (x1, y1) = (((c + 1) as f64 * cw) as usize, ((r + 1) as f64 * ch) as usize);
+                        let (mut a, mut l, mut n) = (0.0, 0.0, 0.0);
+                        for y in y0..y1.min(self.h) {
+                            for x in x0..x1.min(self.w) {
+                                let (pa, pl) = self.at(x, y);
+                                a += pa;
+                                l += pl;
+                                n += 1.0;
+                            }
+                        }
+                        let (a, l) = if n > 0.0 { (a / n, l / n) } else { (0.0, 0.0) };
+                        match (a, l) {
+                            (a, _) if a < 0.4 => ' ',
+                            (_, l) if l < 0.06 => '.',
+                            (_, l) if l < 0.18 => ':',
+                            (_, l) if l < 0.4 => 'o',
+                            _ => '@',
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+}
+
+/// Pixel-level checks on the rendered island plus an ASCII preview in the log.
+fn check_pixels(ctx: &Ctx, stage: &str, expect_content: bool, rounded_bottom: bool) {
+    let Some(r) = Raster::capture() else {
+        ctx.report.borrow_mut().check(&format!("{stage}: island renders"), false, "could not render layer");
+        return;
+    };
+    let (opaque, bright) = r.stats();
+    let preview = r.ascii(88);
+    println!("--- {stage} ({}×{} pt) ---", r.w, r.h);
+    for line in &preview {
+        println!("|{line}|");
+    }
+    let corner = |x: usize, y: usize| r.at(x, y).0;
+    let (tl, bl) = (corner(0, 0), corner(0, r.h - 1));
+    let mut rep = ctx.report.borrow_mut();
+    rep.check(
+        &format!("{stage}: island is an opaque black shape"),
+        opaque > 0.85,
+        format!("{:.1}% opaque", opaque * 100.0),
+    );
+    if expect_content {
+        rep.check(
+            &format!("{stage}: content is drawn"),
+            bright > 0.004,
+            format!("{:.2}% bright pixels", bright * 100.0),
+        );
+    }
+    rep.check(&format!("{stage}: top edge is square (merges with bezel)"), tl > 0.8, format!("top-left alpha {tl:.2}"));
+    if rounded_bottom {
+        rep.check(&format!("{stage}: bottom corners are rounded"), bl < 0.5, format!("bottom-left alpha {bl:.2}"));
+    }
+    rep.metrics.insert(format!("render_{stage}"), json!({ "w": r.w, "h": r.h, "opaque": opaque, "bright": bright }));
+}
+
 #[derive(Default)]
 struct Report {
     checks: Vec<Value>,
@@ -200,6 +334,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 r.metrics.insert("open_animation".into(), anim_json(anim));
             }
             check_settled(ctx, "hover", &[LayoutKind::Compact]);
+            check_pixels(ctx, "hover", true, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "02-hover", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
         }
@@ -256,6 +391,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 );
             }
             check_settled(ctx, "expanded", &[LayoutKind::Expanded]);
+            check_pixels(ctx, "expanded", true, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "03-expanded", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
         }
@@ -284,6 +420,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 r.metrics.insert("close_animation".into(), anim_json(anim));
             }
             check_settled(ctx, "collapse", &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings]);
+            check_pixels(ctx, "collapsed-wings", true, false);
             // Park the pointer well away from the notch: a pointer resting under
             // the notch would (correctly) turn the upcoming peek into a hover.
             post_mouse(mtm, cg::kCGEventMouseMoved, NSPoint::new(center.x, center.y - 400.0));
@@ -305,6 +442,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             let st = state();
             ctx.report.borrow_mut().check("peek: state", st == Some(State::Peek), format!("{st:?}"));
             check_settled(ctx, "peek", &[LayoutKind::Peek]);
+            check_pixels(ctx, "peek", true, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "04-peek", Some(island.outset(40.0, 40.0, 30.0, 0.0)));
         }
