@@ -108,9 +108,7 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
             tracing::warn!("the notch UI needs macOS; running headless");
         }
         tracing::info!(port = config.agents.http_port, "headless mode: press Ctrl-C to quit");
-        runtime.block_on(async {
-            let _ = tokio::signal::ctrl_c().await;
-        });
+        runtime.block_on(wait_for_termination());
         stop(&trigger, runtime, tasks);
         return Ok(());
     }
@@ -125,6 +123,29 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
         runtime,
         tasks,
     })
+}
+
+/// Resolves on SIGINT (Ctrl-C) or SIGTERM (`kill`, launchd, logout).
+async fn wait_for_termination() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut term) => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {}
+                    _ = term.recv() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 /// Everything the UI needs to take over the main thread.
@@ -171,6 +192,11 @@ fn ui_sink(_headless: bool) -> Arc<dyn UiSink> {
 
 #[cfg(target_os = "macos")]
 fn run_ui(l: Launch) -> anyhow::Result<()> {
+    // AppKit owns the main thread, so turn Ctrl-C / SIGTERM into a regular quit.
+    l.runtime.spawn(async {
+        wait_for_termination().await;
+        notchforge_macos::app::request_quit();
+    });
     let state = std::cell::RefCell::new(Some((l.trigger, l.runtime, l.tasks)));
     let on_quit = Box::new(move || {
         if let Some((trigger, rt, tasks)) = state.borrow_mut().take() {
