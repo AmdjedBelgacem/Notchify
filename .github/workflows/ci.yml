@@ -44,16 +44,6 @@ jobs:
           # CI images enable "Reduce motion"; force springs on so the test measures them.
           printf '[appearance]\nreduced_motion = "never"\n' > "$NOTCHFORGE_HOME/config.toml"
           dist/NotchForge.app/Contents/MacOS/notchforge --self-test "$PWD/selftest" -v
-      - name: Print expanded-panel screenshot (small base64 JPEG for log-only review)
-        if: always()
-        run: |
-          for n in 03-expanded 02-hover; do
-            f="selftest/$n.png"; [ -f "$f" ] || continue
-            sips -s format jpeg -s formatOptions 35 -Z 420 "$f" --out "selftest/$n-small.jpg" >/dev/null
-            echo "BEGIN-SCREENSHOT $n $(stat -f%z selftest/$n-small.jpg)"
-            base64 -i "selftest/$n-small.jpg" | fold -w 1000
-            echo "END-SCREENSHOT $n"
-          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
