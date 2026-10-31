@@ -36,6 +36,8 @@ pub struct Boot {
     pub provider_events: mpsc::Sender<ProviderEvent>,
     /// Stops the async runtime; called once when quitting.
     pub on_quit: Box<dyn Fn() + 'static>,
+    /// Run the end-to-end UI self-test, writing results to this directory.
+    pub self_test: Option<std::path::PathBuf>,
 }
 
 pub use bridge::sink;
@@ -187,14 +189,39 @@ pub fn request_quit() {
     dispatch2::DispatchQueue::main().exec_async(quit);
 }
 
-pub fn quit() {
-    let Some(mtm) = MainThreadMarker::new() else { return };
+fn teardown() {
     if let Some(app) = APP.with(|a| a.borrow_mut().take()) {
         crate::accessibility::stop();
         app.controller.shutdown();
+        if let Some(s) = app.settings.borrow().as_ref() {
+            s.close();
+        }
         (app.on_quit)();
     }
+}
+
+pub fn quit() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    teardown();
     NSApplication::sharedApplication(mtm).terminate(None);
+}
+
+/// Like [`quit`] but exits with a specific status (used by the self-test).
+pub fn quit_with_code(code: i32) {
+    teardown();
+    std::process::exit(code);
+}
+
+pub fn settings_visible() -> bool {
+    with_app(|a| a.settings.borrow().as_ref().is_some_and(SettingsWindow::is_visible)).unwrap_or(false)
+}
+
+pub fn close_settings() {
+    with_app(|a| {
+        if let Some(s) = a.settings.borrow().as_ref() {
+            s.close();
+        }
+    });
 }
 
 /// Take over the main thread and run the AppKit event loop. Never returns
@@ -249,6 +276,10 @@ pub fn run(boot: Boot) -> Result<(), String> {
     });
     sync_accessibility_observer(&boot.config, &state.provider_events);
     APP.with(|a| *a.borrow_mut() = Some(state));
+    if let Some(dir) = boot.self_test {
+        tracing::info!(dir = %dir.display(), "running UI self-test");
+        crate::selftest::start(mtm, dir);
+    }
 
     tracing::info!("NotchForge UI running");
     app.run();

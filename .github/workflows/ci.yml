@@ -36,6 +36,15 @@ jobs:
       - run: cargo test --workspace
       - run: packaging/bundle.sh
       - run: packaging/smoke_test.sh
+      - name: UI self-test (drives hover, click, drop, Escape, peek, settings)
+        run: |
+          export NOTCHFORGE_HOME="$(mktemp -d)"
+          dist/NotchForge.app/Contents/MacOS/notchforge --self-test "$PWD/selftest" -v
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-self-test
+          path: selftest/
       - uses: actions/upload-artifact@v4
         with:
           name: NotchForge.app

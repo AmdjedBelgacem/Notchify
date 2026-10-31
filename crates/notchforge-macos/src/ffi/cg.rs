@@ -37,3 +37,32 @@ unsafe extern "C" {
     pub fn CGCompleteDisplayConfiguration(config: CGDisplayConfigRef, option: u32) -> CGError;
     pub fn CGCancelDisplayConfiguration(config: CGDisplayConfigRef) -> CGError;
 }
+
+// ── synthetic input (used only by the self-test) ──────────────────────────
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CGPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+pub type CGEventRef = *const c_void;
+pub const kCGHIDEventTap: u32 = 0;
+pub const kCGEventLeftMouseDown: u32 = 1;
+pub const kCGEventLeftMouseUp: u32 = 2;
+pub const kCGEventMouseMoved: u32 = 5;
+pub const kCGMouseButtonLeft: u32 = 0;
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    pub fn CGEventCreateMouseEvent(
+        source: *const c_void,
+        mouse_type: u32,
+        position: CGPoint,
+        button: u32,
+    ) -> CGEventRef;
+    pub fn CGEventCreateKeyboardEvent(source: *const c_void, keycode: u16, key_down: bool) -> CGEventRef;
+    pub fn CGEventPost(tap: u32, event: CGEventRef);
+    pub fn CGDisplayPixelsHigh(display: CGDirectDisplayID) -> usize;
+}

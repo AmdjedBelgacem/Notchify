@@ -23,3 +23,4 @@ block2 = { workspace = true }
 dispatch2 = { workspace = true }
 libc = { workspace = true }
 tokio = { workspace = true }
+serde_json = { workspace = true }

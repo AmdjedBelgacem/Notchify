@@ -31,6 +31,8 @@ pub mod private_api;
 #[cfg(target_os = "macos")]
 pub mod screen;
 #[cfg(target_os = "macos")]
+pub mod selftest;
+#[cfg(target_os = "macos")]
 pub mod settings;
 #[cfg(target_os = "macos")]
 pub mod sharing;
