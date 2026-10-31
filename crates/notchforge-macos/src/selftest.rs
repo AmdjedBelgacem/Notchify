@@ -876,7 +876,9 @@ fn board_snapshots(
     ) {
         let _ = std::fs::write(&cover, png);
     }
-    let lists: [(&str, u32, &str, [(f64, f64, f64); 3]); 5] = [
+    /// Name, tracks, owner and the three gradient stops of its cover.
+    type BoardPlaylist<'a> = (&'a str, u32, &'a str, [(f64, f64, f64); 3]);
+    let lists: [BoardPlaylist; 5] = [
         ("Night Drive", 64, "You", [(1.0, 0.365, 0.561), (0.357, 0.114, 0.420), (0.078, 0.043, 0.18)]),
         ("Deep Focus", 120, "You", [(0.243, 0.78, 0.761), (0.106, 0.302, 0.42), (0.043, 0.102, 0.165)]),
         ("Sunday Slow", 38, "Léa", [(1.0, 0.824, 0.478), (0.878, 0.478, 0.247), (0.353, 0.141, 0.071)]),
