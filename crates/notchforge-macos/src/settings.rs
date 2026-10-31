@@ -217,7 +217,7 @@ impl Form<'_> {
                 .ceil()
                 .clamp(1.0, 3.0)
         });
-        if lines == 0.0 { 44.0 } else { 30.0 + lines * 15.0 }
+        if lines == 0.0 { 44.0 } else { 34.0 + lines * 15.0 }
     }
 
     fn put_texts(&self, row: &FlippedView, title: &str, subtitle: Option<&str>, text_w: f64, h: f64) {
@@ -236,7 +236,7 @@ impl Form<'_> {
                 s,
                 &font(11.5, Weight::Regular),
                 &text_secondary(),
-                rect(14.0, 27.0, text_w, h - 33.0),
+                rect(14.0, 27.0, text_w, h - 29.0),
                 3,
             );
             row.addSubview(&l);
