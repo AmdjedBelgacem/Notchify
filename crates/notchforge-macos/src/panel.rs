@@ -14,7 +14,7 @@ use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send};
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSDragOperation, NSDraggingContext, NSDraggingDestination, NSDraggingInfo,
-    NSDraggingItem, NSDraggingSession, NSDraggingSource, NSEvent, NSMainMenuWindowLevel, NSPanel,
+    NSDraggingItem, NSDraggingSession, NSDraggingSource, NSEvent, NSEventType, NSMainMenuWindowLevel, NSPanel,
     NSPasteboardTypeFileURL, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindowCollectionBehavior,
     NSWindowStyleMask,
 };
@@ -41,6 +41,23 @@ define_class!(
         #[unsafe(method(canBecomeMainWindow))]
         fn can_become_main(&self) -> bool {
             false
+        }
+
+        /// While the island is not pinned (hover / peek) any click on it must
+        /// pin it. AppKit would otherwise swallow the first click on a subview
+        /// that doesn't accept first-mouse (labels, cards) because the panel is
+        /// not key yet. Once pinned, events flow normally to the controls.
+        #[unsafe(method(sendEvent:))]
+        fn send_event(&self, event: &NSEvent) {
+            if event.r#type() == NSEventType::LeftMouseDown {
+                let p = event.locationInWindow();
+                let consumed = with_controller(|c| c.intercept_mouse_down(p)).unwrap_or(false);
+                if consumed {
+                    return;
+                }
+            }
+            // SAFETY: forwarding to NSWindow's implementation.
+            let _: () = unsafe { msg_send![super(self), sendEvent: event] };
         }
     }
 );

@@ -171,6 +171,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                     }),
                 );
                 r.check("collapsed: click-through", ignores, "");
+                r.metrics.insert("system_reduce_motion".into(), json!(crate::views::system_reduce_motion()));
             }
             check_settled(ctx, "collapsed", &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings]);
             screenshot(ctx, mtm, "01-collapsed", Some(notch.outset(300.0, 300.0, 120.0, 0.0)));
