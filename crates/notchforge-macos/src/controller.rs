@@ -509,6 +509,16 @@ impl Controller {
         }
     }
 
+    /// Called by the panel for every left mouse-down. Returns `true` when the
+    /// click was handled here (pinning a hover/peek island).
+    pub fn intercept_mouse_down(&self, window_point: NSPoint) -> bool {
+        if matches!(self.machine.borrow().state(), State::Expanded | State::DropTarget { .. }) {
+            return false;
+        }
+        self.root_mouse_down(window_point);
+        true
+    }
+
     pub fn key_down(&self, key: u16, flags: NSEventModifierFlags) -> bool {
         match key {
             KEY_ESCAPE => {

@@ -39,6 +39,8 @@ jobs:
       - name: UI self-test (drives hover, click, drop, Escape, peek, settings)
         run: |
           export NOTCHFORGE_HOME="$(mktemp -d)"
+          # CI images enable "Reduce motion"; force springs on so the test measures them.
+          printf '[appearance]\nreduced_motion = "never"\n' > "$NOTCHFORGE_HOME/config.toml"
           dist/NotchForge.app/Contents/MacOS/notchforge --self-test "$PWD/selftest" -v
       - uses: actions/upload-artifact@v4
         if: always()
