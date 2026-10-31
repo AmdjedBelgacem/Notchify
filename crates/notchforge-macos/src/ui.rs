@@ -391,7 +391,11 @@ pub fn style_pill(
 ) {
     b.setAttributedTitle(&attributed(title, f, fg));
     if let Some(sym) = symbol {
-        b.setImage(symbol_image(sym, f.pointSize() - 0.5, title).as_deref());
+        let img = symbol_image(sym, f.pointSize() - 0.5, title);
+        if let Some(i) = &img {
+            i.setTemplate(true);
+        }
+        b.setImage(img.as_deref());
         b.setImagePosition(objc2_app_kit::NSCellImagePosition::ImageLeading);
         b.setImageHugsTitle(true);
     }

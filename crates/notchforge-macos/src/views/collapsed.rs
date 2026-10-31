@@ -210,6 +210,7 @@ impl CollapsedView {
             self.right_icon.setHidden(false);
             self.right_text.setHidden(false);
         } else if snap.focus.active == Some(true) {
+            super::clear_app_tile(&self.right_icon);
             set_symbol(&self.right_icon, "moon.fill", 12.0, "Focus on");
             self.right_icon.setContentTintColor(Some(&crate::ui::rgba(0.62, 0.52, 1.0, 1.0)));
             self.right_icon.setHidden(false);

@@ -840,7 +840,7 @@ impl MediaPage {
         let caps = if fits { caps } else { caps.split(" · up to").next().unwrap_or(&caps).to_owned() };
         set_text(&self.output_caps, &caps);
         set_accessibility_label(&self.output_name, &format!("Output: {}, {}", dev.name, dev.capabilities()));
-        self.output_button.setEnabled(audio.devices.len() > 1);
+        self.output_button.setEnabled(!audio.devices.is_empty());
         match dev.volume {
             Some(v) => {
                 self.volume.set_value(if dev.muted == Some(true) { 0.0 } else { v as f64 });

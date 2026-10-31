@@ -85,15 +85,40 @@ pub fn app_icon_view(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSImageVi
     v
 }
 
+/// Undo `set_app_icon`'s brand tile before a view shows something else.
+pub fn clear_app_tile(v: &NSImageView) {
+    if let Some(l) = v.layer() {
+        l.setBackgroundColor(None);
+        l.setBorderWidth(0.0);
+    }
+    v.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
+}
+
 pub fn set_app_icon(v: &NSImageView, app: &AppRef) {
+    v.setWantsLayer(true);
+    let layer = v.layer();
     match crate::icons::app_icon(app) {
         Some(img) => {
             v.setImage(Some(&img));
             v.setContentTintColor(None);
+            v.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
+            if let Some(l) = layer {
+                l.setBackgroundColor(None);
+                l.setBorderWidth(0.0);
+            }
         }
         None => {
-            v.setImage(symbol_image(crate::icons::fallback_symbol(app), 16.0, &app.display_name).as_deref());
-            v.setContentTintColor(Some(&rgb8(crate::icons::accent(app))));
+            // As on the design boards: a white glyph on a brand-colour tile.
+            let side = v.frame().size.width;
+            v.setImage(symbol_image(crate::icons::fallback_symbol(app), side * 0.5, &app.display_name).as_deref());
+            v.setContentTintColor(Some(&objc2_app_kit::NSColor::whiteColor()));
+            v.setImageScaling(NSImageScaling::ScaleNone);
+            if let Some(l) = layer {
+                l.setBackgroundColor(Some(&rgb8(crate::icons::tile_color(app)).CGColor()));
+                l.setCornerRadius((side * 0.27).round());
+                l.setBorderWidth(0.5);
+                l.setBorderColor(Some(&crate::ui::rgba(1.0, 1.0, 1.0, 0.15).CGColor()));
+            }
         }
     }
     crate::ui::set_accessibility_label(v, &app.display_name);

@@ -42,6 +42,17 @@ pub fn accent(app: &AppRef) -> (u8, u8, u8) {
     app.known.map_or((150, 150, 160), KnownApp::accent)
 }
 
+/// Background of an app's tile when its real icon is unavailable (the
+/// design boards' colours; dark-mark apps get their dark brand colour).
+pub fn tile_color(app: &AppRef) -> (u8, u8, u8) {
+    match app.known {
+        Some(KnownApp::Cursor) => (28, 28, 30),
+        Some(KnownApp::Slack) => (74, 21, 75),
+        Some(k) => k.accent(),
+        None => (72, 72, 78),
+    }
+}
+
 /// Finder icon for a file in the tray.
 pub fn file_icon(path: &std::path::Path) -> Retained<NSImage> {
     NSWorkspace::sharedWorkspace().iconForFile(&NSString::from_str(&path.to_string_lossy()))

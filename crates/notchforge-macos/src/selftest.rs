@@ -802,15 +802,7 @@ fn board_snapshots(
             "Dinner at 8? I booked the place on Rue Oberkampf",
             720_000,
         ),
-        note(
-            14,
-            AppRef::known(KnownApp::Slack),
-            NotificationKind::Message,
-            Priority::Normal,
-            "Mira",
-            "#design · New onboarding mockups are up",
-            1_500_000,
-        ),
+        note(14, AppRef::known(KnownApp::Slack), NotificationKind::Message, Priority::Normal, "Mira", "", 1_500_000),
     ];
     overview.unread = 1;
     let report = dir.join("Report.pdf");

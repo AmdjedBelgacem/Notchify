@@ -13,7 +13,7 @@
 
 use super::{app_icon_view, set_app_icon};
 use crate::ui::{
-    FlippedView, Palette, Weight, attributed, font, label, pill_button, rect, rgb8, rgba, set_accessibility_label,
+    FlippedView, Palette, Weight, attributed, font, label, pill_button, rect, rgba, set_accessibility_label,
     set_gradient, set_text, shape_view, without_animation,
 };
 use notchforge_core::geometry::{LayoutKind, NotchLayout};
@@ -99,20 +99,15 @@ impl PeekView {
     }
 
     pub fn show(&self, n: &Notification, p: &Palette) {
-        set_app_icon(&self.icon, &n.app);
-        // Without a real app icon, the glyph sits white on a brand-colour tile.
+        // Without a real app icon the icon view draws its own brand tile
+        // (see `set_app_icon`); the outer tile only frames real icons.
         let branded = crate::icons::app_icon(&n.app).is_none();
-        let tile_color = if branded { rgb8(crate::icons::accent(&n.app)) } else { rgba(1.0, 1.0, 1.0, 0.08) };
-        if branded {
-            self.icon.setImage(crate::ui::symbol_image(crate::icons::fallback_symbol(&n.app), 19.0, "").as_deref());
-            self.icon.setContentTintColor(Some(&objc2_app_kit::NSColor::whiteColor()));
-            self.icon.setFrame(rect(8.0, 8.0, 20.0, 20.0));
-        } else {
-            self.icon.setFrame(rect(2.0, 2.0, 32.0, 32.0));
-        }
         if let Some(l) = self.tile.layer() {
-            without_animation(|| l.setBackgroundColor(Some(&tile_color.CGColor())));
+            let c = if branded { rgba(0.0, 0.0, 0.0, 0.0) } else { rgba(1.0, 1.0, 1.0, 0.08) };
+            without_animation(|| l.setBackgroundColor(Some(&c.CGColor())));
         }
+        self.icon.setFrame(if branded { rect(0.0, 0.0, 36.0, 36.0) } else { rect(2.0, 2.0, 32.0, 32.0) });
+        set_app_icon(&self.icon, &n.app);
         let urgent = is_urgent(n);
         let summary = match n.kind {
             NotificationKind::NeedsInput => format!("{} needs your input", n.app.display_name),

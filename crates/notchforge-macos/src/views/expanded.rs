@@ -757,9 +757,15 @@ impl ExpandedView {
         }
         let mut y = 0.0;
         let mut views = Vec::new();
-        for n in snap.notifications.iter().take(MAX_ROWS) {
-            let rh = if n.body.trim().is_empty() { 50.0 } else { 64.0 };
-            views.push(self.notification_row(n, snap.now_ms, rect(0.0, y, self.notif_width, rh)));
+        for (i, n) in snap.notifications.iter().take(MAX_ROWS).enumerate() {
+            // Board metrics: 10 pt padding, 13 + 18 (+ 15 body) pt of text.
+            let rh = if n.body.trim().is_empty() { 51.0 } else { 66.0 };
+            let row = self.notification_row(n, snap.now_ms, rect(0.0, y, self.notif_width, rh));
+            // Rows past the first three fade, hinting at more below.
+            if i >= 3 {
+                row.setAlphaValue(0.55);
+            }
+            views.push(row);
             y += rh + ROW_GAP;
         }
         self.notif_doc.setFrame(rect(0.0, 0.0, self.notif_width, y.max(visible_h)));
@@ -809,7 +815,7 @@ impl ExpandedView {
             &relative(n.timestamp_ms, now_ms),
             &font(11.0, Weight::Regular),
             &p.secondary,
-            rect(w - 62.0, 9.0, 50.0, 14.0),
+            rect(w - 62.0, 10.0, 50.0, 14.0),
         );
         time.setAlignment(NSTextAlignment::Right);
         row.addSubview(&time);
@@ -818,7 +824,7 @@ impl ExpandedView {
             &head,
             &font(11.0, Weight::Semibold),
             &head_color,
-            rect(tx, 9.0, w - tx - 66.0, 14.0),
+            rect(tx, 10.0, w - tx - 66.0, 14.0),
         ));
         let mut title = n.title.clone();
         if let Some(sub) = &n.subtitle {
@@ -891,11 +897,35 @@ impl ExpandedView {
                 rect(12.0 + c as f64 * (cw + 8.0), 12.0 + r as f64 * (TILE_H + 8.0), cw, TILE_H),
                 item.path.clone(),
             );
-            let icon = NSImageView::imageViewWithImage(&crate::icons::file_icon(&item.path), mtm);
-            icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
-            icon.setFrame(rect((cw - 54.0) / 2.0, 4.0, 54.0, 54.0));
+            let is_image = item.path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+                matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "heic" | "gif" | "tiff" | "webp")
+            });
+            let thumb = if is_image { crate::icons::file_image(&item.path) } else { None };
+            let icon = match &thumb {
+                // Images show themselves, in a white frame (as on the board).
+                Some(img) => {
+                    let v = NSImageView::imageViewWithImage(img, mtm);
+                    v.setImageScaling(objc2_app_kit::NSImageScaling::ScaleAxesIndependently);
+                    v.setFrame(rect((cw - 54.0) / 2.0, 4.0, 54.0, 54.0));
+                    v.setWantsLayer(true);
+                    if let Some(l) = v.layer() {
+                        l.setCornerRadius(6.0);
+                        l.setMasksToBounds(true);
+                        l.setBorderWidth(2.0);
+                        l.setBorderColor(Some(&objc2_app_kit::NSColor::whiteColor().CGColor()));
+                    }
+                    v
+                }
+                None => {
+                    let v = NSImageView::imageViewWithImage(&crate::icons::file_icon(&item.path), mtm);
+                    v.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
+                    v.setFrame(rect((cw - 54.0) / 2.0, 4.0, 54.0, 54.0));
+                    v
+                }
+            };
             tile.addSubview(&icon);
-            let name = label(mtm, &item.name, &font(11.0, Weight::Regular), &p.primary, rect(0.0, 64.0, cw, 14.0));
+            let name =
+                label(mtm, &item.name, &font(11.0, Weight::Regular), &p.primary, rect(-4.0, 64.0, cw + 8.0, 14.0));
             name.setAlignment(NSTextAlignment::Center);
             name.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingMiddle);
             tile.addSubview(&name);
