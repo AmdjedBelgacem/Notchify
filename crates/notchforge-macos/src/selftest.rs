@@ -236,19 +236,72 @@ fn post_key(code: u16) {
 }
 
 /// Region screenshot (`screencapture` uses top-left coordinates in points).
-fn screenshot(ctx: &Ctx, mtm: MainThreadMarker, name: &str, region: Option<Rect>) {
+/// Save a PNG and print it base64-encoded (chunked) so CI logs carry the
+/// real rendering for review (`NFPNG <name> <index> <chunk>` lines).
+fn emit_png(ctx: &Ctx, name: &str, png: Vec<u8>) {
+    use base64::Engine as _;
     let path = ctx.dir.join(format!("{name}.png"));
-    let mut cmd = std::process::Command::new("/usr/sbin/screencapture");
-    cmd.arg("-x");
-    if let Some(r) = region {
-        let top = primary_height(mtm) - r.max_y();
-        cmd.arg("-R").arg(format!("{:.0},{:.0},{:.0},{:.0}", r.x, top.max(0.0), r.width, r.height));
-    }
-    let ok = cmd.arg(&path).status().is_ok_and(|s| s.success()) && path.exists();
-    if ok {
+    if std::fs::write(&path, &png).is_ok() {
         ctx.report.borrow_mut().screenshots.push(path.display().to_string());
-    } else {
-        tracing::warn!(name, "screenshot unavailable (Screen Recording permission?)");
+    }
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    for (i, chunk) in b64.as_bytes().chunks(12_000).enumerate() {
+        println!("NFPNG {name} {i} {}", String::from_utf8_lossy(chunk));
+    }
+}
+
+/// PNG of a layer tree rendered offscreen at `scale` (no Screen Recording
+/// permission needed: these are our own layers).
+fn png_from_layer(layer: &objc2_quartz_core::CALayer, w: f64, h: f64, scale: f64) -> Option<Vec<u8>> {
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImageAlphaInfo,
+    };
+    let (pw, ph) = ((w * scale).round() as usize, (h * scale).round() as usize);
+    if pw == 0 || ph == 0 {
+        return None;
+    }
+    let space = CGColorSpace::new_device_rgb()?;
+    // SAFETY: null data lets CoreGraphics own the buffer; 0 = automatic stride.
+    let ctx = unsafe {
+        CGBitmapContextCreate(std::ptr::null_mut(), pw, ph, 8, 0, Some(&space), CGImageAlphaInfo::PremultipliedLast.0)
+    }?;
+    CGContext::scale_ctm(Some(&ctx), scale, scale);
+    layer.renderInContext(&ctx);
+    let img = CGBitmapContextCreateImage(Some(&ctx))?;
+    png_from_cgimage(&img)
+}
+
+fn png_from_cgimage(img: &objc2_core_graphics::CGImage) -> Option<Vec<u8>> {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep};
+    let rep = NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), img);
+    // SAFETY: empty properties dictionary.
+    let data = unsafe {
+        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &objc2_foundation::NSDictionary::new())
+    }?;
+    Some(data.to_vec())
+}
+
+/// PNG of any view, drawn offscreen (used for the Settings window).
+pub fn png_from_view(view: &objc2_app_kit::NSView) -> Option<Vec<u8>> {
+    use objc2_app_kit::NSBitmapImageFileType;
+    let bounds = view.bounds();
+    let rep = view.bitmapImageRepForCachingDisplayInRect(bounds)?;
+    view.cacheDisplayInRect_toBitmapImageRep(bounds, &rep);
+    // SAFETY: empty properties dictionary.
+    let data = unsafe {
+        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &objc2_foundation::NSDictionary::new())
+    }?;
+    Some(data.to_vec())
+}
+
+/// Render the island as it is on screen right now, at 2×.
+fn screenshot(ctx: &Ctx, _mtm: MainThreadMarker, name: &str, _region: Option<Rect>) {
+    let Some((layer, island)) = with_controller(|c| (c.island_layer(), c.island_global())) else { return };
+    let Some(layer) = layer else { return };
+    match png_from_layer(&layer, island.width, island.height, 2.0) {
+        Some(png) => emit_png(ctx, name, png),
+        None => tracing::warn!(name, "could not render the island"),
     }
 }
 
@@ -456,7 +509,10 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
         14 => {
             let visible = app::settings_visible();
             ctx.report.borrow_mut().check("settings: window shown", visible, "");
-            screenshot(ctx, mtm, "05-settings", None);
+            match app::settings_content_view().as_deref().and_then(png_from_view) {
+                Some(png) => emit_png(ctx, "05-settings", png),
+                None => tracing::warn!("could not render the Settings window"),
+            }
             app::close_settings();
         }
         // ── display reconfiguration keeps the UI consistent ──

@@ -227,6 +227,11 @@ pub fn settings_visible() -> bool {
     with_app(|a| a.settings.borrow().as_ref().is_some_and(SettingsWindow::is_visible)).unwrap_or(false)
 }
 
+/// The Settings window's content view, when it exists (self-test renders it).
+pub fn settings_content_view() -> Option<Retained<objc2_app_kit::NSView>> {
+    with_app(|a| a.settings.borrow().as_ref().and_then(SettingsWindow::content_view)).flatten()
+}
+
 pub fn close_settings() {
     with_app(|a| {
         if let Some(s) = a.settings.borrow().as_ref() {

@@ -263,6 +263,10 @@ impl SettingsWindow {
         Self { window, targets: Rc::new(Targets::default()) }
     }
 
+    pub fn content_view(&self) -> Option<Retained<NSView>> {
+        self.window.contentView()
+    }
+
     pub fn is_visible(&self) -> bool {
         self.window.isVisible()
     }
