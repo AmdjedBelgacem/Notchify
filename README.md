@@ -32,6 +32,10 @@ secondary entry point.
 >   delivers agent events over HTTP, as a Claude Code hook payload and through
 >   the inbox file, checks they are ingested, then sends SIGTERM and verifies a
 >   clean shutdown (agent socket removed). About 42 MB resident after launch.
+> * **Live providers** (`packaging/providers_test.sh`). Runs every provider
+>   against real macOS and the network. A forecast is fetched from Open-Meteo
+>   for a geocoded city, and the battery, accessory, agent, Notification
+>   Center and Focus providers must all report `Running`.
 > * **System notification paths** (`packaging/system_paths_test.sh`). Posts a
 >   real macOS notification and verifies the Notification Center database
 >   watcher ingests it. The Accessibility banner check is skipped on hosts that
