@@ -263,6 +263,14 @@ impl SettingsWindow {
         Self { window, targets: Rc::new(Targets::default()) }
     }
 
+    pub fn is_visible(&self) -> bool {
+        self.window.isVisible()
+    }
+
+    pub fn close(&self) {
+        self.window.orderOut(None);
+    }
+
     pub fn show(&self, config: &Config) {
         let mtm = MainThreadMarker::from(&*self.window);
         self.targets.clear();

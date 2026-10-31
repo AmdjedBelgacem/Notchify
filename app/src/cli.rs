@@ -12,6 +12,8 @@ OPTIONS:
     --headless         Run the engine and providers without UI (any OS); events are logged
     --config <PATH>    Use a different config file
     --print-config     Print the default configuration and exit
+    --self-test <DIR>  macOS: drive the real UI end to end, write DIR/selftest.json
+                       and screenshots, exit 0 on success (used by CI)
     -v, --verbose      Debug logging (or set RUST_LOG)
     -V, --version      Print version
     -h, --help         Print this help";
@@ -21,6 +23,7 @@ pub struct Args {
     pub headless: bool,
     pub config: Option<PathBuf>,
     pub print_config: bool,
+    pub self_test: Option<PathBuf>,
     pub verbose: bool,
     pub version: bool,
     pub help: bool,
@@ -34,6 +37,7 @@ impl Args {
                 "--headless" => a.headless = true,
                 "--config" => a.config = Some(it.next().ok_or("--config needs a path")?.into()),
                 "--print-config" => a.print_config = true,
+                "--self-test" => a.self_test = Some(it.next().ok_or("--self-test needs a directory")?.into()),
                 "-v" | "--verbose" => a.verbose = true,
                 "-V" | "--version" => a.version = true,
                 "-h" | "--help" => a.help = true,

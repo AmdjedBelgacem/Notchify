@@ -43,6 +43,20 @@ const FRAME_INTERVAL: f64 = 1.0 / 120.0;
 const KEY_ESCAPE: u16 = 53;
 const KEY_COMMA: u16 = 43;
 
+/// Frame statistics of the most recent transition (exposed for the self-test).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct AnimStats {
+    pub frames: u32,
+    pub duration_secs: f64,
+    pub max_frame_secs: f64,
+}
+
+impl AnimStats {
+    pub fn fps(&self) -> f64 {
+        if self.duration_secs > 0.0 { self.frames as f64 / self.duration_secs } else { 0.0 }
+    }
+}
+
 pub struct Controller {
     mtm: MainThreadMarker,
     pub panel: Retained<NotchPanel>,
@@ -57,6 +71,7 @@ pub struct Controller {
     timers: RefCell<HashMap<TimerKind, Retained<NSTimer>>>,
     anim: RefCell<Option<Retained<NSTimer>>>,
     last_tick: Cell<Option<Instant>>,
+    anim_stats: Cell<AnimStats>,
     snapshot: RefCell<Arc<Snapshot>>,
     config: RefCell<Arc<Config>>,
     engine: EngineHandle,
@@ -126,6 +141,7 @@ impl Controller {
             timers: RefCell::new(HashMap::new()),
             anim: RefCell::new(None),
             last_tick: Cell::new(None),
+            anim_stats: Cell::new(AnimStats::default()),
             snapshot: RefCell::new(Arc::new(Snapshot::default())),
             config: RefCell::new(config),
             engine,
@@ -308,6 +324,7 @@ impl Controller {
             return;
         }
         self.last_tick.set(None);
+        self.anim_stats.set(AnimStats::default());
         let block = RcBlock::new(|_t: NonNull<NSTimer>| {
             crate::app::with_controller(|c| c.tick());
         });
@@ -321,6 +338,11 @@ impl Controller {
     fn tick(&self) {
         let now = Instant::now();
         let dt = self.last_tick.replace(Some(now)).map_or(FRAME_INTERVAL, |t| (now - t).as_secs_f64());
+        let mut st = self.anim_stats.get();
+        st.frames += 1;
+        st.duration_secs += dt;
+        st.max_frame_secs = st.max_frame_secs.max(dt);
+        self.anim_stats.set(st);
         self.spring.borrow_mut().step(dt);
         self.apply_frame();
         if self.spring.borrow().is_settled() {
@@ -655,6 +677,52 @@ impl Controller {
         }
         let wings = cfg.appearance.show_wings && self.snapshot.borrow().wants_wings();
         self.handle(Event::WingsChanged(wings));
+    }
+
+    // ── introspection (self-test & diagnostics) ──────────────────────────
+
+    pub fn machine_state(&self) -> State {
+        self.machine.borrow().state()
+    }
+
+    pub fn layout_kind(&self) -> LayoutKind {
+        self.kind.get()
+    }
+
+    pub fn layout(&self) -> NotchLayout {
+        self.layout.borrow().clone()
+    }
+
+    pub fn is_animating(&self) -> bool {
+        self.anim.borrow().is_some()
+    }
+
+    pub fn last_animation(&self) -> AnimStats {
+        self.anim_stats.get()
+    }
+
+    /// Island rect in global coordinates as currently laid out.
+    pub fn island_global(&self) -> notchforge_core::geometry::Rect {
+        let win = self.panel.frame();
+        let f = self.island.frame();
+        notchforge_core::geometry::Rect::new(
+            win.origin.x + f.origin.x,
+            win.origin.y + f.origin.y,
+            f.size.width,
+            f.size.height,
+        )
+    }
+
+    pub fn panel_global(&self) -> notchforge_core::geometry::Rect {
+        screen::to_rect(self.panel.frame())
+    }
+
+    pub fn ignores_mouse(&self) -> bool {
+        self.panel.ignoresMouseEvents()
+    }
+
+    pub fn current_snapshot(&self) -> Arc<Snapshot> {
+        self.snapshot.borrow().clone()
     }
 
     pub fn screen_id(&self) -> u32 {

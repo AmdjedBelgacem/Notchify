@@ -122,6 +122,7 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
         trigger,
         runtime,
         tasks,
+        self_test: args.self_test,
     })
 }
 
@@ -159,6 +160,7 @@ struct Launch {
     trigger: ShutdownTrigger,
     runtime: tokio::runtime::Runtime,
     tasks: Vec<JoinHandle<()>>,
+    self_test: Option<std::path::PathBuf>,
 }
 
 /// Signal shutdown and give every task up to a second to finish cleanly
@@ -210,6 +212,7 @@ fn run_ui(l: Launch) -> anyhow::Result<()> {
         location: l.location,
         provider_events: l.provider_events,
         on_quit,
+        self_test: l.self_test,
     })
     .map_err(anyhow::Error::msg)
 }
