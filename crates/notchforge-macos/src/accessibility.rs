@@ -40,9 +40,15 @@ thread_local! {
     static EVENTS: RefCell<Option<mpsc::Sender<ProviderEvent>>> = const { RefCell::new(None) };
 }
 
+/// PID of the process that renders banners. Looked up by bundle id, then by
+/// executable name (it is not always registered as an `NSRunningApplication`).
 fn nc_pid() -> Option<i32> {
     let apps = NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(NC_BUNDLE));
-    apps.firstObject().map(|a| a.processIdentifier())
+    if let Some(app) = apps.firstObject() {
+        return Some(app.processIdentifier());
+    }
+    let out = std::process::Command::new("/usr/bin/pgrep").args(["-x", "NotificationCenter"]).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().next()?.trim().parse().ok()
 }
 
 /// Copy an attribute (+1) of an AX element.
