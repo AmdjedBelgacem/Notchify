@@ -356,6 +356,14 @@ impl ExpandedView {
             rect(c3x, body_y + 220.0, c3w, 26.0),
         );
         resolution.setAlignment(NSTextAlignment::Left);
+        resolution.addSubview(&symbol_view(
+            mtm,
+            "chevron.up.chevron.down",
+            9.0,
+            &p.secondary,
+            rect(c3w - 22.0, 7.0, 12.0, 12.0),
+            "",
+        ));
         set_accessibility_label(&resolution, "Display resolution");
         overview.addSubview(&resolution);
 

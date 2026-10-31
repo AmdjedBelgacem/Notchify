@@ -15,6 +15,8 @@ pub mod controls;
 #[cfg(target_os = "macos")]
 pub mod ffi;
 #[cfg(target_os = "macos")]
+pub mod hotkey;
+#[cfg(target_os = "macos")]
 pub mod icons;
 #[cfg(target_os = "macos")]
 pub mod location;

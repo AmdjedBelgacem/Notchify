@@ -272,6 +272,7 @@ pub fn run(boot: Boot) -> Result<(), String> {
     let menubar = MenuBar::new(mtm);
     menubar.set_visible(boot.config.general.show_menu_bar_icon);
 
+    crate::hotkey::install();
     crate::location::start(mtm, boot.location);
     if boot.config.providers.weather && boot.config.weather.location.eq_ignore_ascii_case("auto") {
         crate::location::request_if_undetermined();

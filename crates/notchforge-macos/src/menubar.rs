@@ -147,9 +147,14 @@ impl MenuBar {
         menu.addItem(&player_sep);
 
         // ── everyday toggles ──
-        menu.addItem(&menu_item(mtm, &targets, "Show Panel", "", || {
+        let show = menu_item(mtm, &targets, "Show Panel", "n", || {
             with_controller(|c| c.toggle());
-        }));
+        });
+        // ⌃⌥N, registered system-wide by `crate::hotkey`.
+        show.setKeyEquivalentModifierMask(
+            objc2_app_kit::NSEventModifierFlags::Control | objc2_app_kit::NSEventModifierFlags::Option,
+        );
+        menu.addItem(&show);
         let pause = menu_item(mtm, &targets, "Pause Notifications", "", || {
             with_controller(|c| c.toggle_pause());
         });
