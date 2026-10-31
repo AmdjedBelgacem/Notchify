@@ -205,7 +205,12 @@ pub fn wrapping_label(
     l.setFont(Some(f));
     l.setTextColor(Some(color));
     l.setMaximumNumberOfLines(lines);
-    l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
+    // Wrap by word; only the last visible line truncates. (A truncating line
+    // break mode on the field itself would turn wrapping off.)
+    l.setLineBreakMode(NSLineBreakMode::ByWordWrapping);
+    if let Some(cell) = l.cell() {
+        cell.setTruncatesLastVisibleLine(true);
+    }
     l.setFrame(frame);
     l
 }
