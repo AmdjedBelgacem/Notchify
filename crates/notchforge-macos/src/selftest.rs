@@ -548,6 +548,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 (crate::settings::Pane::General, "05c-settings-general"),
                 (crate::settings::Pane::Permissions, "05d-settings-permissions"),
             ] {
+                crate::settings::set_preview(pane == crate::settings::Pane::Agents);
                 app::show_settings_pane(pane);
                 match app::settings_content_view().as_deref().and_then(png_from_view) {
                     Some(png) => emit_png(ctx, name, png),

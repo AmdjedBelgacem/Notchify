@@ -603,7 +603,8 @@ impl Form<'_> {
         let h = self.texts(subtitle, GROUP_W - 64.0 - width);
         let (row, w) = self.row(h);
         self.put_texts(&row, title, subtitle, w - 64.0 - width, h);
-        let frame = rect(w - 16.0 - width, (h - 28.0) / 2.0, width, 28.0);
+        let box_frame = rect(w - 16.0 - width, (h - 28.0) / 2.0, width, 28.0);
+        let frame = rect(10.0, 4.0, width - 20.0, 20.0);
         let f: Retained<NSTextField> = if secure {
             let sf = objc2_app_kit::NSSecureTextField::initWithFrame(
                 <objc2_app_kit::NSSecureTextField as MainThreadOnly>::alloc(self.mtm),
@@ -623,10 +624,8 @@ impl Form<'_> {
         f.setDrawsBackground(false);
         f.setFocusRingType(objc2_app_kit::NSFocusRingType::None);
         f.setTextColor(Some(&text_primary()));
-        f.setWantsLayer(true);
-        if let Some(l) = f.layer() {
-            l.setCornerRadius(8.0);
-            l.setBackgroundColor(Some(&rgba(0.04, 0.04, 0.05, 1.0).CGColor()));
+        let field_box = shape_view(self.mtm, box_frame, &rgba(0.04, 0.04, 0.05, 1.0), 8.0);
+        if let Some(l) = field_box.layer() {
             l.setBorderWidth(1.0);
             l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.08).CGColor()));
         }
@@ -652,7 +651,8 @@ impl Form<'_> {
             f.setTarget(Some(t.as_any()));
             f.setAction(Some(ActionTarget::action()));
         }
-        row.addSubview(&f);
+        field_box.addSubview(&f);
+        row.addSubview(&field_box);
     }
 
     fn slider(&self, title: &str, min: f64, max: f64, value: f64, set: impl Fn(&mut Config, f64) + 'static) {
@@ -766,7 +766,10 @@ impl Form<'_> {
             rect(14.0, 9.0, GROUP_W - 120.0, 16.0),
         ));
         let target = self.targets.add(self.mtm, move |_| copy());
-        let b = pill_button(self.mtm, "Copy", &target, rect(GROUP_W - 8.0 - 64.0, 4.0, 64.0, 26.0), false);
+        let b = pill_button(self.mtm, "Copy", &target, rect(GROUP_W - 8.0 - 76.0, 4.0, 76.0, 26.0), false);
+        b.setImage(crate::ui::symbol_image("doc.on.doc", 11.0, "").as_deref());
+        b.setImagePosition(objc2_app_kit::NSCellImagePosition::ImageLeft);
+        b.setContentTintColor(Some(&rgba(1.0, 1.0, 1.0, 0.7)));
         b.setControlSize(NSControlSize::Regular);
         card.addSubview(&b);
         card.addSubview(&shape_view(self.mtm, rect(0.0, 34.0, GROUP_W, 0.5), &hairline(), 0.0));
@@ -1268,7 +1271,7 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             form.text_row(
                 "Bearer token",
                 Some("Optional. Requests then need Authorization: Bearer"),
-                c.agents.token.as_deref().unwrap_or(""),
+                if preview() { "board-sample" } else { c.agents.token.as_deref().unwrap_or("") },
                 "Optional",
                 true,
                 190.0,
