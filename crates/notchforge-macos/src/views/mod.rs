@@ -10,6 +10,7 @@ pub mod compact;
 pub mod expanded;
 pub mod media;
 pub mod peek;
+pub mod usage;
 
 use crate::ui::{FlippedView, Palette, rgb8, symbol_image};
 use notchforge_core::apps::AppRef;

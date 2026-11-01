@@ -295,6 +295,107 @@ impl BatteryComponent {
     }
 }
 
+/// A coding agent whose token usage can be read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum UsageAgent {
+    ClaudeCode,
+    Codex,
+}
+
+impl UsageAgent {
+    pub fn display_name(self) -> &'static str {
+        match self {
+            UsageAgent::ClaudeCode => "Claude Code",
+            UsageAgent::Codex => "Codex CLI",
+        }
+    }
+}
+
+/// Tokens used, by kind. Cache tokens dwarf the rest, so they stay apart.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenCounts {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+}
+
+impl TokenCounts {
+    /// Input and output: what the page's main figures count.
+    pub fn main(&self) -> u64 {
+        self.input + self.output
+    }
+
+    pub fn cache(&self) -> u64 {
+        self.cache_read + self.cache_write
+    }
+
+    pub fn add(&mut self, other: &TokenCounts) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cache_read += other.cache_read;
+        self.cache_write += other.cache_write;
+    }
+}
+
+/// `950` → `"950"`, `238_400` → `"238K"`, `1_600_000` → `"1.60M"`, `40_200_000` → `"40.2M"`.
+pub fn compact_tokens(n: u64) -> String {
+    match n {
+        0..=999 => n.to_string(),
+        1_000..=999_499 => format!("{}K", (n + 500) / 1000),
+        999_500..=9_994_999 => format!("{:.2}M", n as f64 / 1e6),
+        9_995_000..=999_949_999 => format!("{:.1}M", n as f64 / 1e6),
+        _ => format!("{:.2}B", n as f64 / 1e9),
+    }
+}
+
+/// A session among a range's heaviest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsageSession {
+    pub project: String,
+    pub agent: UsageAgent,
+    pub model: String,
+    pub minutes: u32,
+    /// Input and output tokens within the range.
+    pub tokens: u64,
+}
+
+/// One time range of the Agents page. Everything but `counts` excludes cache.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UsageRange {
+    pub label: String,
+    pub counts: TokenCounts,
+    /// Tokens per hour or day, oldest first: (Claude Code, Codex).
+    pub bars: Vec<(u64, u64)>,
+    pub ticks: Vec<String>,
+    pub agents: Vec<(UsageAgent, u64)>,
+    pub models: Vec<(String, u64)>,
+    pub sessions: Vec<UsageSession>,
+}
+
+/// A session that logged tokens in the last few minutes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunningSession {
+    pub agent: UsageAgent,
+    pub project: String,
+    pub tokens: u64,
+    /// How full the context window is, where the agent logs its size.
+    pub context_percent: Option<u8>,
+}
+
+/// Token usage read from the coding agents' own logs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentUsage {
+    /// The first read of the logs has finished.
+    pub loaded: bool,
+    pub claude_found: bool,
+    pub codex_found: bool,
+    pub opencode_found: bool,
+    /// Today, 7 days, 30 days.
+    pub ranges: Vec<UsageRange>,
+    pub running: Vec<RunningSession>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceBattery {
     /// Stable identity (Bluetooth address when known, else name).
@@ -1099,5 +1200,21 @@ mod tests {
         });
         assert!(a.is_playing());
         assert_eq!(a.playing_app().map(|s| s.name.as_str()), Some("Google Chrome"));
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::*;
+
+    #[test]
+    fn token_counts_read_short() {
+        assert_eq!(compact_tokens(950), "950");
+        assert_eq!(compact_tokens(238_400), "238K");
+        assert_eq!(compact_tokens(999_499), "999K");
+        assert_eq!(compact_tokens(999_500), "1.00M");
+        assert_eq!(compact_tokens(1_600_000), "1.60M");
+        assert_eq!(compact_tokens(40_200_000), "40.2M");
+        assert_eq!(compact_tokens(2_500_000_000), "2.50B");
     }
 }

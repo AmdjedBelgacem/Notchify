@@ -72,6 +72,9 @@ require_approval = true
 # Say when a coding-agent CLI session (claude, codex, opencode, gemini…) ends,
 # with no hooks needed. Settings › Coding Agents can also wire hooks for you.
 watch_sessions = true
+# Read token counts from Claude Code and Codex CLI session logs for the Agents
+# page. Only counts, models, times and project names are kept, on this Mac.
+token_usage = true
 
 [notifications]
 max_items = 100

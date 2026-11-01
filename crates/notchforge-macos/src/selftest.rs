@@ -869,6 +869,79 @@ fn text_probe(ctx: &Rc<Ctx>, mtm: MainThreadMarker) {
 /// The same sample data on a simulated 14-inch MacBook Pro notch (185 × 32
 /// pt), the geometry the design boards are drawn at. CI Macs have no notch
 /// and a 25 pt menu bar, so the live screenshots above sit 7 pt shorter.
+/// The Agents board's sample data.
+pub fn sample_usage() -> notchforge_core::model::AgentUsage {
+    use notchforge_core::model::{AgentUsage, RunningSession, TokenCounts, UsageAgent, UsageRange, UsageSession};
+    let session = |project: &str, agent, model: &str, minutes, tokens| UsageSession {
+        project: project.into(),
+        agent,
+        model: model.into(),
+        minutes,
+        tokens,
+    };
+    let bars = [
+        (0, 0),
+        (0, 0),
+        (0, 0),
+        (0, 0),
+        (0, 0),
+        (0, 0),
+        (0, 0),
+        (0, 0),
+        (2, 1),
+        (6, 2),
+        (11, 4),
+        (14, 3),
+        (9, 6),
+        (4, 8),
+        (12, 9),
+        (18, 7),
+        (16, 5),
+        (10, 8),
+        (7, 6),
+        (13, 4),
+        (15, 7),
+        (9, 3),
+        (6, 3),
+        (0, 0),
+    ];
+    let today = UsageRange {
+        label: "Today".into(),
+        counts: TokenCounts { input: 142_000, output: 96_000, cache_read: 1_520_000, cache_write: 84_000 },
+        bars: bars.iter().map(|(a, b)| (a * 1000, b * 1000)).collect(),
+        ticks: ["00", "06", "12", "18", "24"].map(str::to_owned).to_vec(),
+        agents: vec![(UsageAgent::ClaudeCode, 162_000), (UsageAgent::Codex, 76_000)],
+        models: vec![("Opus 5.5".into(), 104_000), ("GPT-5 Codex".into(), 76_000), ("Sonnet 5.5".into(), 58_000)],
+        sessions: vec![
+            session("Notchify", UsageAgent::ClaudeCode, "Opus 5.5", 134, 96_000),
+            session("api-server", UsageAgent::Codex, "GPT-5 Codex", 100, 58_000),
+            session("website", UsageAgent::ClaudeCode, "Sonnet 5.5", 52, 31_000),
+            session("mobile-app", UsageAgent::Codex, "GPT-5 Codex", 25, 18_000),
+        ],
+    };
+    AgentUsage {
+        loaded: true,
+        claude_found: true,
+        codex_found: true,
+        opencode_found: true,
+        ranges: vec![today.clone(), today.clone(), today],
+        running: vec![
+            RunningSession {
+                agent: UsageAgent::Codex,
+                project: "api-server".into(),
+                tokens: 58_000,
+                context_percent: Some(64),
+            },
+            RunningSession {
+                agent: UsageAgent::ClaudeCode,
+                project: "Notchify".into(),
+                tokens: 96_000,
+                context_percent: None,
+            },
+        ],
+    }
+}
+
 fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     let (overview, music) = board_snapshots(ctx, sample);
     let Some(peek) = overview.notifications.first().cloned() else { return };
@@ -950,7 +1023,7 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
-    r.check("notched: eight views rendered", sizes.len() == 8, format!("{sizes:?}"));
+    r.check("notched: nine views rendered", sizes.len() == 9, format!("{sizes:?}"));
     r.metrics.insert("notched_sizes".into(), json!(sizes));
     // Island sizes on the design boards (Overview, Main, Hover, Peek).
     for (name, bw, bh) in [

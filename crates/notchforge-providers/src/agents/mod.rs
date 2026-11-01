@@ -21,9 +21,11 @@ pub mod http;
 pub mod inbox;
 pub mod payload;
 pub mod socket;
+pub mod usage;
 pub mod watch;
 
 pub use http::HttpAgentProvider;
 pub use inbox::InboxAgentProvider;
 pub use socket::SocketAgentProvider;
+pub use usage::AgentUsageProvider;
 pub use watch::AgentWatchProvider;

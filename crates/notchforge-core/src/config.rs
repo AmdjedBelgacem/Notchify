@@ -199,6 +199,8 @@ pub struct AgentsConfig {
     pub require_approval: bool,
     /// Announce when a coding-agent CLI session ends (no hooks needed).
     pub watch_sessions: bool,
+    /// Read token counts from the agents' own session logs for the Agents page.
+    pub token_usage: bool,
 }
 
 impl Default for AgentsConfig {
@@ -213,6 +215,7 @@ impl Default for AgentsConfig {
             inbox_path: None,
             require_approval: true,
             watch_sessions: true,
+            token_usage: true,
         }
     }
 }

@@ -596,6 +596,11 @@ impl Controller {
         true
     }
 
+    /// Switch the Agents page's time range.
+    pub fn show_usage_range(&self, range: usize) {
+        self.views.borrow().expanded.usage.set_range(range);
+    }
+
     // ── media page ───────────────────────────────────────────────────────
 
     /// The resolution pill was clicked: offer the display's modes.
@@ -737,6 +742,14 @@ impl Controller {
         views.expanded.update(&asking);
         views.expanded.show_tab(Tab::Overview);
         show("07h-notched-auth-overview", LayoutKind::Expanded, &views.expanded.root);
+        // The Agents page, with sample usage.
+        let mut agents = overview.clone();
+        agents.generation += 2;
+        agents.usage = crate::selftest::sample_usage();
+        views.expanded.update(&agents);
+        views.expanded.show_tab(Tab::Agents);
+        show("07i-notched-agents", LayoutKind::Expanded, &views.expanded.root);
+        views.expanded.show_tab(Tab::Overview);
         views.expanded.media.set_active(false);
     }
 

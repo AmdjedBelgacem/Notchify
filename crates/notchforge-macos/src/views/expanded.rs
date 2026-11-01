@@ -19,6 +19,7 @@
 //! the right-click menu, as in Notification Center.
 
 use super::media::MediaPage;
+use super::usage::UsagePage;
 use super::{app_icon_view, set_app_icon, temperature};
 use crate::app::with_controller;
 use crate::controls::{brightness, display_modes, volume};
@@ -67,12 +68,14 @@ type Run<'a> = (&'a str, &'a NSFont, &'a NSColor);
 pub enum Tab {
     Overview,
     Media,
+    Agents,
 }
 
 pub struct ExpandedView {
     pub root: Retained<FlippedView>,
     overview: Retained<FlippedView>,
     pub media: MediaPage,
+    pub usage: UsagePage,
     tab: Cell<Tab>,
     tab_buttons: Vec<Retained<NSButton>>,
     /// The panel is expanded (drives the music page's ticker).
@@ -88,6 +91,7 @@ pub struct ExpandedView {
     date_top: Retained<NSTextField>,
     now_pill: Retained<FlippedView>,
     weather_pill: Retained<FlippedView>,
+    agents_pill: Retained<FlippedView>,
     pill_right: f64,
     pill_max: f64,
     battery_top: Retained<FlippedView>,
@@ -193,7 +197,7 @@ fn battery_rings(devices: &[notchforge_core::model::DeviceBattery]) -> Vec<Ring>
 }
 
 /// A circular gauge filled clockwise from the top.
-fn ring_view(mtm: MainThreadMarker, frame: NSRect, fraction: f64, color: &NSColor) -> Retained<FlippedView> {
+pub fn ring_view(mtm: MainThreadMarker, frame: NSRect, fraction: f64, color: &NSColor) -> Retained<FlippedView> {
     use objc2_core_graphics::CGMutablePath as P;
     use objc2_quartz_core::CAShapeLayer;
     let v = FlippedView::new(mtm, frame);
@@ -294,7 +298,7 @@ impl ExpandedView {
             "",
             &mono_digits(13.0, Weight::Semibold),
             &p.primary,
-            rect(102.0, ty + 3.0, (side - 110.0).max(40.0), 18.0),
+            rect(138.0, ty + 3.0, (side - 144.0).max(40.0), 18.0),
         );
         let battery_top = FlippedView::new(mtm, rect(w - 18.0 - 62.0, ty, 62.0, 24.0));
         root.addSubview(&battery_top);
@@ -526,15 +530,23 @@ impl ExpandedView {
         let media = MediaPage::new(mtm, w, h, nh + 8.0, p);
         media.root.setHidden(true);
         root.addSubview(&media.root);
+        let usage = UsagePage::new(mtm, w, h, nh, p);
+        usage.root.setHidden(true);
+        root.addSubview(&usage.root);
         root.addSubview(&date_top);
         let now_pill = FlippedView::new(mtm, rect(0.0, ty, 0.0, 24.0));
         let weather_pill = FlippedView::new(mtm, rect(0.0, ty, 0.0, 24.0));
         root.addSubview(&now_pill);
         root.addSubview(&weather_pill);
-        let track = shape_view(mtm, rect(PAD, ty - 2.0, 76.0, 28.0), &white(0.12), 14.0);
+        let agents_pill = FlippedView::new(mtm, rect(0.0, ty, 0.0, 24.0));
+        root.addSubview(&agents_pill);
+        let track = shape_view(mtm, rect(PAD, ty - 2.0, 112.0, 28.0), &white(0.12), 14.0);
         root.addSubview(&track);
-        let tabs: [(&str, &str, Tab); 2] =
-            [("square.grid.2x2.fill", "Overview", Tab::Overview), ("music.note", "Now Playing", Tab::Media)];
+        let tabs: [(&str, &str, Tab); 3] = [
+            ("square.grid.2x2.fill", "Overview", Tab::Overview),
+            ("music.note", "Now Playing", Tab::Media),
+            ("chart.bar.fill", "Agents", Tab::Agents),
+        ];
         let tab_buttons: Vec<Retained<NSButton>> = tabs
             .iter()
             .enumerate()
@@ -561,6 +573,7 @@ impl ExpandedView {
             root,
             overview,
             media,
+            usage,
             tab: Cell::new(Tab::Overview),
             tab_buttons,
             visible: Cell::new(false),
@@ -573,6 +586,7 @@ impl ExpandedView {
             date_top,
             now_pill,
             weather_pill,
+            agents_pill,
             pill_right: w - 18.0 - 62.0 - 8.0,
             pill_max: (side - 62.0 - 18.0 - 16.0).max(60.0),
             battery_top,
@@ -615,7 +629,8 @@ impl ExpandedView {
         let previous = self.tab.replace(tab);
         self.overview.setHidden(tab != Tab::Overview);
         self.media.root.setHidden(tab != Tab::Media);
-        for (b, t) in self.tab_buttons.iter().zip([Tab::Overview, Tab::Media]) {
+        self.usage.root.setHidden(tab != Tab::Agents);
+        for (b, t) in self.tab_buttons.iter().zip([Tab::Overview, Tab::Media, Tab::Agents]) {
             let on = t == tab;
             b.setContentTintColor(Some(if on { &self.palette.primary } else { &self.palette.tertiary }));
             // Selected segment: a lighter pill inside the shared track.
@@ -623,6 +638,7 @@ impl ExpandedView {
         }
         self.now_pill.setHidden(tab != Tab::Overview || self.now_pill.subviews().is_empty());
         self.weather_pill.setHidden(tab != Tab::Media || self.weather_pill.subviews().is_empty());
+        self.agents_pill.setHidden(tab != Tab::Agents || self.agents_pill.subviews().is_empty());
         self.media.set_active(self.visible.get() && tab == Tab::Media);
         if tab == Tab::Media && previous != Tab::Media {
             crate::media::send(notchforge_core::provider::ProviderCommand::MediaChanged(None));
@@ -671,6 +687,7 @@ impl ExpandedView {
         self.row_targets.clear();
         self.render_top(snap);
         self.media.update(snap);
+        self.usage.update(&snap.usage, self.config.borrow().agents.token_usage);
         self.render_notifications(snap);
         self.render_tray(snap);
         self.render_weather(snap);
@@ -693,9 +710,12 @@ impl ExpandedView {
     /// The date and time beside the page switch.
     fn render_clock(&self) {
         let f = objc2_foundation::NSDateFormatter::new();
-        f.setLocalizedDateFormatFromTemplate(&crate::ui::ns("EEE d MMM HH:mm"));
-        let text = f.stringFromDate(&objc2_foundation::NSDate::now());
-        crate::ui::set_text(&self.date_top, &text.to_string());
+        let now = objc2_foundation::NSDate::now();
+        f.setLocalizedDateFormatFromTemplate(&crate::ui::ns("MMMd"));
+        let date = f.stringFromDate(&now);
+        f.setLocalizedDateFormatFromTemplate(&crate::ui::ns("HH:mm"));
+        let time = f.stringFromDate(&now);
+        crate::ui::set_text(&self.date_top, &format!("{date} {time}"));
     }
 
     fn render_top(&self, snap: &Snapshot) {
@@ -742,8 +762,20 @@ impl ExpandedView {
             self.weather_pill.addSubview(&icon);
             self.weather_pill.addSubview(&label(mtm, &text, &f, &p.primary, rect(27.0, 4.0, width - 35.0, 16.0)));
         }
+        // Running sessions, on the Agents page.
+        remove_all_subviews(&self.agents_pill);
+        if let Some(text) = UsagePage::running_label(snap.usage.running.len()) {
+            let f = font(12.0, Weight::Semibold);
+            let tw = crate::ui::text_width(&crate::ui::attributed(&text, &f, &p.primary));
+            let width = (tw + 34.0).min(self.pill_max);
+            let y = self.agents_pill.frame().origin.y;
+            pill(&self.agents_pill, self.pill_right, y, width);
+            self.agents_pill.addSubview(&shape_view(mtm, rect(9.0, 8.5, 7.0, 7.0), &p.success, 3.5));
+            self.agents_pill.addSubview(&label(mtm, &text, &f, &p.primary, rect(22.0, 4.0, width - 30.0, 16.0)));
+        }
         self.now_pill.setHidden(self.tab.get() != Tab::Overview || self.now_pill.subviews().is_empty());
         self.weather_pill.setHidden(self.tab.get() != Tab::Media || self.weather_pill.subviews().is_empty());
+        self.agents_pill.setHidden(self.tab.get() != Tab::Agents || self.agents_pill.subviews().is_empty());
 
         remove_all_subviews(&self.battery_top);
         if let Some(b) = snap.battery.as_ref().filter(|b| b.present) {

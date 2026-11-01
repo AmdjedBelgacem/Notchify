@@ -49,6 +49,10 @@ It surfaces:
   watcher says when a coding-agent CLI (Claude Code, Codex, OpenCode, Cursor
   Agent, Gemini CLI…) ends, with no setup. **Settings › Coding Agents** connects
   Claude Code, Codex and OpenCode in one click.
+- **Agent token usage.** The panel's Agents tab shows tokens used today, over 7
+  and over 30 days, by agent, model and session, read from Claude Code and Codex
+  CLI logs on this Mac. Only counts, models, times and project names are kept.
+  It shows tokens rather than money, and OpenCode and Cursor aren't tracked yet.
 
 > **A note on names.** The crates, binaries (`notchforge`, `notchforge-notify`),
 > the `NotchForge.app` bundle and the `NotchForge` data folder keep the project's

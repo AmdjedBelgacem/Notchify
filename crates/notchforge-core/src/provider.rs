@@ -33,8 +33,8 @@
 
 use crate::config::{Config, Paths};
 use crate::model::{
-    AudioState, BatteryStatus, Coordinates, DeviceBattery, FocusState, MediaAction, MediaPlayer, MediaState,
-    NewNotification, Permission, ProviderStatus, Weather,
+    AgentUsage, AudioState, BatteryStatus, Coordinates, DeviceBattery, FocusState, MediaAction, MediaPlayer,
+    MediaState, NewNotification, Permission, ProviderStatus, Weather,
 };
 use std::future::Future;
 use std::pin::Pin;
@@ -81,6 +81,7 @@ pub enum ProviderEvent {
     Focus(FocusState),
     Audio(AudioState),
     Media(MediaState),
+    Usage(AgentUsage),
     Status { provider: &'static str, status: ProviderStatus },
 }
 

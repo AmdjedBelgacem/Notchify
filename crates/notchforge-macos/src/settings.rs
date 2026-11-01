@@ -1308,6 +1308,12 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 c.agents.watch_sessions,
                 |cfg, on| cfg.agents.watch_sessions = on,
             );
+            form.switch(
+                "Show token usage",
+                Some("Reads token counts from Claude Code and Codex CLI logs on this Mac. Conversations are not kept or sent anywhere"),
+                c.agents.token_usage,
+                |cfg, on| cfg.agents.token_usage = on,
+            );
             form.begin("Connect agents");
             let env = connect::Env::current(c.agents.http_port, c.agents.token.clone());
             for def in connect::AGENTS {

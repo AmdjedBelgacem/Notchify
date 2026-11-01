@@ -9,9 +9,9 @@
 use crate::apps::AppRef;
 use crate::config::{Config, Paths};
 use crate::model::{
-    AUTH_THREAD_AGENT, AUTH_THREAD_SPOTIFY, AudioState, BatteryStatus, DeviceBattery, FocusState, MediaPlayer,
-    MediaState, NewNotification, Notification, NotificationId, NotificationKind, Origin, PlaylistStatus, Priority,
-    ProviderStatus, TrayItem, TrayItemId, Weather,
+    AUTH_THREAD_AGENT, AUTH_THREAD_SPOTIFY, AgentUsage, AudioState, BatteryStatus, DeviceBattery, FocusState,
+    MediaPlayer, MediaState, NewNotification, Notification, NotificationId, NotificationKind, Origin, PlaylistStatus,
+    Priority, ProviderStatus, TrayItem, TrayItemId, Weather,
 };
 use crate::pipeline::{Outcome, Pipeline, PipelineFlags};
 use crate::provider::{ProviderCommand, ProviderEvent, Shutdown};
@@ -72,6 +72,7 @@ pub struct Snapshot {
     pub focus: FocusState,
     pub audio: AudioState,
     pub media: MediaState,
+    pub usage: AgentUsage,
     /// Ranked: priority, then recency.
     pub notifications: Vec<Notification>,
     pub latest: Option<Notification>,
@@ -117,6 +118,7 @@ struct AppState {
     focus: FocusState,
     audio: AudioState,
     media: MediaState,
+    usage: AgentUsage,
     pipeline: Pipeline,
     tray: Tray,
     providers: BTreeMap<&'static str, ProviderStatus>,
@@ -248,6 +250,7 @@ impl Engine {
             focus: s.focus.clone(),
             audio: s.audio.clone(),
             media: s.media.clone(),
+            usage: s.usage.clone(),
             notifications: s.pipeline.ranked(),
             latest: s.pipeline.latest().cloned(),
             unread: s.pipeline.unread_count(),
@@ -290,6 +293,11 @@ impl Engine {
             ProviderEvent::Audio(a) => {
                 let changed = self.state.audio != a;
                 self.state.audio = a;
+                changed
+            }
+            ProviderEvent::Usage(u) => {
+                let changed = self.state.usage != u;
+                self.state.usage = u;
                 changed
             }
             ProviderEvent::Media(m) => {
