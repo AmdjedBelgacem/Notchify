@@ -56,15 +56,22 @@ impl CollapsedView {
         let right_text = label(mtm, "", &f, &p.primary, rect(w - WING_WIDTH + 30.0, ty, WING_WIDTH - 42.0, 15.0));
         right_text.setAlignment(NSTextAlignment::Right);
         let art_side = (h - 8.0).clamp(14.0, 20.0);
-        let art = NSImageView::new(mtm);
-        art.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
-        art.setFrame(rect(12.0, (h - art_side) / 2.0, art_side, art_side));
-        art.setWantsLayer(true);
-        if let Some(l) = art.layer() {
-            l.setCornerRadius(4.0);
+        // The image sits in a rounded container (its own layer clips it) rather
+        // than carrying a layer itself, so it draws in every context.
+        let art_box = crate::ui::shape_view(
+            mtm,
+            rect(12.0, (h - art_side) / 2.0, art_side, art_side),
+            &crate::ui::rgba(0.0, 0.0, 0.0, 0.0),
+            4.0,
+        );
+        if let Some(l) = art_box.layer() {
             l.setMasksToBounds(true);
         }
+        let art = NSImageView::new(mtm);
+        art.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
+        art.setFrame(rect(0.0, 0.0, art_side, art_side));
         art.setHidden(true);
+        art_box.addSubview(&art);
 
         // Equaliser: plain (y-up) view so bars grow from the bottom.
         let eq_w = 4.0 * EQ_BAR + 3.0 * EQ_GAP;
@@ -89,7 +96,7 @@ impl CollapsedView {
         eq.setHidden(true);
         crate::ui::set_accessibility_label(&eq, "Music playing");
 
-        for v in [&*left_icon as &objc2_app_kit::NSView, &left_text, &right_icon, &right_text, &art, &eq] {
+        for v in [&*left_icon as &objc2_app_kit::NSView, &left_text, &right_icon, &right_text, &art_box, &eq] {
             root.addSubview(v);
         }
         Self {

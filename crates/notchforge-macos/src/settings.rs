@@ -777,6 +777,8 @@ impl SettingsWindow {
         }
         crate::app::activate(mtm);
         self.window.makeKeyAndOrderFront(None);
+        // No text field starts focused (the search field would show a caret).
+        self.window.makeFirstResponder(None);
     }
 
     /// The pane's icon tile, title, one-line description and status chip.
