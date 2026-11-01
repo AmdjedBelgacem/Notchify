@@ -243,7 +243,7 @@ impl Pane {
                 "claude cursor zed codex opencode qoder webhook port token socket inbox allow deny approval authorize consent"
             }
             Pane::Weather => "location city units celsius fahrenheit refresh",
-            Pane::Media => "spotify apple music audio output playlists client id automation",
+            Pane::Media => "spotify apple music audio output playlists automation",
             Pane::Tray => "files drop airdrop keep",
             Pane::Controls => "brightness volume resolution focus shortcuts",
             Pane::Permissions => "accessibility full disk access location automation privacy",
@@ -1452,7 +1452,6 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             );
             form.begin("Spotify");
             let signed_in = app::spotify_signed_in() || preview();
-            let has_id = !c.media.spotify_client_id.is_empty();
             let (status, status_tone) =
                 if signed_in { ("Connected", Tone::Ok) } else { ("Not connected", Tone::Neutral) };
             let button: RowButton<'_> = if signed_in {
@@ -1465,39 +1464,13 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                     }),
                 )
             } else {
-                {
-                    let draft = form.draft.clone();
-                    (
-                        "Sign in…",
-                        true,
-                        Box::new(move || {
-                            // Spotify needs a Client ID; ask for it right here instead of
-                            // leaving the button disabled.
-                            if draft.borrow().media.spotify_client_id.is_empty() {
-                                let redirect = draft.borrow().media.spotify_redirect_uri();
-                                let Some(id) = app::ask_text(
-                                    "Sign in to Spotify",
-                                    &format!(
-                                        "Create an app at developer.spotify.com/dashboard, add the redirect URI {redirect}, then paste its Client ID."
-                                    ),
-                                    "Client ID",
-                                    "Continue",
-                                ) else {
-                                    return;
-                                };
-                                draft.borrow_mut().media.spotify_client_id = id;
-                                Form::commit(&draft);
-                            }
-                            // Give the engine a moment to persist the Client ID first.
-                            std::thread::spawn(|| {
-                                std::thread::sleep(std::time::Duration::from_millis(400));
-                                dispatch2::DispatchQueue::main().exec_async(|| {
-                                    crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyConnect);
-                                });
-                            });
-                        }),
-                    )
-                }
+                (
+                    "Sign in…",
+                    true,
+                    Box::new(|| {
+                        crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyConnect);
+                    }),
+                )
             };
             form.sub_ok.set(preview());
             let made = form.action_row(
@@ -1513,16 +1486,9 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 vec![button],
                 Some(("spotify", (30, 215, 96))),
             );
-            let _ = (&made, has_id);
+            let _ = &made;
             form.sub_ok.set(false);
-            let client_id = if preview() { "3f9c2e7b1a4d4c0e9b8f6a21" } else { c.media.spotify_client_id.as_str() };
-            form.text("Client ID", client_id, "From developer.spotify.com", true, |cfg, v| {
-                cfg.media.spotify_client_id = v
-            });
-            form.note(&format!(
-                "Only needed to list playlists; play, pause and skip work without it. Create an app at developer.spotify.com/dashboard and add the redirect URI {}.",
-                c.media.spotify_redirect_uri()
-            ));
+            form.note("Sign-in only lists your playlists; play, pause and skip work without it.");
             form.begin("Apple Music");
             {
                 let snap = app::with_controller(|c| c.current_snapshot());

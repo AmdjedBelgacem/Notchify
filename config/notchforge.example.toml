@@ -133,11 +133,8 @@ show_in_wings = true
 # Safety-net refresh while a player is running. Players announce track and
 # play/pause changes themselves, so the notch updates instantly anyway.
 poll_seconds = 10
-# Optional: client ID of your own Spotify app (developer.spotify.com/dashboard),
-# needed only to list Spotify playlists. Register the redirect URI
-# http://127.0.0.1:47816/callback, paste the ID here (or in Settings › Media)
-# and click "Connect…". Playback controls work without it.
-spotify_client_id = ""
+# Port for Spotify's sign-in redirect. Leave it as is: Spotify only accepts the
+# address registered on the app, http://127.0.0.1:47816/callback.
 spotify_redirect_port = 47816
 # Maximum playlists listed per player.
 max_playlists = 100

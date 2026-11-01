@@ -807,7 +807,7 @@ pub enum PlaylistStatus {
     #[default]
     Unknown,
     Loaded,
-    /// Spotify needs a Web API client ID / sign-in to list playlists.
+    /// Spotify needs a sign-in to list playlists.
     NeedsSpotifyLogin,
     /// The browser sign-in is open and waiting for the user to approve.
     SigningIn,

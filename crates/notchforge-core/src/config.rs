@@ -333,11 +333,8 @@ pub struct MediaConfig {
     /// How often players are re-read while one is running (seconds). Changes
     /// announced by the players themselves are picked up immediately.
     pub poll_seconds: u64,
-    /// Client ID of *your* Spotify Web API app (developer.spotify.com). Needed
-    /// only to list Spotify playlists; playback works without it.
-    pub spotify_client_id: String,
-    /// Loopback port for the sign-in redirect. Register
-    /// `http://127.0.0.1:<port>/callback` as the app's redirect URI.
+    /// Loopback port for the sign-in redirect. Spotify only accepts the
+    /// `http://127.0.0.1:<port>/callback` registered on the app.
     pub spotify_redirect_port: u16,
     /// Maximum playlists listed per player.
     pub max_playlists: usize,
@@ -350,7 +347,6 @@ impl Default for MediaConfig {
         Self {
             show_in_wings: true,
             poll_seconds: 10,
-            spotify_client_id: String::new(),
             spotify_redirect_port: DEFAULT_SPOTIFY_REDIRECT_PORT,
             max_playlists: 100,
             browser_audio: true,
@@ -434,7 +430,6 @@ impl Config {
         self.weather.refresh_minutes = self.weather.refresh_minutes.clamp(5, 24 * 60);
         self.media.poll_seconds = self.media.poll_seconds.clamp(2, 300);
         self.media.max_playlists = self.media.max_playlists.clamp(1, 500);
-        self.media.spotify_client_id = self.media.spotify_client_id.trim().to_owned();
         self.tray.max_items = self.tray.max_items.clamp(1, 500);
         self.controls.resolution_confirm_secs = self.controls.resolution_confirm_secs.clamp(5, 120);
         self.general.hover_delay_ms = self.general.hover_delay_ms.min(2000);
@@ -454,9 +449,6 @@ impl Config {
         }
         if self.media.spotify_redirect_port < 1024 {
             return Err(CoreError::InvalidConfig("media.spotify_redirect_port must be ≥ 1024".into()));
-        }
-        if !self.media.spotify_client_id.chars().all(|c| c.is_ascii_alphanumeric()) {
-            return Err(CoreError::InvalidConfig("media.spotify_client_id must be alphanumeric".into()));
         }
         if self.agents.http_enabled && self.agents.http_port < 1024 {
             return Err(CoreError::InvalidConfig("agents.http_port must be ≥ 1024".into()));
@@ -582,12 +574,12 @@ mod tests {
 
     #[test]
     fn media_section_defaults_and_validation() {
-        let cfg = Config::from_toml("[media]\nspotify_client_id = \" abc123 \"\npoll_seconds = 0").expect("parse");
-        assert_eq!(cfg.media.spotify_client_id, "abc123");
+        // Configs saved by older versions may still carry a client ID: it is ignored.
+        let cfg = Config::from_toml("[media]\nspotify_client_id = \"old id&\"\npoll_seconds = 0").expect("parse");
         assert_eq!(cfg.media.poll_seconds, 2);
         assert!(cfg.providers.media && cfg.providers.audio);
         assert_eq!(cfg.media.spotify_redirect_uri(), "http://127.0.0.1:47816/callback");
-        let err = Config::from_toml("[media]\nspotify_client_id = \"bad id&\"");
+        let err = Config::from_toml("[media]\nspotify_redirect_port = 80");
         assert!(matches!(err, Err(CoreError::InvalidConfig(_))));
     }
 

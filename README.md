@@ -413,9 +413,10 @@ players announce track changes, and the notch updates instantly.
 - **Apple Music** playlists are read from the app itself, so Music needs to be running.
 - **Spotify** playlists need the Spotify Web API, because Spotify's scripting
   dictionary has no playlists. Playback itself never needs the API.
-  1. Create an app at <https://developer.spotify.com/dashboard>.
-  2. Add the redirect URI `http://127.0.0.1:47816/callback`.
-  3. Paste the client ID in **Settings › Media** and click **Connect…**.
+  Click **Sign in…** in **Settings › Media** and approve in the browser.
+
+  Notchisland's Spotify app is in Spotify's Development Mode, so only accounts
+  its owner has allowlisted (five at most) can sign in.
 
   Sign-in uses OAuth PKCE with no client secret. Only the refresh token is
   stored, in `spotify-token.json` (mode 0600).
@@ -433,7 +434,6 @@ media = true
 [media]
 show_in_wings = true          # cover + equaliser beside the notch while playing
 poll_seconds = 10             # safety-net refresh; players announce changes themselves
-spotify_client_id = ""        # optional, for Spotify playlists
 spotify_redirect_port = 47816
 max_playlists = 100
 ```
@@ -625,7 +625,8 @@ macOS 15.4 it no longer serves third-party apps.
   with their output device and get play/pause and skip via media keys, but no
   track title or artwork. Without MediaRemote, macOS offers no public way to
   read another app's "Now Playing" info.
-- **Spotify playlists** need your own (free) Spotify developer app; see
+- **Spotify playlists** work only for accounts allowlisted on Notchisland's
+  Spotify app; see
   [Audio & music](#audio--music). Apple Music streaming tracks that aren't in
   your library may have no exportable artwork.
 - **Per-app audio routing** (which device each app uses) is read-only. macOS

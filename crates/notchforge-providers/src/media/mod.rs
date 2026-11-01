@@ -109,7 +109,6 @@ async fn load_playlists(
     player: MediaPlayer,
     http: reqwest::Client,
     paths: std::sync::Arc<Paths>,
-    client_id: String,
     max: usize,
 ) -> PlaylistResult {
     match player {
@@ -121,7 +120,7 @@ async fn load_playlists(
         },
         MediaPlayer::Spotify => {
             let now = notchforge_core::time::now_ms();
-            match spotify::access_token(&http, &paths.spotify_token(), &client_id, now).await {
+            match spotify::access_token(&http, &paths.spotify_token(), now).await {
                 Ok(token) => match spotify::playlists(&http, &token, max).await {
                     Ok(mut lists) => {
                         let dir = paths.artwork_dir();
@@ -131,9 +130,7 @@ async fn load_playlists(
                     }
                     Err(e) => (player, PlaylistStatus::Failed(e.to_string()), vec![]),
                 },
-                Err(spotify::SpotifyError::NoClientId | spotify::SpotifyError::NotSignedIn) => {
-                    (player, PlaylistStatus::NeedsSpotifyLogin, vec![])
-                }
+                Err(spotify::SpotifyError::NotSignedIn) => (player, PlaylistStatus::NeedsSpotifyLogin, vec![]),
                 Err(e) => (player, PlaylistStatus::Failed(e.to_string()), vec![]),
             }
         }
@@ -311,13 +308,7 @@ impl Session {
         self.loading.insert(player);
         self.playlists_loaded_ms.insert(player, now);
         let tx = self.playlist_tx.clone();
-        let fut = load_playlists(
-            player,
-            self.http.clone(),
-            self.paths.clone(),
-            cfg.media.spotify_client_id.clone(),
-            cfg.media.max_playlists,
-        );
+        let fut = load_playlists(player, self.http.clone(), self.paths.clone(), cfg.media.max_playlists);
         tokio::spawn(async move {
             let _ = tx.send(fut.await).await;
         });
@@ -478,9 +469,9 @@ impl Provider for MediaProvider {
                             let cfg = ctx.config();
                             let http = s.http.clone();
                             let path = ctx.paths.spotify_token();
-                            let (id, port) = (cfg.media.spotify_client_id.clone(), cfg.media.spotify_redirect_port);
+                            let port = cfg.media.spotify_redirect_port;
                             login = Some(tokio::spawn(async move {
-                                spotify::login(&http, &path, &id, port, notchforge_core::time::now_ms).await
+                                spotify::login(&http, &path, port, notchforge_core::time::now_ms).await
                             }));
                             // Tell the UI the browser sign-in is open and waiting.
                             let waiting = PlaylistStatus::SigningIn;

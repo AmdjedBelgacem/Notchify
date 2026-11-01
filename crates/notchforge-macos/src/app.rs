@@ -163,7 +163,7 @@ pub fn show_settings_soon() {
 
 /// A Spotify Web API token is stored.
 pub fn spotify_signed_in() -> bool {
-    with_app(|a| a.paths.spotify_token().exists()).unwrap_or(false)
+    with_app(|a| notchforge_providers::media::spotify::is_signed_in(&a.paths.spotify_token())).unwrap_or(false)
 }
 
 pub fn open_config_file() {

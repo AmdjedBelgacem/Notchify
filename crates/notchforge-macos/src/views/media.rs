@@ -109,7 +109,6 @@ enum ListAction {
     #[default]
     None,
     ConnectSpotify,
-    OpenSettings,
     AllowAutomation,
     OpenMusic,
     Retry,
@@ -605,7 +604,6 @@ impl MediaPage {
         let t = targets.add(mtm, move |_| match kind.get() {
             ListAction::None => {}
             ListAction::ConnectSpotify => glue::send(ProviderCommand::SpotifyConnect),
-            ListAction::OpenSettings => crate::app::show_settings(),
             ListAction::AllowAutomation => glue::request_automation(),
             ListAction::OpenMusic => glue::open_player(MediaPlayer::Music),
             ListAction::Retry => glue::send(ProviderCommand::ReloadPlaylists),
@@ -1012,49 +1010,37 @@ impl MediaPage {
         self.row_targets.clear();
         remove_all_subviews(&self.list_doc);
 
-        let (message, action, action_title): (Option<String>, ListAction, &str) = if denied
-            || status == PlaylistStatus::NeedsAutomation
-        {
-            (
-                Some(format!("Allow Notchisland to control {} to see your playlists.", player.display_name())),
-                ListAction::AllowAutomation,
-                "Allow…",
-            )
-        } else if !lists.is_empty() {
-            (None, ListAction::None, "")
-        } else {
-            match (player, &status) {
-                (MediaPlayer::Spotify, PlaylistStatus::SigningIn) => (
-                    Some("Waiting for you to approve Notchisland in your browser…".into()),
-                    ListAction::CancelSpotify,
-                    "Cancel",
-                ),
-                (MediaPlayer::Spotify, PlaylistStatus::NeedsSpotifyLogin) => {
-                    let has_id = crate::app::with_config(|c| !c.media.spotify_client_id.is_empty()).unwrap_or(false);
-                    if has_id {
-                        (
-                            Some("Sign in to Spotify to list your playlists.".into()),
-                            ListAction::ConnectSpotify,
-                            "Connect Spotify",
-                        )
-                    } else {
-                        (
-                            Some("Add your Spotify client ID in Settings › Media to list your playlists.".into()),
-                            ListAction::OpenSettings,
-                            "Open Settings",
-                        )
+        let (message, action, action_title): (Option<String>, ListAction, &str) =
+            if denied || status == PlaylistStatus::NeedsAutomation {
+                (
+                    Some(format!("Allow Notchisland to control {} to see your playlists.", player.display_name())),
+                    ListAction::AllowAutomation,
+                    "Allow…",
+                )
+            } else if !lists.is_empty() {
+                (None, ListAction::None, "")
+            } else {
+                match (player, &status) {
+                    (MediaPlayer::Spotify, PlaylistStatus::SigningIn) => (
+                        Some("Waiting for you to approve Notchisland in your browser…".into()),
+                        ListAction::CancelSpotify,
+                        "Cancel",
+                    ),
+                    (MediaPlayer::Spotify, PlaylistStatus::NeedsSpotifyLogin) => (
+                        Some("Sign in to Spotify to list your playlists.".into()),
+                        ListAction::ConnectSpotify,
+                        "Connect Spotify",
+                    ),
+                    (MediaPlayer::Music, _) if !running => {
+                        (Some("Open Music to see your playlists.".into()), ListAction::OpenMusic, "Open Music")
                     }
+                    (_, PlaylistStatus::Failed(e)) => {
+                        (Some(format!("Couldn't load playlists. {e}")), ListAction::Retry, "Retry")
+                    }
+                    (_, PlaylistStatus::Loaded) => (Some("No playlists yet.".into()), ListAction::None, ""),
+                    _ => (Some("Loading playlists…".into()), ListAction::None, ""),
                 }
-                (MediaPlayer::Music, _) if !running => {
-                    (Some("Open Music to see your playlists.".into()), ListAction::OpenMusic, "Open Music")
-                }
-                (_, PlaylistStatus::Failed(e)) => {
-                    (Some(format!("Couldn't load playlists. {e}")), ListAction::Retry, "Retry")
-                }
-                (_, PlaylistStatus::Loaded) => (Some("No playlists yet.".into()), ListAction::None, ""),
-                _ => (Some("Loading playlists…".into()), ListAction::None, ""),
-            }
-        };
+            };
         self.list_action_kind.set(action);
         match message {
             Some(m) => {

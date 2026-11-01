@@ -3,10 +3,9 @@
 //! through AppleScript, so it works for Free and Premium accounts alike.
 //!
 //! Sign-in is OAuth 2.0 *Authorization Code with PKCE*: no client secret is
-//! stored. The user registers their own app at developer.spotify.com, adds the
-//! redirect URI `http://127.0.0.1:<port>/callback`, and pastes the client ID in
-//! Settings. NotchForge opens the browser, receives the redirect on a one-shot
-//! loopback listener, and stores only the refresh token (file mode 0600).
+//! stored. NotchForge opens the browser, receives the redirect on a one-shot
+//! loopback listener at `http://127.0.0.1:<port>/callback`, and stores only the
+//! refresh token (file mode 0600).
 
 use base64::Engine as _;
 use notchforge_core::model::{MediaPlayer, Playlist};
@@ -16,6 +15,8 @@ use std::path::Path;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+/// Notchisland's Spotify app. PKCE has no client secret, and this ID is public.
+pub const CLIENT_ID: &str = "a2ff5487321947dab3b5e9fd64840749";
 pub const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";
 pub const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 pub const API_BASE: &str = "https://api.spotify.com/v1";
@@ -25,8 +26,6 @@ pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, thiserror::Error)]
 pub enum SpotifyError {
-    #[error("no Spotify client ID configured")]
-    NoClientId,
     #[error("not signed in to Spotify")]
     NotSignedIn,
     #[error("sign-in was cancelled or timed out")]
@@ -62,10 +61,10 @@ pub fn pkce_pair(seed: &[u8]) -> (String, String) {
     (verifier, challenge)
 }
 
-pub fn authorize_url(client_id: &str, redirect_uri: &str, challenge: &str, state: &str) -> String {
+pub fn authorize_url(redirect_uri: &str, challenge: &str, state: &str) -> String {
     let mut url = reqwest::Url::parse(AUTHORIZE_URL).expect("static URL");
     url.query_pairs_mut()
-        .append_pair("client_id", client_id)
+        .append_pair("client_id", CLIENT_ID)
         .append_pair("response_type", "code")
         .append_pair("redirect_uri", redirect_uri)
         .append_pair("code_challenge_method", "S256")
@@ -103,7 +102,7 @@ pub struct Token {
     pub refresh_token: String,
     /// Unix ms.
     pub expires_at_ms: i64,
-    /// Client ID the token was issued to (a different ID invalidates it).
+    /// Client ID the token was issued to (a token from another ID is not valid).
     pub client_id: String,
 }
 
@@ -122,6 +121,11 @@ struct TokenResponse {
 
 pub fn load_token(path: &Path) -> Option<Token> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// A token from the current Spotify app is stored.
+pub fn is_signed_in(path: &Path) -> bool {
+    load_token(path).is_some_and(|t| t.client_id == CLIENT_ID)
 }
 
 pub fn save_token(path: &Path, t: &Token) -> std::io::Result<()> {
@@ -149,29 +153,21 @@ async fn token_request(http: &reqwest::Client, form: &[(&str, &str)]) -> Result<
 }
 
 /// A valid access token, refreshing (and persisting) it when needed.
-pub async fn access_token(
-    http: &reqwest::Client,
-    path: &Path,
-    client_id: &str,
-    now_ms: i64,
-) -> Result<Token, SpotifyError> {
-    if client_id.is_empty() {
-        return Err(SpotifyError::NoClientId);
-    }
-    let t = load_token(path).filter(|t| t.client_id == client_id).ok_or(SpotifyError::NotSignedIn)?;
+pub async fn access_token(http: &reqwest::Client, path: &Path, now_ms: i64) -> Result<Token, SpotifyError> {
+    let t = load_token(path).filter(|t| t.client_id == CLIENT_ID).ok_or(SpotifyError::NotSignedIn)?;
     if t.is_fresh(now_ms) {
         return Ok(t);
     }
     let r = token_request(
         http,
-        &[("grant_type", "refresh_token"), ("refresh_token", &t.refresh_token), ("client_id", client_id)],
+        &[("grant_type", "refresh_token"), ("refresh_token", &t.refresh_token), ("client_id", CLIENT_ID)],
     )
     .await?;
     let t = Token {
         access_token: r.access_token,
         refresh_token: r.refresh_token.unwrap_or(t.refresh_token),
         expires_at_ms: now_ms + r.expires_in * 1000,
-        client_id: client_id.to_owned(),
+        client_id: CLIENT_ID.to_owned(),
     };
     save_token(path, &t)?;
     Ok(t)
@@ -181,18 +177,14 @@ pub async fn access_token(
 pub async fn login(
     http: &reqwest::Client,
     path: &Path,
-    client_id: &str,
     port: u16,
     now_ms: impl Fn() -> i64,
 ) -> Result<(), SpotifyError> {
-    if client_id.is_empty() {
-        return Err(SpotifyError::NoClientId);
-    }
     let redirect = format!("http://127.0.0.1:{port}/callback");
     let (verifier, challenge) = pkce_pair(&random_bytes()?);
     let state = b64url(&random_bytes()?[..16]);
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    let url = authorize_url(client_id, &redirect, &challenge, &state);
+    let url = authorize_url(&redirect, &challenge, &state);
     open_browser(&url).await;
 
     let code = tokio::time::timeout(LOGIN_TIMEOUT, async {
@@ -237,7 +229,7 @@ pub async fn login(
             ("grant_type", "authorization_code"),
             ("code", &code),
             ("redirect_uri", &redirect),
-            ("client_id", client_id),
+            ("client_id", CLIENT_ID),
             ("code_verifier", &verifier),
         ],
     )
@@ -246,7 +238,7 @@ pub async fn login(
         access_token: r.access_token,
         refresh_token: r.refresh_token.ok_or_else(|| SpotifyError::Rejected("no refresh token".into()))?,
         expires_at_ms: now_ms() + r.expires_in * 1000,
-        client_id: client_id.to_owned(),
+        client_id: CLIENT_ID.to_owned(),
     };
     save_token(path, &t)?;
     Ok(())
@@ -369,8 +361,10 @@ mod tests {
 
     #[test]
     fn authorize_url_is_encoded() {
-        let u = authorize_url("abc", "http://127.0.0.1:47816/callback", "CH", "ST");
-        assert!(u.starts_with("https://accounts.spotify.com/authorize?client_id=abc&response_type=code"));
+        let u = authorize_url("http://127.0.0.1:47816/callback", "CH", "ST");
+        assert!(
+            u.starts_with(&format!("https://accounts.spotify.com/authorize?client_id={CLIENT_ID}&response_type=code"))
+        );
         assert!(u.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A47816%2Fcallback"));
         assert!(u.contains("scope=playlist-read-private+playlist-read-collaborative"));
     }
@@ -415,6 +409,7 @@ mod tests {
         };
         save_token(&path, &t).expect("save");
         assert_eq!(load_token(&path), Some(t.clone()));
+        assert!(!is_signed_in(&path), "a token from another client ID does not count");
         assert!(t.is_fresh(0));
         assert!(!t.is_fresh(50_000));
         #[cfg(unix)]
