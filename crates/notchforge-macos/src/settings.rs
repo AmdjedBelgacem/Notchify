@@ -23,8 +23,8 @@ use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSBackingStoreType, NSButton, NSColor, NSControlSize,
-    NSControlStateValueOff, NSControlStateValueOn, NSImageView, NSPopUpButton, NSScrollView, NSSearchField, NSSlider,
-    NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSControlStateValueOff, NSControlStateValueOn, NSImageView, NSScrollView, NSSearchField, NSSlider, NSTextAlignment,
+    NSTextField, NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -449,42 +449,76 @@ impl Form<'_> {
         row.addSubview(&sw);
     }
 
+    /// The board's pop-up: a dark rounded pill with the current value and a
+    /// chevron; clicking opens a menu of the options.
     fn popup(&self, title: &str, options: &[&str], selected: usize, set: impl Fn(&mut Config, usize) + 'static) {
+        use objc2_app_kit::{NSCellImagePosition, NSMenu, NSMenuItem};
         let (row, w) = self.row(ROW_H);
         self.put_texts(&row, title, None, w - 250.0, ROW_H);
-        let p = NSPopUpButton::initWithFrame_pullsDown(
-            NSPopUpButton::alloc(self.mtm),
-            rect(w - 16.0 - 110.0, (ROW_H - 27.0) / 2.0, 110.0, 27.0),
-            false,
-        );
-        for o in options {
-            p.addItemWithTitle(&ns(o));
-        }
-        p.selectItemAtIndex(selected as isize);
-        p.setBordered(false);
-        p.setWantsLayer(true);
-        if let Some(l) = p.layer() {
+        let (pw, ph) = (112.0, 27.0);
+        let value_font = font(13.0, Weight::Regular);
+        let value_color = rgba(1.0, 1.0, 1.0, 0.92);
+        let btn = NSButton::new(self.mtm);
+        btn.setButtonType(objc2_app_kit::NSButtonType::MomentaryPushIn);
+        btn.setBordered(false);
+        btn.setFrame(rect(w - 16.0 - pw, (ROW_H - ph) / 2.0, pw, ph));
+        btn.setAlignment(NSTextAlignment::Left);
+        btn.setAttributedTitle(&attributed(options.get(selected).copied().unwrap_or(""), &value_font, &value_color));
+        btn.setImage(crate::ui::symbol_image("chevron.up.chevron.down", 9.0, "").as_deref());
+        btn.setImagePosition(NSCellImagePosition::ImageRight);
+        btn.setContentTintColor(Some(&rgba(1.0, 1.0, 1.0, 0.55)));
+        btn.setWantsLayer(true);
+        if let Some(l) = btn.layer() {
             l.setCornerRadius(8.0);
             l.setBackgroundColor(Some(&rgba(0.11, 0.11, 0.125, 1.0).CGColor()));
             l.setBorderWidth(1.0);
             l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.10).CGColor()));
         }
-        crate::ui::set_accessibility_label(&p, title);
-        let draft = self.draft.clone();
-        let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
-            if let Some(p) = sender.and_then(|s| s.downcast_ref::<NSPopUpButton>()) {
-                if let Ok(i) = usize::try_from(p.indexOfSelectedItem()) {
-                    set(&mut draft.borrow_mut(), i);
-                    Self::commit(&draft);
-                }
-            }
-        });
+        crate::ui::set_accessibility_label(&btn, title);
+
+        let set = Rc::new(set);
+        let menu = NSMenu::new(self.mtm);
+        let names: Vec<String> = options.iter().map(|o| (*o).to_owned()).collect();
+        for (i, name) in names.iter().enumerate() {
+            let draft = self.draft.clone();
+            let set = set.clone();
+            let button = btn.clone();
+            let (font, color, title) = (value_font.clone(), value_color.clone(), name.clone());
+            let t = self.targets.add(self.mtm, move |_| {
+                button.setAttributedTitle(&attributed(&title, &font, &color));
+                set(&mut draft.borrow_mut(), i);
+                Self::commit(&draft);
+            });
+            // SAFETY: a valid selector (the shared action) and plain strings.
+            let item = unsafe {
+                NSMenuItem::initWithTitle_action_keyEquivalent(
+                    NSMenuItem::alloc(self.mtm),
+                    &ns(name),
+                    Some(ActionTarget::action()),
+                    &ns(""),
+                )
+            };
+            // SAFETY: target kept alive by `targets`.
+            unsafe { item.setTarget(Some(t.as_any())) };
+            item.setState(if i == selected { NSControlStateValueOn } else { NSControlStateValueOff });
+            menu.addItem(&item);
+        }
+        let opener = {
+            let button = btn.clone();
+            self.targets.add(self.mtm, move |_| {
+                menu.popUpMenuPositioningItem_atLocation_inView(
+                    None,
+                    objc2_foundation::NSPoint::new(0.0, ph + 4.0),
+                    Some(&button),
+                );
+            })
+        };
         // SAFETY: target kept alive by `targets`.
         unsafe {
-            p.setTarget(Some(t.as_any()));
-            p.setAction(Some(ActionTarget::action()));
+            btn.setTarget(Some(opener.as_any()));
+            btn.setAction(Some(ActionTarget::action()));
         }
-        row.addSubview(&p);
+        row.addSubview(&btn);
     }
 
     fn text(
