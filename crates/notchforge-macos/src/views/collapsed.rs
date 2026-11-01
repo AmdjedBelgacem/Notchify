@@ -112,6 +112,23 @@ impl CollapsedView {
         }
     }
 
+    /// State of the left-wing icon, for self-test diagnostics.
+    pub fn debug_art(&self) -> String {
+        let f = self.art.frame();
+        let host = self.art.superview().map(|v| (v.isHidden(), v.frame().origin.x, v.frame().size.width));
+        format!(
+            "art hidden={} frame=({:.0},{:.0},{:.0},{:.0}) has_image={} host={:?} left_icon_hidden={}",
+            self.art.isHidden(),
+            f.origin.x,
+            f.origin.y,
+            f.size.width,
+            f.size.height,
+            self.art.image().is_some(),
+            host,
+            self.left_icon.isHidden()
+        )
+    }
+
     fn set_equalizer(&self, on: bool, color: &objc2_app_kit::NSColor, animate: bool) {
         use objc2_quartz_core::{CABasicAnimation, CAMediaTiming};
         self.eq.setHidden(!on);
