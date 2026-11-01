@@ -825,10 +825,44 @@ fn text_probe(ctx: &Rc<Ctx>, mtm: MainThreadMarker) {
 fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     let (overview, music) = board_snapshots(ctx, sample);
     let Some(peek) = overview.notifications.first().cloned() else { return };
+    let prompt = |id: u64, app: AppRef, title: &str, body: &str, thread: String| notchforge_core::model::Notification {
+        id: notchforge_core::model::NotificationId(id),
+        app,
+        origin: Origin::Internal,
+        kind: NotificationKind::Authorization,
+        priority: Priority::High,
+        title: title.into(),
+        subtitle: None,
+        body: body.into(),
+        timestamp_ms: notchforge_core::time::now_ms(),
+        thread: Some(thread),
+        url: None,
+        group_count: 1,
+        read: false,
+    };
+    let mut claude_code = AppRef::known(KnownApp::Claude);
+    claude_code.display_name = "Claude Code".into();
+    let spotify = AppRef { known: None, bundle_id: Some("com.spotify.client".into()), display_name: "Spotify".into() };
+    let prompts = [
+        prompt(
+            901,
+            claude_code,
+            "Allow Claude Code in the notch?",
+            "It asked to show notifications. Nothing appears until you decide.",
+            format!("{}claude", notchforge_core::model::AUTH_THREAD_AGENT),
+        ),
+        prompt(
+            902,
+            spotify,
+            "Approve NotchForge in your browser",
+            "Spotify's sign-in is open. Allow access there, then come back.",
+            notchforge_core::model::AUTH_THREAD_SPOTIFY.into(),
+        ),
+    ];
     let (overview, music) = (&overview, &music);
     let mut sizes = Vec::new();
     with_controller(|c| {
-        c.notched_previews(overview, music, &peek, &mut |name, view, w, h| {
+        c.notched_previews(overview, music, &peek, &prompts, &mut |name, view, w, h| {
             sizes.push((name.to_string(), w, h));
             match view.layer().and_then(|l| png_from_layer(&l, w, h, 2.0)) {
                 Some(png) => emit_png(ctx, name, png),
@@ -838,7 +872,7 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
-    r.check("notched: five views rendered", sizes.len() == 5, format!("{sizes:?}"));
+    r.check("notched: eight views rendered", sizes.len() == 8, format!("{sizes:?}"));
     r.metrics.insert("notched_sizes".into(), json!(sizes));
     // Island sizes on the design boards (Overview, Main, Hover, Peek).
     for (name, bw, bh) in [

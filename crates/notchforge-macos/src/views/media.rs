@@ -113,6 +113,8 @@ enum ListAction {
     AllowAutomation,
     OpenMusic,
     Retry,
+    /// Give up the Spotify sign-in waiting on the browser.
+    CancelSpotify,
 }
 
 pub struct MediaPage {
@@ -595,6 +597,7 @@ impl MediaPage {
             ListAction::AllowAutomation => glue::request_automation(),
             ListAction::OpenMusic => glue::open_player(MediaPlayer::Music),
             ListAction::Retry => glue::send(ProviderCommand::ReloadPlaylists),
+            ListAction::CancelSpotify => glue::send(ProviderCommand::SpotifyCancel),
         });
         let list_action = pill_button(
             mtm,
@@ -1001,6 +1004,11 @@ impl MediaPage {
             (None, ListAction::None, "")
         } else {
             match (player, &status) {
+                (MediaPlayer::Spotify, PlaylistStatus::SigningIn) => (
+                    Some("Waiting for you to approve NotchForge in your browser…".into()),
+                    ListAction::CancelSpotify,
+                    "Cancel",
+                ),
                 (MediaPlayer::Spotify, PlaylistStatus::NeedsSpotifyLogin) => {
                     let has_id = crate::app::with_config(|c| !c.media.spotify_client_id.is_empty()).unwrap_or(false);
                     if has_id {

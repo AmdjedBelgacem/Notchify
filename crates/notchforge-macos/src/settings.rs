@@ -96,7 +96,9 @@ impl Pane {
             Pane::General => "launch login menu bar screen display hover peek config logs reset battery accessories",
             Pane::Appearance => "motion animation speed wings contrast",
             Pane::Notifications => "focus banners apps whatsapp discord slack messages priority notification center",
-            Pane::Agents => "claude cursor zed codex opencode qoder webhook port token socket inbox",
+            Pane::Agents => {
+                "claude cursor zed codex opencode qoder webhook port token socket inbox allow deny approval authorize consent"
+            }
             Pane::Weather => "location city units celsius fahrenheit refresh",
             Pane::Media => "spotify apple music audio output playlists client id automation",
             Pane::Tray => "files drop airdrop keep",
@@ -778,6 +780,23 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             form.text("Bearer token", c.agents.token.as_deref().unwrap_or(""), "Optional", true, |cfg, v| {
                 cfg.agents.token = if v.is_empty() { None } else { Some(v) };
             });
+            form.switch(
+                "Ask before a new agent shows notifications",
+                Some("The notch asks Allow / Deny the first time an agent sends something"),
+                c.agents.require_approval,
+                |cfg, on| cfg.agents.require_approval = on,
+            );
+            form.action_row(
+                "Remembered decisions",
+                Some("Forget every Allow / Deny so agents are asked again."),
+                None,
+                vec![(
+                    "Forget",
+                    false,
+                    Box::new(|| crate::app::send(notchforge_core::engine::Command::ForgetAgentDecisions)),
+                )],
+                None,
+            );
             let port = c.agents.http_port;
             form.action_row(
                 "Test the webhook",

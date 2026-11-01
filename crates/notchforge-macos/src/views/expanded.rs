@@ -31,7 +31,9 @@ use crate::ui::{
 use notchforge_core::config::Config;
 use notchforge_core::engine::{Command, EngineHandle, Snapshot};
 use notchforge_core::geometry::{LayoutKind, NotchLayout};
-use notchforge_core::model::{BatteryComponent, BatteryStatus, DisplayInfo, Notification, NotificationKind, Priority};
+use notchforge_core::model::{
+    AuthTarget, BatteryComponent, BatteryStatus, DisplayInfo, Notification, NotificationKind, Priority,
+};
 use notchforge_core::time::{relative, relative_spoken};
 use notchforge_core::tray::format_bytes;
 use objc2::rc::Retained;
@@ -798,6 +800,9 @@ impl ExpandedView {
             NotificationKind::NeedsInput => Some("Needs input"),
             NotificationKind::TaskFinished => Some("Task finished"),
             NotificationKind::Error => Some("Error"),
+            NotificationKind::Authorization => {
+                Some(if matches!(n.auth_target(), Some(AuthTarget::Spotify)) { "Sign-in" } else { "Wants access" })
+            }
             _ => None,
         };
         let mut head = n.app.display_name.clone();
@@ -826,6 +831,13 @@ impl ExpandedView {
             &head_color,
             rect(tx, 10.0, w - tx - 66.0, 14.0),
         ));
+        // Authorization prompts carry their buttons on the right.
+        let auth = n.auth_target();
+        let reserve = match &auth {
+            Some(AuthTarget::Agent(_)) => 118.0,
+            Some(AuthTarget::Spotify) => 74.0,
+            None => 0.0,
+        };
         let mut title = n.title.clone();
         if let Some(sub) = &n.subtitle {
             title.push_str(" — ");
@@ -836,7 +848,7 @@ impl ExpandedView {
             &title,
             &font(13.0, Weight::Semibold),
             &p.primary,
-            rect(tx, 24.0, w - tx - 12.0, 17.0),
+            rect(tx, 24.0, w - tx - 12.0 - reserve, 17.0),
         ));
         if !n.body.trim().is_empty() {
             row.addSubview(&label(
@@ -844,8 +856,13 @@ impl ExpandedView {
                 &n.body.replace('\n', " "),
                 &font(11.5, Weight::Regular),
                 &p.secondary,
-                rect(tx, 41.0, w - tx - 12.0, 15.0),
+                rect(tx, 41.0, w - tx - 12.0 - reserve, 15.0),
             ));
+        }
+        if let Some(target) = auth {
+            set_accessibility_label(&row, &format!("{}, {}", n.plain_text(), relative_spoken(n.timestamp_ms, now_ms)));
+            self.auth_buttons(&row, &target, w);
+            return row;
         }
         // Click opens; right-click offers Open, Copy and Dismiss.
         let id = n.id;
@@ -873,6 +890,31 @@ impl ExpandedView {
         row.addSubview(&overlay);
         set_accessibility_label(&row, &format!("{}, {}", n.plain_text(), relative_spoken(n.timestamp_ms, now_ms)));
         row
+    }
+
+    /// Allow / Deny (agent access) or Cancel (Spotify sign-in) on the right of
+    /// an authorization card.
+    fn auth_buttons(&self, row: &FlippedView, target: &AuthTarget, w: f64) {
+        let mtm = self.mtm;
+        let f = font(11.5, Weight::Semibold);
+        let (black, white) = (NSColor::blackColor(), NSColor::whiteColor());
+        let quiet = rgba(1.0, 1.0, 1.0, 0.14);
+        let add = |title: &str, x: f64, bw: f64, primary: bool, light: bool| {
+            let t = target.clone();
+            let handler = self.row_targets.add(mtm, move |_| {
+                with_controller(|c| c.answer_auth(&t, primary));
+            });
+            let (fg, bg) = if light { (&black, white.clone()) } else { (&white, quiet.clone()) };
+            let b = pill_button(mtm, title, None, &f, fg, &bg, 13.0, &handler, rect(x, 28.0, bw, 26.0));
+            row.addSubview(&b);
+        };
+        match target {
+            AuthTarget::Agent(_) => {
+                add("Allow", w - 12.0 - 56.0, 56.0, true, true);
+                add("Deny", w - 12.0 - 56.0 - 8.0 - 50.0, 50.0, false, false);
+            }
+            AuthTarget::Spotify => add("Cancel", w - 12.0 - 62.0, 62.0, true, false),
+        }
     }
 
     fn render_tray(&self, snap: &Snapshot) {

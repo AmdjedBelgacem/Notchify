@@ -559,11 +559,15 @@ impl Controller {
         if matches!(self.machine.borrow().state(), State::Expanded | State::DropTarget { .. }) {
             return false;
         }
-        // The peek's Open button opens the notification itself.
-        if self.kind.get() == LayoutKind::Peek && self.views.borrow().peek.open_hit(window_point) {
-            self.views.borrow().peek.open_current();
-            self.handle(Event::ClickOutside);
-            return true;
+        // The peek's button opens the notification itself, or answers its
+        // authorization question (Allow / Deny / Cancel).
+        if self.kind.get() == LayoutKind::Peek {
+            let hit = self.views.borrow().peek.button_hit(window_point);
+            if let Some(primary) = hit {
+                self.views.borrow().peek.press(primary);
+                self.handle(Event::ClickOutside);
+                return true;
+            }
         }
         // Clicking the hover card's "now playing" opens straight on the music page.
         if self.kind.get() == LayoutKind::Compact && self.views.borrow().compact.media_hit(window_point) {
@@ -608,6 +612,7 @@ impl Controller {
         overview: &Snapshot,
         music: &Snapshot,
         peek: &Notification,
+        prompts: &[Notification; 2],
         render: &mut dyn FnMut(&str, &NSView, f64, f64),
     ) {
         use crate::views::expanded::Tab;
@@ -696,6 +701,16 @@ impl Controller {
             crate::views::collapsed::WingOptions { media: true, animate: false },
         );
         show("07e-notched-wings-browser", LayoutKind::CollapsedWithWings, &views.collapsed.root);
+        // Authorization prompts: an agent asking for access, a Spotify sign-in.
+        views.peek.show(&prompts[0], &palette);
+        show("07f-notched-auth-agent", LayoutKind::Peek, &views.peek.root);
+        views.peek.show(&prompts[1], &palette);
+        show("07g-notched-auth-spotify", LayoutKind::Peek, &views.peek.root);
+        let mut asking = overview.clone();
+        asking.notifications.splice(0..0, prompts.iter().cloned());
+        views.expanded.update(&asking);
+        views.expanded.show_tab(Tab::Overview);
+        show("07h-notched-auth-overview", LayoutKind::Expanded, &views.expanded.root);
         views.expanded.media.set_active(false);
     }
 
@@ -764,6 +779,18 @@ impl Controller {
 
     pub fn collapse(&self) {
         self.handle(Event::Escape);
+    }
+
+    /// Answer an authorization prompt: Allow / Deny for an agent asking to show
+    /// notifications, Cancel for a Spotify sign-in waiting on the browser.
+    pub fn answer_auth(&self, target: &notchforge_core::model::AuthTarget, primary: bool) {
+        use notchforge_core::model::AuthTarget;
+        match target {
+            AuthTarget::Agent(key) => self.engine.send(Command::Authorize { key: key.clone(), allow: primary }),
+            AuthTarget::Spotify => {
+                self.engine.send(Command::Provider(notchforge_core::provider::ProviderCommand::SpotifyCancel))
+            }
+        }
     }
 
     /// The panel lost key status: if it was pinned open, close it. (A modal
