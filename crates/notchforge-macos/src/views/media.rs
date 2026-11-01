@@ -126,6 +126,7 @@ pub struct MediaPage {
     source_targets: Targets,
     state: Shared,
     wash: Retained<objc2_quartz_core::CAGradientLayer>,
+    wash2: Retained<objc2_quartz_core::CAGradientLayer>,
 
     art: Retained<NSImageView>,
     art_placeholder: Retained<NSImageView>,
@@ -227,12 +228,23 @@ impl MediaPage {
         wash.setType(&NSString::from_str("radial"));
         wash.setFrame(rect(0.0, 0.0, w, h));
         wash.setStartPoint(NSPoint::new(0.08, 0.0));
-        wash.setEndPoint(NSPoint::new(0.55, 0.85));
+        // The board's wash: radius 70 % x 85 %, transparent at 62 % of it.
+        wash.setEndPoint(NSPoint::new(0.08 + 0.434, 0.527));
         wash.setOpacity(0.0);
         // The notch band stays pure black so the island blends with the notch.
-        crate::ui::fade_in_below(&wash, nh, 24.0);
+        crate::ui::fade_in_below(&wash, nh, 6.0);
+        // A warm second glow beside it (50 % x 60 % at 30 % / 10 %).
+        let wash2 = objc2_quartz_core::CAGradientLayer::layer();
+        wash2.setType(&NSString::from_str("radial"));
+        wash2.setFrame(rect(0.0, 0.0, w, h));
+        wash2.setStartPoint(NSPoint::new(0.30, 0.10));
+        wash2.setEndPoint(NSPoint::new(0.30 + 0.35, 0.10 + 0.42));
+        set_gradient(&wash2, &[(1.0, 0.588, 0.314, 0.16), (1.0, 0.588, 0.314, 0.0)]);
+        wash2.setOpacity(0.0);
+        crate::ui::fade_in_below(&wash2, nh, 6.0);
         if let Some(layer) = root.layer() {
             layer.addSublayer(&wash);
+            layer.addSublayer(&wash2);
         }
 
         let lw = ((w - 56.0) * 0.612).floor();
@@ -302,13 +314,13 @@ impl MediaPage {
             now.sampled_at_ms = now_ms();
             glue::control(now.player, MediaAction::Seek(secs));
         });
-        let elapsed = label(mtm, "", &mono_digits(11.0, Weight::Medium), &p.tertiary, rect(tx, nh + 110.0, 70.0, 14.0));
+        let elapsed = label(mtm, "", &mono_digits(11.0, Weight::Medium), &p.tertiary, rect(tx, nh + 107.5, 70.0, 14.0));
         let remaining = label(
             mtm,
             "",
             &mono_digits(11.0, Weight::Medium),
             &p.tertiary,
-            rect(tx + tw - 70.0, nh + 110.0, 70.0, 14.0),
+            rect(tx + tw - 70.0, nh + 107.5, 70.0, 14.0),
         );
         remaining.setAlignment(NSTextAlignment::Right);
         for v in [&*progress as &NSView, &elapsed, &remaining] {
@@ -347,7 +359,7 @@ impl MediaPage {
         let prev = mk(
             1,
             "backward.fill",
-            19.0,
+            14.5,
             "Previous track",
             Box::new(|st| match &st.borrow().featured {
                 Featured::Player(pl) => glue::control(*pl, MediaAction::Previous),
@@ -386,7 +398,7 @@ impl MediaPage {
         let next = mk(
             3,
             "forward.fill",
-            19.0,
+            14.5,
             "Next track",
             Box::new(|st| match &st.borrow().featured {
                 Featured::Player(pl) => glue::control(*pl, MediaAction::Next),
@@ -447,8 +459,8 @@ impl MediaPage {
         let output_icon = symbol_view(mtm, "headphones", 14.0, &p.primary, rect(7.0, 7.0, 16.0, 16.0), "Output");
         icon_disc.addSubview(&output_icon);
         let output_name =
-            label(mtm, "Output", &font(13.5, Weight::Semibold), &p.primary, rect(55.0, 11.0, lw - 170.0, 17.0));
-        let output_caps = label(mtm, "", &font(11.0, Weight::Regular), &p.tertiary, rect(55.0, 28.0, lw - 170.0, 14.0));
+            label(mtm, "Output", &font(13.5, Weight::Semibold), &p.primary, rect(55.0, 12.5, lw - 170.0, 17.0));
+        let output_caps = label(mtm, "", &font(11.0, Weight::Regular), &p.tertiary, rect(55.0, 29.5, lw - 170.0, 14.0));
         let st = state.clone();
         let t = targets.add(mtm, move |sender: Option<&AnyObject>| {
             let Some(b) = sender.and_then(|s| s.downcast_ref::<NSButton>()) else { return };
@@ -463,17 +475,17 @@ impl MediaPage {
             &white(0.12),
             13.0,
             &t,
-            rect(lw - 14.0 - 88.0, 14.0, 88.0, 26.0),
+            rect(lw - 14.0 - 80.0, 14.5, 80.0, 26.0),
         );
         out_card.addSubview(&symbol_view(
             mtm,
             "speaker.fill",
             10.0,
             &p.secondary,
-            rect(14.0, 52.0, 13.0, 13.0),
+            rect(14.0, 54.5, 13.0, 13.0),
             "Volume",
         ));
-        let volume = ThinSlider::new(mtm, rect(34.0, 48.0, lw - 74.0, 20.0), true, &p.primary);
+        let volume = ThinSlider::new(mtm, rect(34.0, 50.5, lw - 74.0, 20.0), true, &p.primary);
         set_accessibility_label(&volume, "Output volume");
         volume.set_on_change(|v| {
             crate::controls::volume::set(v as f32);
@@ -483,7 +495,7 @@ impl MediaPage {
             "speaker.wave.2.fill",
             11.0,
             &p.secondary,
-            rect(lw - 32.0, 51.0, 18.0, 14.0),
+            rect(lw - 32.0, 53.5, 18.0, 14.0),
             "Louder",
         ));
         for v in [&*icon_disc as &NSView, &output_name, &output_caps, &output_button, &volume] {
@@ -622,6 +634,7 @@ impl MediaPage {
             source_targets: Targets::default(),
             state,
             wash,
+            wash2,
             art,
             art_placeholder,
             badge_dot,
@@ -725,10 +738,14 @@ impl MediaPage {
     fn set_wash(&self, color: Option<(f64, f64, f64)>) {
         match color {
             Some((r, g, b)) => {
-                set_gradient(&self.wash, &[(r, g, b, 0.34), (r, g, b, 0.0)]);
+                set_gradient(&self.wash, &[(r, g, b, 0.40), (r, g, b, 0.0)]);
                 self.wash.setOpacity(1.0);
+                self.wash2.setOpacity(1.0);
             }
-            None => self.wash.setOpacity(0.0),
+            None => {
+                self.wash.setOpacity(0.0);
+                self.wash2.setOpacity(0.0);
+            }
         }
     }
 
