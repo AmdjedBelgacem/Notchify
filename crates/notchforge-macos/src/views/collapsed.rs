@@ -61,7 +61,7 @@ impl CollapsedView {
         let art_box = crate::ui::shape_view(
             mtm,
             rect(12.0, (h - art_side) / 2.0, art_side, art_side),
-            &crate::ui::rgba(0.0, 0.0, 0.0, 0.0),
+            &crate::ui::rgba(0.0, 0.0, 0.0, 1.0),
             4.0,
         );
         if let Some(l) = art_box.layer() {
@@ -110,24 +110,6 @@ impl CollapsedView {
             right_icon,
             right_text,
         }
-    }
-
-    /// State of the left-wing icon, for self-test diagnostics.
-    pub fn debug_art(&self) -> String {
-        let f = self.art.frame();
-        // SAFETY: reading the superview of a view we own.
-        let host = unsafe { self.art.superview() }.map(|v| (v.isHidden(), v.frame().origin.x, v.frame().size.width));
-        format!(
-            "art hidden={} frame=({:.0},{:.0},{:.0},{:.0}) has_image={} host={:?} left_icon_hidden={}",
-            self.art.isHidden(),
-            f.origin.x,
-            f.origin.y,
-            f.size.width,
-            f.size.height,
-            self.art.image().is_some(),
-            host,
-            self.left_icon.isHidden()
-        )
     }
 
     fn set_equalizer(&self, on: bool, color: &objc2_app_kit::NSColor, animate: bool) {
