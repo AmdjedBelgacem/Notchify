@@ -703,6 +703,81 @@ fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core
     screenshot(ctx, mtm, "03c-overview-sample", None);
     with_controller(|c| c.preview_overview(snap));
     notched_previews(ctx, &fake);
+    text_probe(ctx, mtm);
+}
+
+/// The Peek title drawn three ways, to tell how much of the text weight seen
+/// in the renders comes from font smoothing in the capture: through an
+/// NSTextField (the app's path), and straight into a bitmap with smoothing
+/// on and off.
+fn text_probe(ctx: &Rc<Ctx>, mtm: MainThreadMarker) {
+    use objc2_app_kit::{NSAttributedStringNSStringDrawing, NSGraphicsContext};
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImageAlphaInfo,
+    };
+    let (w, h, scale) = (200.0, 24.0, 2.0);
+    let text = "Allow running cargo test?";
+    let font = crate::ui::font(14.0, crate::ui::Weight::Semibold);
+    let white = objc2_app_kit::NSColor::whiteColor();
+    for smooth in [true, false] {
+        let (pw, ph) = ((w * scale) as usize, (h * scale) as usize);
+        let Some(space) = CGColorSpace::new_device_rgb() else { return };
+        // SAFETY: null data lets CoreGraphics own the buffer; 0 = automatic stride.
+        let Some(cg) = (unsafe {
+            CGBitmapContextCreate(
+                std::ptr::null_mut(),
+                pw,
+                ph,
+                8,
+                0,
+                Some(&space),
+                CGImageAlphaInfo::PremultipliedLast.0,
+            )
+        }) else {
+            return;
+        };
+        CGContext::set_rgb_fill_color(Some(&cg), 0.0, 0.0, 0.0, 1.0);
+        CGContext::fill_rect(Some(&cg), crate::ui::rect(0.0, 0.0, pw as f64, ph as f64));
+        CGContext::scale_ctm(Some(&cg), scale, scale);
+        CGContext::set_allows_font_smoothing(Some(&cg), smooth);
+        CGContext::set_should_smooth_fonts(Some(&cg), smooth);
+        let ns = NSGraphicsContext::graphicsContextWithCGContext_flipped(&cg, false);
+        NSGraphicsContext::saveGraphicsState_class();
+        NSGraphicsContext::setCurrentContext(Some(&ns));
+        crate::ui::attributed(text, &font, &white).drawAtPoint(NSPoint::new(0.0, 5.0));
+        NSGraphicsContext::restoreGraphicsState_class();
+        let Some(img) = CGBitmapContextCreateImage(Some(&cg)) else { return };
+        if let Some(png) = png_from_cgimage(&img) {
+            let name = if smooth { "08-text-smoothing-on" } else { "08-text-smoothing-off" };
+            emit_png(ctx, name, png);
+        }
+    }
+    // The app's path: a label in a layer-backed view, captured like the islands.
+    let host = crate::ui::FlippedView::new(mtm, crate::ui::rect(0.0, 0.0, w, h));
+    host.setWantsLayer(true);
+    if let Some(l) = host.layer() {
+        l.setBackgroundColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
+    }
+    host.addSubview(&crate::ui::label(mtm, text, &font, &white, crate::ui::rect(0.0, 2.0, w, 20.0)));
+    // SAFETY: a plain borderless window, closed below.
+    let window = unsafe {
+        let win = objc2_app_kit::NSWindow::initWithContentRect_styleMask_backing_defer(
+            objc2_app_kit::NSWindow::alloc(mtm),
+            crate::ui::rect(-20000.0, -20000.0, w, h),
+            objc2_app_kit::NSWindowStyleMask::Borderless,
+            objc2_app_kit::NSBackingStoreType::Buffered,
+            false,
+        );
+        win.setReleasedWhenClosed(false);
+        win
+    };
+    window.setContentView(Some(&host));
+    window.displayIfNeeded();
+    objc2_quartz_core::CATransaction::flush();
+    if let Some(png) = host.layer().and_then(|l| png_from_layer(&l, w, h, scale)) {
+        emit_png(ctx, "08-text-label", png);
+    }
+    window.close();
 }
 
 /// The same sample data on a simulated 14-inch MacBook Pro notch (185 × 32

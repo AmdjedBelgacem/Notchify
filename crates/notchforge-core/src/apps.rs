@@ -160,7 +160,7 @@ impl KnownApp {
     /// SF Symbol used when the real application icon is unavailable.
     pub fn symbol(self) -> &'static str {
         match self {
-            KnownApp::Claude => "sparkle",
+            KnownApp::Claude => "asterisk",
             KnownApp::ChatGpt => "bubble.left.and.text.bubble.right",
             KnownApp::Cursor => "cursorarrow.rays",
             KnownApp::Zed => "chevron.left.forwardslash.chevron.right",

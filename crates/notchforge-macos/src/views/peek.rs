@@ -62,8 +62,8 @@ impl PeekView {
         glow.setType(&objc2_foundation::NSString::from_str("radial"));
         glow.setFrame(rect(0.0, 0.0, w, h));
         glow.setStartPoint(NSPoint::new(0.0, 1.0));
-        glow.setEndPoint(NSPoint::new(0.6, -0.2));
-        set_gradient(&glow, &[(1.0, 0.62, 0.04, 0.24), (1.0, 0.62, 0.04, 0.0)]);
+        glow.setEndPoint(NSPoint::new(0.42, 1.0 - 0.84));
+        set_gradient(&glow, &[(1.0, 0.62, 0.04, 0.22), (1.0, 0.62, 0.04, 0.0)]);
         if let Some(l) = root.layer() {
             l.addSublayer(&glow);
         }
@@ -73,7 +73,9 @@ impl PeekView {
         let tile = shape_view(mtm, rect(16.0, cy - 18.0, 36.0, 36.0), &rgba(1.0, 1.0, 1.0, 0.08), 9.0);
         let icon = app_icon_view(mtm, rect(2.0, 2.0, 32.0, 32.0));
         tile.addSubview(&icon);
-        let ow = 64.0;
+        // Board: 12 pt padding either side of the label.
+        let open_font = font(12.5, Weight::Semibold);
+        let ow = (crate::ui::text_width(&attributed("Open", &open_font, &p.primary)) + 24.0).ceil();
         let tx = 64.0;
         let tw = w - tx - ow - 28.0;
         let dot = shape_view(mtm, rect(tx, cy - 13.0, 6.0, 6.0), &p.warning, 3.0);
@@ -85,7 +87,7 @@ impl PeekView {
             mtm,
             "Open",
             None,
-            &font(12.5, Weight::Semibold),
+            &open_font,
             &objc2_app_kit::NSColor::blackColor(),
             &objc2_app_kit::NSColor::whiteColor(),
             14.0,
@@ -120,7 +122,7 @@ impl PeekView {
         self.dot.setHidden(!urgent);
         let shift = if urgent { 0.0 } else { -12.0 };
         let f = self.summary.frame();
-        let base_x = self.dot.frame().origin.x + 12.0;
+        let base_x = self.dot.frame().origin.x + 12.0 - crate::ui::LABEL_INSET;
         self.summary.setFrameOrigin(NSPoint::new(base_x + shift, f.origin.y));
         without_animation(|| self.glow.setHidden(!urgent));
         let mut title = n.title.clone();

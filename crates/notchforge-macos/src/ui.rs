@@ -183,13 +183,25 @@ pub fn mono_digits(size: f64, w: Weight) -> Retained<NSFont> {
 // Controls
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// AppKit draws a label's text 2 pt inside its frame (the text container's
+/// line fragment padding). Widen the frame by that much on each side so text
+/// starts exactly at the frame's x, as on the design boards (CSS).
+pub const LABEL_INSET: f64 = 2.0;
+
+fn text_frame(frame: NSRect) -> NSRect {
+    NSRect::new(
+        objc2_foundation::NSPoint::new(frame.origin.x - LABEL_INSET, frame.origin.y),
+        objc2_foundation::NSSize::new(frame.size.width + 2.0 * LABEL_INSET, frame.size.height),
+    )
+}
+
 /// Non-editable, non-selectable single- or multi-line label.
 pub fn label(mtm: MainThreadMarker, text: &str, f: &NSFont, color: &NSColor, frame: NSRect) -> Retained<NSTextField> {
     let l = NSTextField::labelWithString(&ns(text), mtm);
     l.setFont(Some(f));
     l.setTextColor(Some(color));
     l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
-    l.setFrame(frame);
+    l.setFrame(text_frame(frame));
     l
 }
 
@@ -211,7 +223,7 @@ pub fn wrapping_label(
     if let Some(cell) = l.cell() {
         cell.setTruncatesLastVisibleLine(true);
     }
-    l.setFrame(frame);
+    l.setFrame(text_frame(frame));
     l
 }
 
@@ -621,7 +633,7 @@ pub fn rich_label(
 ) -> Retained<NSTextField> {
     let l = NSTextField::labelWithAttributedString(s, mtm);
     l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
-    l.setFrame(frame);
+    l.setFrame(text_frame(frame));
     l
 }
 
