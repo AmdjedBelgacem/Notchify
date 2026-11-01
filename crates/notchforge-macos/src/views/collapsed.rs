@@ -115,7 +115,8 @@ impl CollapsedView {
     /// State of the left-wing icon, for self-test diagnostics.
     pub fn debug_art(&self) -> String {
         let f = self.art.frame();
-        let host = self.art.superview().map(|v| (v.isHidden(), v.frame().origin.x, v.frame().size.width));
+        // SAFETY: reading the superview of a view we own.
+        let host = unsafe { self.art.superview() }.map(|v| (v.isHidden(), v.frame().origin.x, v.frame().size.width));
         format!(
             "art hidden={} frame=({:.0},{:.0},{:.0},{:.0}) has_image={} host={:?} left_icon_hidden={}",
             self.art.isHidden(),

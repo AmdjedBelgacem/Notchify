@@ -703,6 +703,11 @@ impl Controller {
             &palette,
             crate::views::collapsed::WingOptions { media: true, animate: false },
         );
+        tracing::info!(
+            audio = ?browser.audio.playing_app().map(|a| (&a.name, &a.bundle_id)),
+            state = %views.collapsed.debug_art(),
+            "browser-audio wings"
+        );
         show("07e-notched-wings-browser", LayoutKind::CollapsedWithWings, &views.collapsed.root);
         // Authorization prompts: an agent asking for access, a Spotify sign-in.
         views.peek.show(&prompts[0], &palette);
