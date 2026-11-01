@@ -584,15 +584,55 @@ impl Form<'_> {
         mono: bool,
         set: impl Fn(&mut Config, String) + 'static,
     ) {
-        let (row, w) = self.row(ROW_H);
-        self.put_texts(&row, title, None, w - 350.0, ROW_H);
-        let f = NSTextField::textFieldWithString(&ns(value), self.mtm);
+        self.text_row(title, None, value, placeholder, mono, 300.0, false, set);
+    }
+
+    /// A row with a text field on the right: dark rounded box, `width` wide.
+    #[allow(clippy::too_many_arguments)]
+    fn text_row(
+        &self,
+        title: &str,
+        subtitle: Option<&str>,
+        value: &str,
+        placeholder: &str,
+        mono: bool,
+        width: f64,
+        secure: bool,
+        set: impl Fn(&mut Config, String) + 'static,
+    ) {
+        let h = self.texts(subtitle, GROUP_W - 64.0 - width);
+        let (row, w) = self.row(h);
+        self.put_texts(&row, title, subtitle, w - 64.0 - width, h);
+        let frame = rect(w - 16.0 - width, (h - 28.0) / 2.0, width, 28.0);
+        let f: Retained<NSTextField> = if secure {
+            let sf = objc2_app_kit::NSSecureTextField::initWithFrame(
+                <objc2_app_kit::NSSecureTextField as MainThreadOnly>::alloc(self.mtm),
+                frame,
+            );
+            sf.setStringValue(&ns(value));
+            Retained::into_super(sf)
+        } else {
+            let tf = NSTextField::textFieldWithString(&ns(value), self.mtm);
+            tf.setFrame(frame);
+            tf
+        };
         f.setPlaceholderString(Some(&ns(placeholder)));
-        f.setFrame(rect(w - 16.0 - 300.0, (ROW_H - 24.0) / 2.0, 300.0, 24.0));
         f.setAlignment(NSTextAlignment::Right);
+        f.setBordered(false);
+        f.setBezeled(false);
+        f.setDrawsBackground(false);
+        f.setFocusRingType(objc2_app_kit::NSFocusRingType::None);
+        f.setTextColor(Some(&text_primary()));
+        f.setWantsLayer(true);
+        if let Some(l) = f.layer() {
+            l.setCornerRadius(8.0);
+            l.setBackgroundColor(Some(&rgba(0.04, 0.04, 0.05, 1.0).CGColor()));
+            l.setBorderWidth(1.0);
+            l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.08).CGColor()));
+        }
         if mono {
             f.setFont(Some(&objc2_app_kit::NSFont::monospacedSystemFontOfSize_weight(
-                12.0,
+                13.0,
                 crate::ui::weight(Weight::Regular),
             )));
         }
@@ -1207,27 +1247,46 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             form.note("Messaging apps are read from Notification Center. To avoid double banners, set an app's alert style to “None” in System Settings › Notifications; it still reaches the notch.");
         }
         Pane::Agents => {
-            form.begin("");
+            form.begin("Listening");
             form.switch("Coding agents", Some("Webhook, Unix socket and inbox file"), c.providers.agents, |cfg, on| {
                 cfg.providers.agents = on
             });
-            form.text("Webhook port", &c.agents.http_port.to_string(), "47815", true, |cfg, v| {
-                if let Ok(p) = v.parse::<u16>() {
-                    cfg.agents.http_port = p;
-                }
-            });
-            form.text("Bearer token", c.agents.token.as_deref().unwrap_or(""), "Optional", true, |cfg, v| {
-                cfg.agents.token = if v.is_empty() { None } else { Some(v) };
-            });
+            form.text_row(
+                "Webhook port",
+                Some("Loopback only"),
+                &c.agents.http_port.to_string(),
+                "47815",
+                true,
+                86.0,
+                false,
+                |cfg, v| {
+                    if let Ok(p) = v.parse::<u16>() {
+                        cfg.agents.http_port = p;
+                    }
+                },
+            );
+            form.text_row(
+                "Bearer token",
+                Some("Optional. Requests then need Authorization: Bearer"),
+                c.agents.token.as_deref().unwrap_or(""),
+                "Optional",
+                true,
+                190.0,
+                true,
+                |cfg, v| {
+                    cfg.agents.token = if v.is_empty() { None } else { Some(v) };
+                },
+            );
+            form.begin("Approval");
             form.switch(
                 "Ask before a new agent shows notifications",
-                Some("The notch asks Allow / Deny the first time an agent sends something"),
+                Some("The notch asks Allow or Deny the first time an agent sends something"),
                 c.agents.require_approval,
                 |cfg, on| cfg.agents.require_approval = on,
             );
             form.action_row(
                 "Remembered decisions",
-                Some("Forget every Allow / Deny so agents are asked again."),
+                Some("Forget every Allow and Deny so agents are asked again"),
                 None,
                 vec![(
                     "Forget",
@@ -1235,6 +1294,9 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                     Box::new(|| crate::app::send(notchforge_core::engine::Command::ForgetAgentDecisions)),
                 )],
                 None,
+            );
+            form.note(
+                "This is consent, not authentication: an agent is recognised by the source name it sends. Set a bearer token to keep other local processes from posting.",
             );
             let port = c.agents.http_port;
             let cmd = format!(
@@ -1256,9 +1318,6 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                     crate::sharing::copy_text(&cmd);
                 }),
             );
-            form.note(&format!(
-                "Agents POST JSON to http://127.0.0.1:{port}/v1/notify. The README has recipes for Claude Code, Codex, OpenCode, Zed and Cursor."
-            ));
         }
         Pane::Weather => {
             form.begin("");
