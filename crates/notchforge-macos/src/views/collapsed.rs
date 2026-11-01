@@ -69,9 +69,10 @@ impl CollapsedView {
         }
         let art = NSImageView::new(mtm);
         art.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
-        art.setFrame(rect(0.0, 0.0, art_side, art_side));
+        // A direct child of the root (nested inside the layer-backed box it
+        // did not draw in offscreen renders); the box only backs it with black.
+        art.setFrame(rect(12.0, (h - art_side) / 2.0, art_side, art_side));
         art.setHidden(true);
-        art_box.addSubview(&art);
 
         // Equaliser: plain (y-up) view so bars grow from the bottom.
         let eq_w = 4.0 * EQ_BAR + 3.0 * EQ_GAP;
@@ -96,7 +97,7 @@ impl CollapsedView {
         eq.setHidden(true);
         crate::ui::set_accessibility_label(&eq, "Music playing");
 
-        for v in [&*left_icon as &objc2_app_kit::NSView, &left_text, &right_icon, &right_text, &art_box, &eq] {
+        for v in [&*left_icon as &objc2_app_kit::NSView, &left_text, &right_icon, &right_text, &art_box, &art, &eq] {
             root.addSubview(v);
         }
         Self {
