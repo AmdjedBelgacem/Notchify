@@ -46,7 +46,11 @@ define_class!(
         fn resign_key_window(&self) {
             // SAFETY: forwarding to NSWindow's implementation.
             let _: () = unsafe { msg_send![super(self), resignKeyWindow] };
-            with_controller(|c| c.panel_resigned_key());
+            // Next run-loop turn, never from inside AppKit's own key-window
+            // bookkeeping; the handler re-checks that the panel really lost key.
+            dispatch2::DispatchQueue::main().exec_async(|| {
+                with_controller(|c| c.panel_lost_key());
+            });
         }
 
         #[unsafe(method(canBecomeMainWindow))]

@@ -1207,15 +1207,26 @@ fn finish(ctx: &Rc<Ctx>) {
 
 /// Schedule the self-test; steps run 800 ms apart (long enough for every
 /// spring to settle at default speed).
+/// Index of the step that calls `finish` (one past the last explicit step).
+const LAST_STEP: usize = 20;
+
 pub fn start(mtm: MainThreadMarker, dir: PathBuf) {
     let _ = std::fs::create_dir_all(&dir);
+    // A stuck step must fail fast and say where, not burn the CI timeout.
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(150));
+        eprintln!("self-test watchdog: the run did not finish in 150 s");
+        std::process::exit(3);
+    });
     let ctx = Rc::new(Ctx { dir, report: RefCell::new(Report::default()) });
     let step = Rc::new(std::cell::Cell::new(0usize));
     let block = RcBlock::new(move |timer: NonNull<NSTimer>| {
         let n = step.get();
         step.set(n + 1);
+        tracing::info!(step = n, "self-test step");
         run_step(&ctx, mtm, n);
-        if n >= 16 {
+        // The last step (`finish`) is the first one past the explicit list.
+        if n >= LAST_STEP {
             // SAFETY: the timer passed to its own block is valid.
             unsafe { timer.as_ref() }.invalidate();
         }

@@ -793,6 +793,15 @@ impl Controller {
         }
     }
 
+    /// AppKit reported the panel resigning key. Close only if it really is no
+    /// longer key (opening the panel makes it key, which can report a resign
+    /// of the previous key window first).
+    pub fn panel_lost_key(&self) {
+        if !self.panel.isKeyWindow() {
+            self.panel_resigned_key();
+        }
+    }
+
     /// The panel lost key status: if it was pinned open, close it. (A modal
     /// the island itself raised, such as the resolution confirmation, also
     /// takes key; closing then is fine, the answer still applies.)
