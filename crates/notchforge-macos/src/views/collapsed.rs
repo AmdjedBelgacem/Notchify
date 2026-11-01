@@ -32,6 +32,7 @@ const EQ_GAP: f64 = 2.0;
 pub struct CollapsedView {
     pub root: Retained<FlippedView>,
     art: Retained<NSImageView>,
+    art_box: Retained<crate::ui::FlippedView>,
     eq: Retained<objc2_app_kit::NSView>,
     eq_bars: Vec<Retained<objc2_quartz_core::CALayer>>,
     eq_animating: std::cell::Cell<bool>,
@@ -103,6 +104,7 @@ impl CollapsedView {
         Self {
             root,
             art,
+            art_box,
             eq,
             eq_bars,
             eq_animating: std::cell::Cell::new(false),
@@ -110,6 +112,37 @@ impl CollapsedView {
             left_text,
             right_icon,
             right_text,
+        }
+    }
+
+    /// Draw `img` as the wing icon through the box's layer contents (layers
+    /// draw in every context, offscreen renders included); symbols that need
+    /// a tint go through the image view instead.
+    fn set_art(&self, img: Option<&objc2_app_kit::NSImage>, fallback: Option<(&str, &str, &objc2_app_kit::NSColor)>) {
+        let layer = self.art_box.layer();
+        let cg = img.and_then(|i| {
+            // SAFETY: null rect / context / hints are the documented defaults.
+            unsafe { i.CGImageForProposedRect_context_hints(std::ptr::null_mut(), None, None) }
+        });
+        match (&cg, &layer) {
+            (Some(cg), Some(l)) => {
+                // SAFETY: a CGImage is a valid CALayer contents object.
+                let obj =
+                    unsafe { &*(&**cg as *const objc2_core_graphics::CGImage as *const objc2::runtime::AnyObject) };
+                unsafe { l.setContents(Some(obj)) };
+                l.setContentsGravity(&objc2_foundation::NSString::from_str("resizeAspect"));
+                self.art.setHidden(true);
+            }
+            _ => {
+                if let Some(l) = &layer {
+                    unsafe { l.setContents(None) };
+                }
+                if let Some((sym, spoken, tint)) = fallback {
+                    self.art.setImage(crate::ui::symbol_image(sym, 12.0, spoken).as_deref());
+                    self.art.setContentTintColor(Some(tint));
+                    self.art.setHidden(false);
+                }
+            }
         }
     }
 
@@ -161,40 +194,26 @@ impl CollapsedView {
         });
         match &cover {
             Some((n, img)) => {
-                match img {
-                    Some(img) => {
-                        self.art.setImage(Some(img));
-                        self.art.setContentTintColor(None);
-                    }
-                    None => {
-                        self.art.setImage(crate::ui::symbol_image("music.note", 12.0, "Music").as_deref());
-                        self.art.setContentTintColor(Some(&crate::ui::rgb8(n.player.color())));
-                    }
-                }
-                set_accessibility_label(&self.art, &format!("Playing {} by {}", n.title, n.artist));
-                self.art.setHidden(false);
+                let tint = crate::ui::rgb8(n.player.color());
+                self.set_art(img.as_deref(), Some(("music.note", "Music", &tint)));
+                set_accessibility_label(&self.art_box, &format!("Playing {} by {}", n.title, n.artist));
+                self.art_box.setHidden(false);
                 self.left_icon.setHidden(true);
                 self.left_text.setHidden(true);
             }
             None => match browser.filter(|_| !low) {
                 Some(src) => {
                     let icon = crate::icons::source_icon(src.bundle_id.as_deref(), src.app_path.as_deref());
-                    match &icon {
-                        Some(img) => {
-                            self.art.setImage(Some(img));
-                            self.art.setContentTintColor(None);
-                        }
-                        None => {
-                            self.art.setImage(crate::ui::symbol_image("waveform", 12.0, &src.name).as_deref());
-                            self.art.setContentTintColor(Some(&p.success));
-                        }
-                    }
-                    set_accessibility_label(&self.art, &format!("{} is playing audio", src.name));
-                    self.art.setHidden(false);
+                    self.set_art(icon.as_deref(), Some(("waveform", &src.name, &p.success)));
+                    set_accessibility_label(&self.art_box, &format!("{} is playing audio", src.name));
+                    self.art_box.setHidden(false);
                     self.left_icon.setHidden(true);
                     self.left_text.setHidden(true);
                 }
-                None => self.art.setHidden(true),
+                None => {
+                    self.art.setHidden(true);
+                    self.art_box.setHidden(true);
+                }
             },
         }
         let browser_wing = cover.is_none() && browser.is_some() && !low;
