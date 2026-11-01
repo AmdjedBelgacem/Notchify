@@ -48,8 +48,10 @@ impl Raster {
         use objc2_core_graphics::{CGBitmapContextCreate, CGColorSpace, CGImageAlphaInfo};
         let (layer, island) = with_controller(|c| (c.island_layer(), c.island_global()))?;
         let layer = layer?;
-        // The bitmap is sized to the island; the silhouette (flared top
-        // corners, rounded bottom) is the layer's own mask, so it renders as is.
+        // The bitmap is sized to the *visible* island. The layer is taller (it
+        // overhangs the window's top edge by one corner radius); in CoreGraphics'
+        // y-up space that overhang lies above the bitmap and is clipped, exactly
+        // as the window clips it on screen.
         let (w, h) = (island.width.round() as usize, island.height.round() as usize);
         if w == 0 || h == 0 {
             return None;
@@ -148,7 +150,7 @@ fn check_pixels(ctx: &Ctx, stage: &str, expect_content: bool, rounded_bottom: bo
         println!("|{line}|");
     }
     let corner = |x: usize, y: usize| r.at(x, y).0;
-    let (tl, bl) = (corner(r.w / 2, 0), corner(0, r.h - 1));
+    let (tl, bl) = (corner(0, 0), corner(0, r.h - 1));
     let mut rep = ctx.report.borrow_mut();
     rep.check(
         &format!("{stage}: island is an opaque black shape"),
@@ -162,15 +164,9 @@ fn check_pixels(ctx: &Ctx, stage: &str, expect_content: bool, rounded_bottom: bo
             format!("{:.2}% bright pixels", bright * 100.0),
         );
     }
-    rep.check(&format!("{stage}: top edge is flush with the bezel"), tl > 0.8, format!("top-centre alpha {tl:.2}"));
+    rep.check(&format!("{stage}: top edge is square (merges with bezel)"), tl > 0.8, format!("top-left alpha {tl:.2}"));
     if rounded_bottom {
         rep.check(&format!("{stage}: bottom corners are rounded"), bl < 0.5, format!("bottom-left alpha {bl:.2}"));
-        let side = corner(0, 18.min(r.h - 1));
-        rep.check(
-            &format!("{stage}: top corners flare out to the screen edge"),
-            side < 0.5,
-            format!("alpha {side:.2} beside the body, 18 pt down"),
-        );
     }
     rep.metrics.insert(format!("render_{stage}"), json!({ "w": r.w, "h": r.h, "opaque": opaque, "bright": bright }));
 }

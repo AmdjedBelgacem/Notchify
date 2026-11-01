@@ -114,8 +114,10 @@ impl Controller {
         island.setWantsLayer(true);
         if let Some(layer) = island.layer() {
             layer.setBackgroundColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
-            // The silhouette (flared top corners, rounded bottom) is a layer
-            // mask that `apply_frame` keeps in step with the springs.
+            layer.setMasksToBounds(true);
+            // All corners are rounded, but the island extends one radius above
+            // the window's top edge (see `apply_frame`), so the window clips the
+            // top corners and the island merges squarely with the bezel.
         }
         root.addSubview(&island);
         // Flares: black, outside the island, so the notch widens into the
@@ -376,10 +378,11 @@ impl Controller {
         let g = self.layout.borrow().island_global(w, h);
         let win = self.panel.frame();
         let radius = s.radius.value.clamp(0.0, h / 2.0);
-        let flare = crate::ui::top_flare(radius, w, self.layout.borrow().notch.rect.width);
-        self.island.setFrame(rect(g.x - win.origin.x, g.y - win.origin.y, w, h));
+        // Extra height above the window's top edge, clipped away by the window.
+        let overhang = radius.ceil();
+        self.island.setFrame(rect(g.x - win.origin.x, g.y - win.origin.y, w, h + overhang));
         if let Some(layer) = self.island.layer() {
-            crate::ui::apply_notch_mask(&layer, w, h, flare, radius);
+            layer.setCornerRadius(radius);
         }
         self.place_ears(g.x - win.origin.x, w, win.size.height, radius);
         let views = self.views.borrow();
@@ -650,8 +653,14 @@ impl Controller {
             island.setWantsLayer(true);
             if let Some(l) = island.layer() {
                 l.setBackgroundColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
-                let flare = crate::ui::top_flare(s.corner_radius, s.width, self.layout.borrow().notch.rect.width);
-                crate::ui::apply_notch_mask(&l, s.width, s.height, flare, s.corner_radius);
+                l.setMasksToBounds(true);
+                // On screen the top corners sit above the display edge; only
+                // the lower two are visible.
+                l.setCornerRadius(s.corner_radius);
+                l.setMaskedCorners(
+                    objc2_quartz_core::CACornerMask::LayerMinXMinYCorner
+                        | objc2_quartz_core::CACornerMask::LayerMaxXMinYCorner,
+                );
             }
             content.setHidden(false);
             island.addSubview(content);
