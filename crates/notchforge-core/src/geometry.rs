@@ -191,6 +191,18 @@ pub fn notch_ear_radius(corner_radius: f64) -> f64 {
     (corner_radius * 0.5).clamp(6.0, NOTCH_EAR_MAX)
 }
 
+/// How far an island of `height` has turned from black to glass (0–1). `span`
+/// is the height the current or last opening travels above the notch. The
+/// black holds for the first 40 % of the travel, so the body springs out solid
+/// and the glass wraps in as it settles; closing runs the same way back.
+pub fn glass_progress(height: f64, notch_h: f64, span: f64) -> f64 {
+    if span <= 0.0 {
+        return 0.0;
+    }
+    let x = (((height - notch_h) / span - 0.4) / 0.55).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
+
 /// Computes every rectangle the UI needs for one screen.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NotchLayout {
@@ -397,6 +409,17 @@ mod tests {
         let layout = NotchLayout::new(s, AppearanceConfig::default());
         let win = layout.window_frame();
         assert!(win.x >= 0.0);
+    }
+
+    #[test]
+    fn glass_starts_black_and_settles_clear() {
+        assert_eq!(glass_progress(38.0, 38.0, 320.0), 0.0);
+        assert_eq!(glass_progress(38.0 + 0.4 * 320.0, 38.0, 320.0), 0.0, "black for the first 40 %");
+        let mid = glass_progress(38.0 + 0.7 * 320.0, 38.0, 320.0);
+        assert!(mid > 0.0 && mid < 1.0);
+        assert_eq!(glass_progress(358.0, 38.0, 320.0), 1.0);
+        assert_eq!(glass_progress(370.0, 38.0, 320.0), 1.0, "overshoot stays settled");
+        assert_eq!(glass_progress(38.0, 38.0, 0.0), 0.0, "no span, no glass");
     }
 
     #[test]

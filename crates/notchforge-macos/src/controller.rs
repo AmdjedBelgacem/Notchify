@@ -64,6 +64,10 @@ pub struct Controller {
     /// Concave flares either side of the island's top edge (left, right).
     ears: [Retained<objc2_quartz_core::CAShapeLayer>; 2],
     ear_radius: Cell<f64>,
+    /// Black at the notch, Liquid Glass at the ends.
+    glass: crate::glass::Glass,
+    /// Height the current or last opening travels above the notch.
+    glass_span: Cell<f64>,
     views: RefCell<Views>,
     palette: RefCell<Palette>,
     machine: RefCell<NotchMachine>,
@@ -113,7 +117,6 @@ impl Controller {
         let island = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, notch.width, notch.height));
         island.setWantsLayer(true);
         if let Some(layer) = island.layer() {
-            layer.setBackgroundColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
             layer.setMasksToBounds(true);
             // All corners are rounded, but the island extends one radius above
             // the window's top edge (see `apply_frame`), so the window clips the
@@ -133,6 +136,7 @@ impl Controller {
             l
         });
 
+        let glass = crate::glass::Glass::install(mtm, &island, notch.height);
         let views = Views::new(mtm, &layout, &config, &engine);
         for v in views.all() {
             v.setHidden(true);
@@ -149,6 +153,8 @@ impl Controller {
             island,
             ears,
             ear_radius: Cell::new(0.0),
+            glass,
+            glass_span: Cell::new(0.0),
             views: RefCell::new(views),
             palette: RefCell::new(palette),
             machine: RefCell::new(NotchMachine::new(timings(&config))),
@@ -313,6 +319,11 @@ impl Controller {
             self.views.borrow().compact.update(&snap, &self.palette.borrow());
         }
         self.show_container(kind);
+        let notch_h = self.layout.borrow().notch.rect.height;
+        if shape.height > notch_h + 1.0 {
+            self.glass_span.set(shape.height - notch_h);
+            self.glass.set_open_panel(kind == LayoutKind::Expanded, self.high_contrast());
+        }
         {
             let mut s = self.spring.borrow_mut();
             s.animate_to(shape.width, shape.height, shape.corner_radius, speed);
@@ -384,12 +395,19 @@ impl Controller {
         if let Some(layer) = self.island.layer() {
             layer.setCornerRadius(radius);
         }
+        let notch_h = self.layout.borrow().notch.rect.height;
+        let t = notchforge_core::geometry::glass_progress(h, notch_h, self.glass_span.get());
+        self.glass.apply(w, h, overhang, radius, t);
         self.place_ears(g.x - win.origin.x, w, win.size.height, radius);
         let views = self.views.borrow();
         let c = views.container(self.kind.get());
         let cs = c.frame().size;
         c.setFrameOrigin(NSPoint::new((w - cs.width) / 2.0, h - cs.height));
         c.setAlphaValue(s.content_alpha.value.clamp(0.0, 1.0));
+    }
+
+    fn high_contrast(&self) -> bool {
+        self.config.borrow().appearance.high_contrast || system_increase_contrast()
     }
 
     /// Put the flares against the island's left and right edges at the top of
@@ -428,6 +446,7 @@ impl Controller {
             return;
         }
         tracing::info!(screen = layout.screen.id, notch = layout.notch.physical, "screen layout changed");
+        self.glass.set_notch_height(layout.notch.rect.height);
         *self.layout.borrow_mut() = layout;
         self.rebuild_views();
         let kind = self.kind.get();
@@ -652,7 +671,6 @@ impl Controller {
             let island = NSView::initWithFrame(NSView::alloc(self.mtm), rect(0.0, 0.0, s.width, s.height));
             island.setWantsLayer(true);
             if let Some(l) = island.layer() {
-                l.setBackgroundColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
                 l.setMasksToBounds(true);
                 // On screen the top corners sit above the display edge; only
                 // the lower two are visible.
@@ -662,6 +680,10 @@ impl Controller {
                         | objc2_quartz_core::CACornerMask::LayerMaxXMinYCorner,
                 );
             }
+            let notch_h = self.layout.borrow().notch.rect.height;
+            let t = if matches!(kind, LayoutKind::Collapsed | LayoutKind::CollapsedWithWings) { 0.0 } else { 1.0 };
+            let _material =
+                crate::glass::Glass::preview(self.mtm, &island, s.width, s.height, s.corner_radius, notch_h, t);
             content.setHidden(false);
             island.addSubview(content);
             window.setContentView(Some(&island));
@@ -711,6 +733,7 @@ impl Controller {
         show("07g-notched-auth-spotify", LayoutKind::Peek, &views.peek.root);
         let mut asking = overview.clone();
         asking.notifications.splice(0..0, prompts.iter().cloned());
+        asking.generation += 1;
         views.expanded.update(&asking);
         views.expanded.show_tab(Tab::Overview);
         show("07h-notched-auth-overview", LayoutKind::Expanded, &views.expanded.root);

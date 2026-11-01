@@ -188,18 +188,22 @@ pub fn weight(w: Weight) -> NSFontWeight {
     // SAFETY: reading AppKit's constant font weights.
     unsafe {
         match w {
+            Weight::Light => objc2_app_kit::NSFontWeightLight,
             Weight::Regular => NSFontWeightRegular,
             Weight::Medium => NSFontWeightMedium,
             Weight::Semibold => NSFontWeightSemibold,
+            Weight::Bold => objc2_app_kit::NSFontWeightBold,
         }
     }
 }
 
 #[derive(Clone, Copy)]
 pub enum Weight {
+    Light,
     Regular,
     Medium,
     Semibold,
+    Bold,
 }
 
 pub fn font(size: f64, w: Weight) -> Retained<NSFont> {
@@ -618,6 +622,8 @@ pub type SliderFn = Box<dyn Fn(f64)>;
 pub struct SliderIvars {
     value: std::cell::Cell<f64>,
     knob: bool,
+    /// Track height; above 4 pt the fill is clipped to a capsule track.
+    thickness: f64,
     on_change: RefCell<Option<SliderFn>>,
     on_commit: RefCell<Option<SliderFn>>,
     tracking: std::cell::Cell<bool>,
@@ -667,13 +673,39 @@ define_class!(
 
 impl ThinSlider {
     pub fn new(mtm: MainThreadMarker, frame: NSRect, knob: bool, fill: &NSColor) -> Retained<Self> {
+        Self::build(mtm, frame, knob, 4.0, &rgba(1.0, 1.0, 1.0, 0.16), fill)
+    }
+
+    /// A Control Center style slider: a thick capsule filled from the left.
+    pub fn capsule(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        thickness: f64,
+        track: &NSColor,
+        fill: &NSColor,
+    ) -> Retained<Self> {
+        Self::build(mtm, frame, false, thickness, track, fill)
+    }
+
+    fn build(
+        mtm: MainThreadMarker,
+        frame: NSRect,
+        knob: bool,
+        thickness: f64,
+        track_color: &NSColor,
+        fill: &NSColor,
+    ) -> Retained<Self> {
         let track = objc2_quartz_core::CALayer::new();
         let fill_layer = objc2_quartz_core::CALayer::new();
         let knob_layer = objc2_quartz_core::CALayer::new();
-        track.setBackgroundColor(Some(&rgba(1.0, 1.0, 1.0, 0.16).CGColor()));
-        track.setCornerRadius(2.0);
+        let clipped = thickness > 4.0;
+        track.setBackgroundColor(Some(&track_color.CGColor()));
+        track.setCornerRadius(thickness / 2.0);
+        track.setMasksToBounds(clipped);
         fill_layer.setBackgroundColor(Some(&fill.CGColor()));
-        fill_layer.setCornerRadius(2.0);
+        if !clipped {
+            fill_layer.setCornerRadius(2.0);
+        }
         knob_layer.setBackgroundColor(Some(&NSColor::whiteColor().CGColor()));
         knob_layer.setCornerRadius(7.0);
         knob_layer.setShadowOpacity(0.5);
@@ -683,6 +715,7 @@ impl ThinSlider {
         let this = Self::alloc(mtm).set_ivars(SliderIvars {
             value: std::cell::Cell::new(0.0),
             knob,
+            thickness,
             on_change: RefCell::new(None),
             on_commit: RefCell::new(None),
             tracking: std::cell::Cell::new(false),
@@ -696,7 +729,11 @@ impl ThinSlider {
         if let Some(root) = this.layer() {
             let iv = this.ivars();
             root.addSublayer(&iv.track);
-            root.addSublayer(&iv.fill);
+            if clipped {
+                iv.track.addSublayer(&iv.fill);
+            } else {
+                root.addSublayer(&iv.fill);
+            }
             root.addSublayer(&iv.knob_layer);
         }
         // SAFETY: setAccessibilityRole: exists on every NSView.
@@ -732,6 +769,12 @@ impl ThinSlider {
         self.layout_layers();
     }
 
+    /// Move or resize the slider and refit its track.
+    pub fn set_slider_frame(&self, frame: NSRect) {
+        self.setFrame(frame);
+        self.layout_layers();
+    }
+
     pub fn set_fill_color(&self, c: &NSColor) {
         self.ivars().fill.setBackgroundColor(Some(&c.CGColor()));
     }
@@ -745,11 +788,16 @@ impl ThinSlider {
         let iv = self.ivars();
         let pad = self.inset();
         let usable = (size.width - 2.0 * pad).max(1.0);
-        let y = (size.height - 4.0) / 2.0;
+        let t = iv.thickness;
+        let y = (size.height - t) / 2.0;
         let x = pad + usable * iv.value.get();
         without_animation(|| {
-            iv.track.setFrame(rect(pad, y, usable, 4.0));
-            iv.fill.setFrame(rect(pad, y, (x - pad).max(0.0), 4.0));
+            iv.track.setFrame(rect(pad, y, usable, t));
+            if t > 4.0 {
+                iv.fill.setFrame(rect(0.0, 0.0, (x - pad).max(0.0), t));
+            } else {
+                iv.fill.setFrame(rect(pad, y, (x - pad).max(0.0), t));
+            }
             iv.knob_layer.setFrame(rect(x - 7.0, size.height / 2.0 - 7.0, 14.0, 14.0));
         });
         // SAFETY: accessibility value setter on NSView.

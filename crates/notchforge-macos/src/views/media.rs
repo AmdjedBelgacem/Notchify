@@ -1,34 +1,31 @@
 //! "Now Playing" page of the expanded panel, built to the *Pinned · Now
-//! Playing* board of the NotchForge design canvas (720 × 372 island).
+//! Playing, glass* board of the NotchForge design canvas.
 //!
 //! ```text
-//! ┌──────────────────────────────────────────────┬──────────────────────────┐
-//! │ ┌────────┐  ● Spotify · Playing on AirPods    │ Playlists  (Spotify|Music)│
-//! │ │  art   │  Afterglow                         │ ▣ Night Drive      ▮▮▮   │
-//! │ │  136   │  Neon Harbor — Night Transit       │ ▣ Deep Focus             │
-//! │ └────────┘  ━━━━━━━━━━──────────  1:24  -2:17  │ ▣ Sunday Slow            │
-//! │             ⇄    ⏮    ⏸    ⏭    ↻             │ ▣ Run Club               │
-//! │ ┌ ◎ AirPods Pro                 (◉ Output) ┐  │ ▣ Rainy Paris            │
-//! │ │   Bluetooth · 48 kHz · 24-bit · Stereo   │  │ ░░░░░ fade ░░░░░░░░░░░░ │
-//! │ │ 🔈 ━━━━━━━━━━━━━━━━●────────────── 🔊    │  │                          │
-//! │ └──────────────────────────────────────────┘  │                          │
-//! │ Playing audio                                 │                          │
-//! │ (▣ Spotify → AirPods Pro) (▣ Safari → AirPods)│                          │
-//! └──────────────────────────────────────────────┴──────────────────────────┘
+//! ╭───────────────────────────────────────────╮ ╭──────────────────────────╮
+//! │ ┌────────┐ Spotify · Playing               │ │ Playlists (Spotify|Music)│
+//! │ │  art   │ Afterglow                       │ │ ▣ Night Drive       ▮▮▮  │
+//! │ │        │ Neon Harbor                     │ │ ▣ Deep Focus             │
+//! │ │        │ Night Transit                   │ │ ▣ Sunday Slow            │
+//! │ └────────┘ ▓▓▓▓▓▓▓░░░░░░░░░░  1:24  -2:17  │ │ ▣ Run Club               │
+//! │    ⇄      ⏮      (⏸)      ⏭      ↻        │ │ ▣ Rainy Paris            │
+//! │ (🔈▓▓▓▓▓▓▓▓▓░░░░░░░░░) (🎧 AirPods Pro)    │ │                          │
+//! │ ▣ Safari is also playing     48 kHz · 24-bit│ │                          │
+//! ╰───────────────────────────────────────────╯ ╰──────────────────────────╯
 //! ```
 //!
 //! The page shows the *featured* source: the playing Spotify/Music player,
 //! else another app producing audio (controlled with media keys), else an
-//! empty state with shortcuts to open a player. The backdrop is a radial
-//! wash of the cover's average colour.
+//! empty state with shortcuts to open a player. The player tile is tinted from
+//! the cover's average colour.
 
 use crate::icons;
 use crate::media::{self as glue, MediaKey};
 use crate::ui::{
     FlippedView, Palette, Targets, ThinSlider, Weight, attributed_parts, click_overlay, font, label, make_card,
-    mono_digits, pill_button, rect, remove_all_subviews, rgb8, rgba, rich_label, set_accessibility_label,
-    set_button_symbol, set_gradient, set_symbol, set_text, shape_view, style_pill, symbol_button, symbol_view,
-    text_width, without_animation, wrapping_label,
+    mono_digits, pill_button, rect, remove_all_subviews, rgb8, rgba, set_accessibility_label, set_button_symbol,
+    set_gradient, set_text, shape_view, style_pill, symbol_button, symbol_view, text_width, without_animation,
+    wrapping_label,
 };
 use notchforge_core::engine::Snapshot;
 use notchforge_core::model::{
@@ -50,9 +47,10 @@ use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
-const X0: f64 = 20.0;
-const ART: f64 = 136.0;
-const ROW_H: f64 = 48.0;
+const PAD: f64 = 14.0;
+/// Tallest a playlist row grows to when there are only a few.
+const MAX_ROW_H: f64 = 64.0;
+const VISIBLE_ROWS: f64 = 5.0;
 const EQ_DURATIONS: [f64; 3] = [0.42, 0.55, 0.38];
 
 /// What the left half is showing.
@@ -124,15 +122,14 @@ pub struct MediaPage {
     row_targets: Targets,
     source_targets: Targets,
     state: Shared,
-    wash: Retained<objc2_quartz_core::CAGradientLayer>,
-    wash2: Retained<objc2_quartz_core::CAGradientLayer>,
+    tint: Retained<objc2_quartz_core::CAGradientLayer>,
 
     art: Retained<NSImageView>,
     art_placeholder: Retained<NSImageView>,
-    badge_dot: Retained<FlippedView>,
     badge: Retained<NSTextField>,
     title: Retained<NSTextField>,
     subtitle: Retained<NSTextField>,
+    album: Retained<NSTextField>,
     progress: Retained<ThinSlider>,
     elapsed: Retained<NSTextField>,
     remaining: Retained<NSTextField>,
@@ -144,13 +141,12 @@ pub struct MediaPage {
     open_spotify: Retained<NSButton>,
     open_music: Retained<NSButton>,
 
-    output_icon: Retained<NSImageView>,
-    output_name: Retained<NSTextField>,
-    output_caps: Retained<NSTextField>,
     output_button: Retained<NSButton>,
+    output_right: f64,
     volume: Retained<ThinSlider>,
+    volume_y: f64,
 
-    sources_header: Retained<NSTextField>,
+    caps: Retained<NSTextField>,
     sources: Retained<FlippedView>,
     sources_width: f64,
 
@@ -159,7 +155,6 @@ pub struct MediaPage {
     list_scroll: Retained<NSScrollView>,
     list_doc: Retained<FlippedView>,
     list_width: f64,
-    list_fade: Retained<objc2_quartz_core::CAGradientLayer>,
     list_message: Retained<NSTextField>,
     list_action: Retained<NSButton>,
     list_action_kind: Rc<Cell<ListAction>>,
@@ -168,9 +163,9 @@ pub struct MediaPage {
 }
 
 fn seg_style(b: &NSButton, title: &str, on: bool) {
-    let fg = if on { rgba(1.0, 1.0, 1.0, 1.0) } else { rgba(1.0, 1.0, 1.0, 0.55) };
-    let bg = if on { rgba(1.0, 1.0, 1.0, 0.18) } else { rgba(1.0, 1.0, 1.0, 0.0) };
-    style_pill(b, title, None, &font(11.0, Weight::Semibold), &fg, &bg, 6.0);
+    let fg = if on { rgba(1.0, 1.0, 1.0, 1.0) } else { rgba(1.0, 1.0, 1.0, 0.72) };
+    let bg = if on { rgba(1.0, 1.0, 1.0, 0.28) } else { rgba(1.0, 1.0, 1.0, 0.0) };
+    style_pill(b, title, None, &font(12.0, Weight::Semibold), &fg, &bg, 12.0);
 }
 
 /// Three bars animated by Core Animation (render server: no CPU here).
@@ -220,61 +215,54 @@ impl MediaPage {
         let state: Shared = Rc::default();
         let white = |a: f64| rgba(1.0, 1.0, 1.0, a);
 
-        // ── cover-colour wash (radial, top-left) ──
-        root.setWantsLayer(true);
-        let wash = objc2_quartz_core::CAGradientLayer::layer();
-        // SAFETY: "radial" is kCAGradientLayerRadial.
-        wash.setType(&NSString::from_str("radial"));
-        wash.setFrame(rect(0.0, 0.0, w, h));
-        wash.setStartPoint(NSPoint::new(0.08, 0.0));
-        // The board's wash: radius 70 % x 85 %, transparent at 62 % of it.
-        wash.setEndPoint(NSPoint::new(0.08 + 0.434, 0.527));
-        wash.setOpacity(0.0);
-        // The notch band stays pure black so the island blends with the notch.
-        crate::ui::fade_in_below(&wash, nh, 6.0);
-        // A warm second glow beside it (50 % x 60 % at 30 % / 10 %).
-        let wash2 = objc2_quartz_core::CAGradientLayer::layer();
-        wash2.setType(&NSString::from_str("radial"));
-        wash2.setFrame(rect(0.0, 0.0, w, h));
-        wash2.setStartPoint(NSPoint::new(0.30, 0.10));
-        wash2.setEndPoint(NSPoint::new(0.30 + 0.35, 0.10 + 0.42));
-        set_gradient(&wash2, &[(1.0, 0.588, 0.314, 0.16), (1.0, 0.588, 0.314, 0.0)]);
-        wash2.setOpacity(0.0);
-        crate::ui::fade_in_below(&wash2, nh, 6.0);
-        if let Some(layer) = root.layer() {
-            layer.addSublayer(&wash);
-            layer.addSublayer(&wash2);
-        }
+        let top_y = nh + 6.0;
+        let ph = h - top_y - PAD;
+        let lw = ((w - 2.0 * PAD - 10.0) * 420.0 / 682.0).floor();
+        let rx = PAD + lw + 10.0;
+        let rw = w - PAD - rx;
 
-        let lw = ((w - 56.0) * 0.612).floor();
-        let rx = X0 + lw + 16.0;
-        let rw = w - 20.0 - rx;
+        // ── player tile, tinted from the cover ──
+        let player = super::expanded::glass_tile(mtm, rect(PAD, top_y, lw, ph));
+        let tint = objc2_quartz_core::CAGradientLayer::layer();
+        tint.setFrame(rect(0.0, 0.0, lw, ph));
+        tint.setStartPoint(NSPoint::new(0.0, 0.0));
+        tint.setEndPoint(NSPoint::new(1.0, 1.0));
+        tint.setOpacity(0.0);
+        if let Some(l) = player.layer() {
+            l.setCornerRadius(24.0);
+            l.setMasksToBounds(true);
+            l.addSublayer(&tint);
+        }
+        root.addSubview(&player);
+
+        // The artwork takes what the rows below it leave.
+        let art_side = (ph - 162.0).clamp(96.0, 150.0);
 
         // ── artwork ──
-        let art_shadow = FlippedView::new(mtm, rect(X0, nh + 18.0, ART, ART));
+        let art_shadow = FlippedView::new(mtm, rect(PAD, PAD, art_side, art_side));
         art_shadow.setWantsLayer(true);
         if let Some(l) = art_shadow.layer() {
-            l.setShadowOpacity(0.5);
+            l.setShadowOpacity(0.45);
             l.setShadowRadius(14.0);
             l.setShadowOffset(objc2_foundation::NSSize::new(0.0, -8.0));
         }
-        let art_card = shape_view(mtm, rect(0.0, 0.0, ART, ART), &white(0.07), 14.0);
+        let art_card = shape_view(mtm, rect(0.0, 0.0, art_side, art_side), &white(0.1), 14.0);
         if let Some(l) = art_card.layer() {
             l.setMasksToBounds(true);
             l.setBorderWidth(0.5);
-            l.setBorderColor(Some(&white(0.12).CGColor()));
+            l.setBorderColor(Some(&white(0.16).CGColor()));
         }
         let art_placeholder = symbol_view(
             mtm,
             "music.note",
             36.0,
-            &p.tertiary,
-            rect(ART / 2.0 - 22.0, ART / 2.0 - 22.0, 44.0, 44.0),
+            &p.secondary,
+            rect(art_side / 2.0 - 22.0, art_side / 2.0 - 22.0, 44.0, 44.0),
             "No artwork",
         );
         let art = NSImageView::new(mtm);
         art.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
-        art.setFrame(rect(0.0, 0.0, ART, ART));
+        art.setFrame(rect(0.0, 0.0, art_side, art_side));
         art_card.addSubview(&art_placeholder);
         art_card.addSubview(&art);
         let st = state.clone();
@@ -283,25 +271,26 @@ impl MediaPage {
             Featured::App { bundle_id: Some(b), .. } => glue::activate_app(b),
             _ => {}
         });
-        art_card.addSubview(&click_overlay(mtm, &t, rect(0.0, 0.0, ART, ART), "Show player"));
+        art_card.addSubview(&click_overlay(mtm, &t, rect(0.0, 0.0, art_side, art_side), "Show player"));
         art_shadow.addSubview(&art_card);
-        root.addSubview(&art_shadow);
+        player.addSubview(&art_shadow);
 
         // ── title block ──
-        let tx = X0 + ART + 18.0;
-        let tw = lw - ART - 18.0;
-        let badge_dot = shape_view(mtm, rect(tx, nh + 24.0, 7.0, 7.0), &p.success, 3.5);
-        let badge =
-            label(mtm, "", &font(11.5, Weight::Semibold), &p.secondary, rect(tx + 13.0, nh + 20.0, tw - 13.0, 15.0));
+        let tx = PAD + art_side + PAD;
+        let tw = lw - tx - PAD;
+        let badge = label(mtm, "", &font(12.0, Weight::Semibold), &white(0.84), rect(tx, PAD + 2.0, tw, 16.0));
         let title =
-            label(mtm, "Nothing playing", &font(20.0, Weight::Semibold), &p.primary, rect(tx, nh + 40.0, tw, 25.0));
-        let subtitle = label(mtm, "", &font(13.0, Weight::Regular), &p.secondary, rect(tx, nh + 66.0, tw, 17.0));
-        for v in [&*badge_dot as &NSView, &badge, &title, &subtitle] {
-            root.addSubview(v);
+            label(mtm, "Nothing playing", &font(26.0, Weight::Bold), &p.primary, rect(tx, PAD + 20.0, tw, 32.0));
+        let subtitle = label(mtm, "", &font(15.0, Weight::Medium), &white(0.88), rect(tx, PAD + 52.0, tw, 20.0));
+        let album = label(mtm, "", &font(13.0, Weight::Regular), &white(0.76), rect(tx, PAD + 72.0, tw, 17.0));
+        for v in [&*badge as &NSView, &title, &subtitle, &album] {
+            player.addSubview(v);
         }
 
-        // ── progress ──
-        let progress = ThinSlider::new(mtm, rect(tx, nh + 92.5, tw, 16.0), false, &white(0.92));
+        // ── progress, level with the bottom of the artwork ──
+        let bar_y = PAD + art_side - 14.0 - 19.0;
+        let progress =
+            ThinSlider::capsule(mtm, rect(tx, bar_y, tw, 16.0), 7.0, &white(0.24), &rgba(1.0, 1.0, 1.0, 1.0));
         set_accessibility_label(&progress, "Playback position");
         let st = state.clone();
         progress.set_on_commit(move |v| {
@@ -313,41 +302,45 @@ impl MediaPage {
             now.sampled_at_ms = now_ms();
             glue::control(now.player, MediaAction::Seek(secs));
         });
-        let elapsed = label(mtm, "", &mono_digits(11.0, Weight::Medium), &p.tertiary, rect(tx, nh + 107.5, 70.0, 14.0));
-        let remaining = label(
-            mtm,
-            "",
-            &mono_digits(11.0, Weight::Medium),
-            &p.tertiary,
-            rect(tx + tw - 70.0, nh + 107.5, 70.0, 14.0),
-        );
+        let times_y = PAD + art_side - 14.0;
+        let elapsed = label(mtm, "", &mono_digits(11.0, Weight::Medium), &white(0.82), rect(tx, times_y, 70.0, 14.0));
+        let remaining =
+            label(mtm, "", &mono_digits(11.0, Weight::Medium), &white(0.82), rect(tx + tw - 70.0, times_y, 70.0, 14.0));
         remaining.setAlignment(NSTextAlignment::Right);
         for v in [&*progress as &NSView, &elapsed, &remaining] {
-            root.addSubview(v);
+            player.addSubview(v);
         }
 
-        // ── transport: space-between across the text column ──
-        let widths = [32.0, 40.0, 48.0, 40.0, 32.0];
-        let gap = ((tw - 4.0) - widths.iter().sum::<f64>()) / 4.0;
+        // ── transport: space-between across the tile ──
+        let row_y = PAD + art_side + 8.0;
+        let widths = [40.0, 52.0, 52.0, 52.0, 40.0];
+        let span = lw - 2.0 * 20.0;
+        let gap = (span - widths.iter().sum::<f64>()) / 4.0;
         let mut xs = [0.0; 5];
-        let mut x = tx + 2.0;
+        let mut x = 20.0;
         for (i, bw) in widths.iter().enumerate() {
             xs[i] = x;
             x += bw + gap;
         }
-        let cy = nh + 153.0;
         let mk = |i: usize, sym: &str, size: f64, tip: &str, action: TransportFn| {
             let st = state.clone();
             let t = targets.add(mtm, move |_| action(&st));
             let bw = widths[i];
-            let b = symbol_button(mtm, sym, size, tip, &p.primary, &t, rect(xs[i], cy - bw / 2.0, bw, bw));
-            root.addSubview(&b);
+            let bh = if i == 2 {
+                52.0
+            } else if i == 0 || i == 4 {
+                40.0
+            } else {
+                44.0
+            };
+            let b = symbol_button(mtm, sym, size, tip, &p.primary, &t, rect(xs[i], row_y + (52.0 - bh) / 2.0, bw, bh));
+            player.addSubview(&b);
             b
         };
         let shuffle = mk(
             0,
             "shuffle",
-            14.0,
+            16.0,
             "Shuffle",
             Box::new(|st| {
                 if let Some(n) = &st.borrow().now {
@@ -358,7 +351,7 @@ impl MediaPage {
         let prev = mk(
             1,
             "backward.fill",
-            14.5,
+            22.0,
             "Previous track",
             Box::new(|st| match &st.borrow().featured {
                 Featured::Player(pl) => glue::control(*pl, MediaAction::Previous),
@@ -371,7 +364,7 @@ impl MediaPage {
         let play = mk(
             2,
             "play.fill",
-            27.0,
+            24.0,
             "Play",
             Box::new(|st| {
                 let mut st = st.borrow_mut();
@@ -394,10 +387,15 @@ impl MediaPage {
                 crate::app::with_controller(|c| c.media_tick());
             }),
         );
+        make_card(&play, &white(0.2), 26.0);
+        if let Some(l) = play.layer() {
+            l.setBorderWidth(0.5);
+            l.setBorderColor(Some(&white(0.34).CGColor()));
+        }
         let next = mk(
             3,
             "forward.fill",
-            14.5,
+            22.0,
             "Next track",
             Box::new(|st| match &st.borrow().featured {
                 Featured::Player(pl) => glue::control(*pl, MediaAction::Next),
@@ -410,7 +408,7 @@ impl MediaPage {
         let repeat = mk(
             4,
             "repeat",
-            14.0,
+            16.0,
             "Repeat",
             Box::new(|st| {
                 if let Some(n) = &st.borrow().now {
@@ -427,10 +425,10 @@ impl MediaPage {
             None,
             &font(12.0, Weight::Semibold),
             &p.primary,
-            &white(0.12),
-            13.0,
+            &white(0.16),
+            14.0,
             &t,
-            rect(tx, nh + 96.0, 104.0, 26.0),
+            rect(tx, bar_y + 2.0, 104.0, 28.0),
         );
         let t = targets.add(mtm, |_| glue::open_player(MediaPlayer::Music));
         let open_music = pill_button(
@@ -439,27 +437,32 @@ impl MediaPage {
             None,
             &font(12.0, Weight::Semibold),
             &p.primary,
-            &white(0.12),
-            13.0,
+            &white(0.16),
+            14.0,
             &t,
-            rect(tx + 112.0, nh + 96.0, 96.0, 26.0),
+            rect(tx + 112.0, bar_y + 2.0, 96.0, 28.0),
         );
-        root.addSubview(&open_spotify);
-        root.addSubview(&open_music);
+        player.addSubview(&open_spotify);
+        player.addSubview(&open_music);
 
-        // ── output card ──
-        let oy = nh + 172.0;
-        let out_card = shape_view(mtm, rect(X0, oy, lw, 78.0), &white(0.07), 16.0);
-        if let Some(l) = out_card.layer() {
-            l.setBorderWidth(0.5);
-            l.setBorderColor(Some(&white(0.08).CGColor()));
-        }
-        let icon_disc = shape_view(mtm, rect(14.0, 12.0, 30.0, 30.0), &white(0.12), 15.0);
-        let output_icon = symbol_view(mtm, "headphones", 14.0, &p.primary, rect(7.0, 7.0, 16.0, 16.0), "Output");
-        icon_disc.addSubview(&output_icon);
-        let output_name =
-            label(mtm, "Output", &font(13.5, Weight::Semibold), &p.primary, rect(55.0, 12.5, lw - 170.0, 17.0));
-        let output_caps = label(mtm, "", &font(11.0, Weight::Regular), &p.tertiary, rect(55.0, 29.5, lw - 170.0, 14.0));
+        // ── volume and output ──
+        let volume_y = row_y + 52.0 + 8.0;
+        let output_right = lw - PAD;
+        let volume =
+            ThinSlider::capsule(mtm, rect(PAD, volume_y, lw - 2.0 * PAD, 36.0), 36.0, &white(0.16), &white(0.94));
+        volume.addSubview(&symbol_view(
+            mtm,
+            "speaker.wave.1.fill",
+            14.0,
+            &rgba(0.11, 0.11, 0.118, 1.0),
+            rect(11.0, 10.0, 16.0, 16.0),
+            "Volume",
+        ));
+        set_accessibility_label(&volume, "Output volume");
+        volume.set_on_change(|v| {
+            crate::controls::volume::set(v as f32);
+        });
+        player.addSubview(&volume);
         let st = state.clone();
         let t = targets.add(mtm, move |sender: Option<&AnyObject>| {
             let Some(b) = sender.and_then(|s| s.downcast_ref::<NSButton>()) else { return };
@@ -469,64 +472,45 @@ impl MediaPage {
             mtm,
             "Output",
             Some("airplayaudio"),
-            &font(12.0, Weight::Semibold),
+            &font(12.5, Weight::Semibold),
             &p.primary,
-            &white(0.12),
-            13.0,
+            &white(0.16),
+            18.0,
             &t,
-            rect(lw - 14.0 - 80.0, 14.5, 80.0, 26.0),
+            rect(output_right - 90.0, volume_y, 90.0, 36.0),
         );
-        out_card.addSubview(&symbol_view(
-            mtm,
-            "speaker.fill",
-            10.0,
-            &p.secondary,
-            rect(14.0, 54.5, 13.0, 13.0),
-            "Volume",
-        ));
-        let volume = ThinSlider::new(mtm, rect(34.0, 50.5, lw - 74.0, 20.0), true, &p.primary);
-        set_accessibility_label(&volume, "Output volume");
-        volume.set_on_change(|v| {
-            crate::controls::volume::set(v as f32);
-        });
-        out_card.addSubview(&symbol_view(
-            mtm,
-            "speaker.wave.2.fill",
-            11.0,
-            &p.secondary,
-            rect(lw - 32.0, 53.5, 18.0, 14.0),
-            "Louder",
-        ));
-        for v in [&*icon_disc as &NSView, &output_name, &output_caps, &output_button, &volume] {
-            out_card.addSubview(v);
-        }
-        root.addSubview(&out_card);
+        player.addSubview(&output_button);
 
-        // ── apps playing audio ──
-        let sy = nh + 268.5;
-        let sources_header =
-            label(mtm, "Playing audio", &font(11.5, Weight::Semibold), &p.secondary, rect(X0 + 2.0, sy, lw, 15.0));
-        let sources = FlippedView::new(mtm, rect(X0, sy + 20.0, lw, (h - sy - 20.0 - 12.0).max(30.0)));
-        root.addSubview(&sources_header);
-        root.addSubview(&sources);
+        // ── other apps making sound, and the output's format ──
+        let by = ph - 12.0 - 24.0;
+        let caps_w = 120.0;
+        let caps = label(
+            mtm,
+            "",
+            &mono_digits(12.0, Weight::Regular),
+            &white(0.84),
+            rect(lw - PAD - caps_w, by + 4.0, caps_w, 16.0),
+        );
+        caps.setAlignment(NSTextAlignment::Right);
+        player.addSubview(&caps);
+        let sources_width = lw - 2.0 * PAD - caps_w - 6.0;
+        let sources = FlippedView::new(mtm, rect(PAD, by, sources_width, 24.0));
+        player.addSubview(&sources);
 
-        // ── playlists card ──
-        let cy0 = nh + 12.0;
-        let ch = h - cy0 - 18.0;
-        let card = shape_view(mtm, rect(rx, cy0, rw, ch), &white(0.06), 18.0);
+        // ── playlists tile ──
+        let card = super::expanded::glass_tile(mtm, rect(rx, top_y, rw, ph));
         if let Some(l) = card.layer() {
+            l.setCornerRadius(24.0);
             l.setMasksToBounds(true);
-            l.setBorderWidth(0.5);
-            l.setBorderColor(Some(&white(0.08).CGColor()));
         }
         card.addSubview(&label(
             mtm,
             "Playlists",
-            &font(13.0, Weight::Semibold),
+            &font(15.0, Weight::Semibold),
             &p.primary,
-            rect(14.0, 15.5, 100.0, 17.0),
+            rect(14.0, 15.0, rw - 140.0, 19.0),
         ));
-        let seg_track = shape_view(mtm, rect(rw - 12.0 - 112.0, 12.5, 112.0, 24.0), &white(0.08), 8.0);
+        let seg_track = shape_view(mtm, rect(rw - 10.0 - 122.0, 10.0, 122.0, 28.0), &white(0.12), 14.0);
         let pick = |player: MediaPlayer| {
             let st = state.clone();
             move |_: Option<&AnyObject>| {
@@ -543,32 +527,32 @@ impl MediaPage {
             mtm,
             "Spotify",
             None,
-            &font(11.0, Weight::Semibold),
+            &font(12.0, Weight::Semibold),
             &p.primary,
-            &white(0.18),
-            6.0,
+            &white(0.28),
+            12.0,
             &t,
-            rect(2.0, 2.0, 58.0, 20.0),
+            rect(2.0, 2.0, 64.0, 24.0),
         );
         let t = targets.add(mtm, pick(MediaPlayer::Music));
         let seg_music = pill_button(
             mtm,
             "Music",
             None,
-            &font(11.0, Weight::Semibold),
+            &font(12.0, Weight::Semibold),
             &p.secondary,
             &white(0.0),
-            6.0,
+            12.0,
             &t,
-            rect(60.0, 2.0, 50.0, 20.0),
+            rect(66.0, 2.0, 54.0, 24.0),
         );
         seg_track.addSubview(&seg_spotify);
         seg_track.addSubview(&seg_music);
         card.addSubview(&seg_track);
 
-        let lh = ch - 44.0;
+        let lh = ph - 48.0 - 6.0;
         let list_doc = FlippedView::new(mtm, rect(0.0, 0.0, rw - 12.0, lh));
-        let list_scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), rect(6.0, 44.0, rw - 12.0, lh));
+        let list_scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), rect(6.0, 48.0, rw - 12.0, lh));
         list_scroll.setDrawsBackground(false);
         list_scroll.setHasVerticalScroller(true);
         list_scroll.setAutohidesScrollers(true);
@@ -576,25 +560,12 @@ impl MediaPage {
         list_scroll.setDocumentView(Some(&list_doc));
         card.addSubview(&list_scroll);
 
-        // Bottom fade so the list reads as scrollable.
-        let fade_host = FlippedView::new(mtm, rect(0.0, ch - 40.0, rw, 40.0));
-        fade_host.setWantsLayer(true);
-        let list_fade = objc2_quartz_core::CAGradientLayer::layer();
-        list_fade.setFrame(rect(0.0, 0.0, rw, 40.0));
-        set_gradient(&list_fade, &[(0.06, 0.06, 0.06, 0.0), (0.06, 0.06, 0.06, 0.95)]);
-        list_fade.setStartPoint(NSPoint::new(0.5, 0.0));
-        list_fade.setEndPoint(NSPoint::new(0.5, 1.0));
-        if let Some(l) = fade_host.layer() {
-            l.addSublayer(&list_fade);
-        }
-        card.addSubview(&fade_host);
-
         let list_message = wrapping_label(
             mtm,
             "",
             &font(12.0, Weight::Regular),
             &p.secondary,
-            rect(18.0, ch / 2.0 - 34.0, rw - 36.0, 48.0),
+            rect(18.0, ph / 2.0 - 34.0, rw - 36.0, 48.0),
             3,
         );
         list_message.setAlignment(NSTextAlignment::Center);
@@ -616,9 +587,9 @@ impl MediaPage {
             &font(12.0, Weight::Semibold),
             &p.primary,
             &p.accent,
-            13.0,
+            14.0,
             &t,
-            rect(rw / 2.0 - 70.0, ch / 2.0 + 20.0, 140.0, 26.0),
+            rect(rw / 2.0 - 70.0, ph / 2.0 + 20.0, 140.0, 28.0),
         );
         card.addSubview(&list_action);
         root.addSubview(&card);
@@ -631,14 +602,13 @@ impl MediaPage {
             row_targets: Targets::default(),
             source_targets: Targets::default(),
             state,
-            wash,
-            wash2,
+            tint,
             art,
             art_placeholder,
-            badge_dot,
             badge,
             title,
             subtitle,
+            album,
             progress,
             elapsed,
             remaining,
@@ -649,20 +619,18 @@ impl MediaPage {
             repeat,
             open_spotify,
             open_music,
-            output_icon,
-            output_name,
-            output_caps,
             output_button,
+            output_right,
             volume,
-            sources_header,
+            volume_y,
+            caps,
             sources,
-            sources_width: lw,
+            sources_width,
             seg_spotify,
             seg_music,
             list_scroll,
             list_doc,
             list_width: rw - 12.0,
-            list_fade,
             list_message,
             list_action,
             list_action_kind,
@@ -698,7 +666,7 @@ impl MediaPage {
         set_button_symbol(
             &self.play,
             if n.is_playing() { "pause.fill" } else { "play.fill" },
-            27.0,
+            24.0,
             if n.is_playing() { "Pause" } else { "Play" },
         );
         let pos = n.position_at(now_ms()).unwrap_or(0.0);
@@ -728,40 +696,37 @@ impl MediaPage {
         }
         self.render_featured(snap, &featured);
         self.render_output(&snap.audio);
-        self.render_sources(&snap.audio);
+        self.render_sources(&snap.audio, &featured);
         self.render_playlists(&snap.media);
         self.tick();
     }
 
+    /// Tint the player tile from the cover, dark enough to keep white text legible.
     fn set_wash(&self, color: Option<(f64, f64, f64)>) {
-        match color {
+        without_animation(|| match color {
             Some((r, g, b)) => {
-                set_gradient(&self.wash, &[(r, g, b, 0.40), (r, g, b, 0.0)]);
-                self.wash.setOpacity(1.0);
-                self.wash2.setOpacity(1.0);
+                let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                let k = if lum > 0.34 { 0.34 / lum } else { 1.0 };
+                let (r, g, b) = (r * k, g * k, b * k);
+                set_gradient(
+                    &self.tint,
+                    &[(r, g, b, 0.84), (r * 0.62, g * 0.62, b * 0.62, 0.8), (r * 0.3, g * 0.3, b * 0.3, 0.78)],
+                );
+                self.tint.setOpacity(1.0);
             }
-            None => {
-                self.wash.setOpacity(0.0);
-                self.wash2.setOpacity(0.0);
-            }
-        }
+            None => self.tint.setOpacity(0.0),
+        });
     }
 
     fn render_featured(&self, snap: &Snapshot, featured: &Featured) {
         let p = &self.p;
-        let f = font(11.5, Weight::Semibold);
-        let fm = font(11.5, Weight::Medium);
         let (has_controls, has_progress) = match featured {
             Featured::Player(pl) => {
                 let n = snap.media.player(*pl);
-                let brand = rgb8(pl.color());
-                make_card(&self.badge_dot, &brand, 3.5);
-                let route = snap.audio.default_device().map(|d| d.name.clone()).unwrap_or_default();
                 let state = match n.map(|n| n.state) {
-                    Some(PlaybackState::Playing) if !route.is_empty() => format!("  ·  Playing on {route}"),
-                    Some(PlaybackState::Playing) => "  ·  Playing".into(),
-                    Some(PlaybackState::Paused) => "  ·  Paused".into(),
-                    _ => String::new(),
+                    Some(PlaybackState::Playing) => " · Playing",
+                    Some(PlaybackState::Paused) => " · Paused",
+                    _ => "",
                 };
                 let short = match (pl, n) {
                     (MediaPlayer::Spotify, _) => "Spotify",
@@ -769,10 +734,11 @@ impl MediaPage {
                     (MediaPlayer::Browser, Some(n)) => n.source_name(),
                     (MediaPlayer::Browser, None) => "Browser",
                 };
-                self.badge
-                    .setAttributedStringValue(&attributed_parts(&[(short, &f, &brand), (&state, &fm, &p.tertiary)]));
+                set_text(&self.badge, &format!("{short}{state}"));
                 set_text(&self.title, n.map_or("", |n| n.title.as_str()));
-                set_text(&self.subtitle, &n.map(NowPlaying::subtitle).unwrap_or_default());
+                let artist = n.map(|n| if n.artist.is_empty() { n.subtitle() } else { n.artist.clone() });
+                set_text(&self.subtitle, &artist.unwrap_or_default());
+                set_text(&self.album, n.map_or("", |n| if n.artist.is_empty() { "" } else { n.album.as_str() }));
                 let art = n.and_then(|n| n.artwork_path.clone());
                 if self.state.borrow().art_path != art || art.is_none() {
                     let img = art.as_deref().and_then(icons::file_image);
@@ -788,17 +754,18 @@ impl MediaPage {
                     self.state.borrow_mut().art_path = art;
                 }
                 if let Some(n) = n {
-                    let on = |b: Option<bool>| if b == Some(true) { brand.clone() } else { p.secondary.clone() };
-                    self.shuffle.setContentTintColor(Some(&on(n.shuffle)));
-                    self.repeat.setContentTintColor(Some(&on(n.repeat)));
-                    self.progress.set_fill_color(&rgba(1.0, 1.0, 1.0, 0.92));
+                    let on = |b: Option<bool>| rgba(1.0, 1.0, 1.0, if b == Some(true) { 0.28 } else { 0.0 });
+                    make_card(&self.shuffle, &on(n.shuffle), 20.0);
+                    make_card(&self.repeat, &on(n.repeat), 20.0);
+                    self.shuffle.setContentTintColor(Some(&p.primary));
+                    self.repeat.setContentTintColor(Some(&p.primary));
                     set_accessibility_label(&self.title, &format!("{}, {}", n.title, n.subtitle()));
                 }
                 (true, n.is_none_or(|n| n.duration.is_some()))
             }
             Featured::App { name, bundle_id, app_path } => {
-                make_card(&self.badge_dot, &p.success, 3.5);
-                self.badge.setAttributedStringValue(&attributed_parts(&[("Playing audio", &f, &p.success)]));
+                set_text(&self.badge, "Playing audio");
+                set_text(&self.album, "");
                 set_text(&self.title, name);
                 let route = snap
                     .audio
@@ -816,8 +783,8 @@ impl MediaPage {
                 (true, false)
             }
             Featured::Nothing => {
-                make_card(&self.badge_dot, &p.tertiary, 3.5);
-                self.badge.setAttributedStringValue(&attributed_parts(&[("Silent", &f, &p.tertiary)]));
+                set_text(&self.badge, "Silent");
+                set_text(&self.album, "");
                 set_text(&self.title, "Nothing playing");
                 set_text(&self.subtitle, "Start something in Spotify or Apple Music");
                 self.art.setImage(None);
@@ -837,7 +804,7 @@ impl MediaPage {
             v.setHidden(!has_progress);
         }
         if !rich && has_controls {
-            set_button_symbol(&self.play, "playpause.fill", 24.0, "Play or pause");
+            set_button_symbol(&self.play, "playpause.fill", 22.0, "Play or pause");
         }
         let empty = matches!(featured, Featured::Nothing);
         self.open_spotify.setHidden(!(empty && glue::is_installed(MediaPlayer::Spotify)));
@@ -847,22 +814,28 @@ impl MediaPage {
     fn render_output(&self, audio: &AudioState) {
         self.state.borrow_mut().devices =
             audio.devices.iter().map(|d| (d.uid.clone(), d.name.clone(), d.capabilities(), d.is_default)).collect();
+        let f = font(12.5, Weight::Semibold);
+        let name = audio.default_device().map_or("No output", |d| d.name.as_str());
+        let symbol = audio.default_device().map_or("airplayaudio", |d| d.symbol());
+        let bw = (text_width(&crate::ui::attributed(name, &f, &self.p.primary)) + 50.0).min(self.output_right * 0.5);
+        style_pill(&self.output_button, name, Some(symbol), &f, &self.p.primary, &rgba(1.0, 1.0, 1.0, 0.16), 18.0);
+        self.output_button.setFrame(rect(self.output_right - bw, self.volume_y, bw, 36.0));
+        self.volume.set_slider_frame(rect(PAD, self.volume_y, self.output_right - bw - 8.0 - PAD, 36.0));
+        self.output_button.setEnabled(!audio.devices.is_empty());
         let Some(dev) = audio.default_device() else {
-            set_text(&self.output_name, "No output device");
-            set_text(&self.output_caps, "");
+            set_text(&self.caps, "");
+            self.volume.setHidden(true);
             return;
         };
-        set_symbol(&self.output_icon, dev.symbol(), 14.0, &dev.name);
-        set_text(&self.output_name, &dev.name);
-        let caps = dev.capabilities();
-        let avail = self.output_caps.frame().size.width - 4.0;
-        let fits = crate::ui::text_width(&crate::ui::attributed(&caps, &font(11.0, Weight::Regular), &self.p.tertiary))
-            <= avail;
-        // Drop the "up to …" tail before truncating mid-word.
-        let caps = if fits { caps } else { caps.split(" · up to").next().unwrap_or(&caps).to_owned() };
-        set_text(&self.output_caps, &caps);
-        set_accessibility_label(&self.output_name, &format!("Output: {}, {}", dev.name, dev.capabilities()));
-        self.output_button.setEnabled(!audio.devices.is_empty());
+        // The format only: the output's name is on the button beside the volume.
+        let format: Vec<String> = dev
+            .capabilities()
+            .split(" · ")
+            .filter(|part| !part.starts_with("up to") && (part.contains("kHz") || part.contains("bit")))
+            .map(str::to_owned)
+            .collect();
+        set_text(&self.caps, &format.join(" · "));
+        set_accessibility_label(&self.output_button, &format!("Output: {}, {}", dev.name, dev.capabilities()));
         match dev.volume {
             Some(v) => {
                 self.volume.set_value(if dev.muted == Some(true) { 0.0 } else { v as f64 });
@@ -872,9 +845,16 @@ impl MediaPage {
         }
     }
 
-    fn render_sources(&self, audio: &AudioState) {
+    /// One line for the other apps making sound; the featured one is the tile.
+    fn render_sources(&self, audio: &AudioState, featured: &Featured) {
+        let is_featured = |s: &notchforge_core::model::AudioSource| match featured {
+            Featured::Player(pl) => s.bundle_id.as_deref() == Some(pl.bundle_id()),
+            Featured::App { name, .. } => &s.name == name,
+            Featured::Nothing => false,
+        };
+        let others: Vec<_> = audio.sources.iter().filter(|s| !is_featured(s)).collect();
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        for s in &audio.sources {
+        for s in &others {
             s.name.hash(&mut h);
             audio.route_label(s).hash(&mut h);
         }
@@ -886,85 +866,53 @@ impl MediaPage {
         self.state.borrow_mut().sources_key = key;
         self.source_targets.clear();
         remove_all_subviews(&self.sources);
-        let p = &self.p;
-        let note = |text: &str| {
-            self.sources.addSubview(&label(
-                self.mtm,
-                text,
-                &font(11.5, Weight::Regular),
-                &p.tertiary,
-                rect(2.0, 6.0, self.sources_width, 16.0),
-            ));
+        let color = rgba(1.0, 1.0, 1.0, 0.84);
+        let f = font(12.0, Weight::Regular);
+        let width = self.sources_width;
+        let text_at = |x: f64, text: &str| {
+            self.sources.addSubview(&label(self.mtm, text, &f, &color, rect(x, 4.0, width - x, 16.0)));
         };
         if !audio.sources_supported {
-            set_text(&self.sources_header, "Playing audio");
-            note("Per-app audio needs macOS 14.2 or later");
+            text_at(0.0, "Per-app audio needs macOS 14.2 or later");
             return;
         }
-        set_text(&self.sources_header, "Playing audio");
-        if audio.sources.is_empty() {
-            note("No app is playing audio");
+        let Some(s) = others.first() else {
+            text_at(0.0, "No other app is playing audio");
             return;
+        };
+        let slot = rect(0.0, 3.0, 18.0, 18.0);
+        let boxed = icons::source_icon(s.bundle_id.as_deref(), s.app_path.as_deref())
+            .and_then(|img| crate::ui::image_box(self.mtm, slot, &img));
+        if let Some(b) = boxed {
+            self.sources.addSubview(&b);
+        } else if s.bundle_id.as_deref() == Some("com.spotify.client") {
+            // The board's Spotify tile: green, with the black mark.
+            let tile = shape_view(self.mtm, slot, &crate::ui::rgb8(MediaPlayer::Spotify.color()), 5.0);
+            tile.addSubview(&crate::ui::spotify_mark(self.mtm, rect(3.0, 3.0, 12.0, 12.0)));
+            self.sources.addSubview(&tile);
+        } else {
+            let icon = crate::views::app_icon_view(self.mtm, slot);
+            icon.setImage(crate::ui::symbol_image("app.fill", 12.0, &s.name).as_deref());
+            icon.setContentTintColor(Some(&color));
+            self.sources.addSubview(&icon);
         }
-        // Chips flow left to right, wrapping onto a second row.
-        let fm = font(12.0, Weight::Medium);
-        let (mut x, mut y) = (0.0, 0.0);
-        let max_y = self.sources.frame().size.height - 30.0;
-        for s in &audio.sources {
-            let route = audio.route_label(s);
-            let text = attributed_parts(&[
-                (&s.name, &fm, &p.primary),
-                ("  →  ", &fm, &p.tertiary),
-                (&route, &fm, &p.secondary),
-            ]);
-            let cw = (31.0 + text_width(&text) + 12.0).min(self.sources_width);
-            if x > 0.0 && x + cw > self.sources_width {
-                x = 0.0;
-                y += 36.0;
-            }
-            if y > max_y {
-                break;
-            }
-            let chip = shape_view(self.mtm, rect(x, y, cw, 30.0), &rgba(1.0, 1.0, 1.0, 0.07), 15.0);
-            let slot = rect(7.0, 6.0, 18.0, 18.0);
-            let boxed = icons::source_icon(s.bundle_id.as_deref(), s.app_path.as_deref())
-                .and_then(|img| crate::ui::image_box(self.mtm, slot, &img));
-            if let Some(b) = boxed {
-                chip.addSubview(&b);
-            } else if s.bundle_id.as_deref() == Some("com.spotify.client") {
-                // The board's Spotify tile: green, with the black mark.
-                let tile = shape_view(self.mtm, slot, &crate::ui::rgb8(MediaPlayer::Spotify.color()), 5.0);
-                tile.addSubview(&crate::ui::spotify_mark(self.mtm, rect(3.0, 3.0, 12.0, 12.0)));
-                chip.addSubview(&tile);
-            } else {
-                let icon = crate::views::app_icon_view(self.mtm, slot);
-                match s.bundle_id.as_deref() {
-                    Some("com.apple.Music") => {
-                        icon.setImage(crate::ui::symbol_image("music.note", 10.0, &s.name).as_deref());
-                        icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleNone);
-                        icon.setContentTintColor(Some(&objc2_app_kit::NSColor::whiteColor()));
-                        icon.setWantsLayer(true);
-                        if let Some(l) = icon.layer() {
-                            l.setBackgroundColor(Some(&crate::ui::rgb8(MediaPlayer::Music.color()).CGColor()));
-                            l.setCornerRadius(5.0);
-                        }
-                    }
-                    _ => {
-                        icon.setImage(crate::ui::symbol_image("app.fill", 12.0, &s.name).as_deref());
-                        icon.setContentTintColor(Some(&p.secondary));
-                    }
-                }
-                chip.addSubview(&icon);
-            }
-            chip.addSubview(&rich_label(self.mtm, &text, rect(31.0, 7.0, cw - 38.0, 16.0)));
-            if let Some(b) = s.bundle_id.clone() {
-                let t = self.source_targets.add(self.mtm, move |_| glue::activate_app(&b));
-                chip.addSubview(&click_overlay(self.mtm, &t, rect(0.0, 0.0, cw, 30.0), &format!("Show {}", s.name)));
-            }
-            set_accessibility_label(&chip, &format!("{} is playing through {route}", s.name));
-            self.sources.addSubview(&chip);
-            x += cw + 8.0;
+        let route = audio.route_label(s);
+        let text = if others.len() > 1 {
+            format!("{} and {} more also playing", s.name, others.len() - 1)
+        } else {
+            format!("{} is also playing on {route}", s.name)
+        };
+        text_at(25.0, &text);
+        if let Some(b) = s.bundle_id.clone() {
+            let t = self.source_targets.add(self.mtm, move |_| glue::activate_app(&b));
+            self.sources.addSubview(&click_overlay(
+                self.mtm,
+                &t,
+                rect(0.0, 0.0, width, 24.0),
+                &format!("Show {}", s.name),
+            ));
         }
+        set_accessibility_label(&self.sources, &text);
     }
 
     /// Which player's playlists to list.
@@ -1056,23 +1004,30 @@ impl MediaPage {
             &font(12.0, Weight::Semibold),
             &self.p.primary,
             &self.p.accent,
-            13.0,
+            14.0,
         );
         self.list_action.setHidden(action == ListAction::None);
         self.list_scroll.setHidden(lists.is_empty());
-        without_animation(|| self.list_fade.setHidden(lists.len() < 6));
 
         let p = &self.p;
         let w = self.list_width;
         let brand = rgb8(player.color());
         let visible_h = self.list_scroll.frame().size.height;
-        let doc_h = (lists.len() as f64 * ROW_H + 30.0).max(visible_h);
+        // Five rows fill the tile; a shorter list spreads out, a longer one scrolls.
+        let row_h = if lists.is_empty() || lists.len() as f64 >= VISIBLE_ROWS {
+            visible_h / VISIBLE_ROWS
+        } else {
+            (visible_h / lists.len() as f64).min(MAX_ROW_H)
+        };
+        let doc_h = (lists.len() as f64 * row_h).max(visible_h);
         self.list_doc.setFrame(rect(0.0, 0.0, w, doc_h));
+        let detail_color = rgba(1.0, 1.0, 1.0, 0.74);
         for (i, pl) in lists.iter().enumerate() {
             let is_active = active.as_deref() == Some(pl.id.as_str());
-            let row_bg = if is_active { rgba(1.0, 1.0, 1.0, 0.09) } else { rgba(1.0, 1.0, 1.0, 0.0) };
-            let row = shape_view(self.mtm, rect(0.0, i as f64 * ROW_H, w, ROW_H), &row_bg, 11.0);
-            let cover = shape_view(self.mtm, rect(8.0, 6.0, 36.0, 36.0), &brand, 8.0);
+            let row_bg = if is_active { rgba(1.0, 1.0, 1.0, 0.14) } else { rgba(1.0, 1.0, 1.0, 0.0) };
+            let row = shape_view(self.mtm, rect(0.0, i as f64 * row_h, w, row_h), &row_bg, 13.0);
+            let cy = (row_h - 40.0) / 2.0;
+            let cover = shape_view(self.mtm, rect(8.0, cy, 40.0, 40.0), &brand, 8.0);
             if let Some(l) = cover.layer() {
                 l.setMasksToBounds(true);
             }
@@ -1080,26 +1035,27 @@ impl MediaPage {
                 Some(img) => {
                     let v = NSImageView::new(self.mtm);
                     v.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
-                    v.setFrame(rect(0.0, 0.0, 36.0, 36.0));
+                    v.setFrame(rect(0.0, 0.0, 40.0, 40.0));
                     v.setImage(Some(&img));
                     cover.addSubview(&v);
                 }
                 None => cover.addSubview(&symbol_view(
                     self.mtm,
                     "music.note.list",
-                    15.0,
+                    16.0,
                     &rgba(1.0, 1.0, 1.0, 0.92),
-                    rect(8.0, 8.0, 20.0, 20.0),
+                    rect(10.0, 10.0, 20.0, 20.0),
                     &pl.name,
                 )),
             }
             row.addSubview(&cover);
+            let ty = (row_h - 33.0) / 2.0;
             row.addSubview(&label(
                 self.mtm,
                 &pl.name,
-                &font(13.0, Weight::Medium),
+                &font(13.5, Weight::Medium),
                 &p.primary,
-                rect(54.0, 9.0, w - 84.0, 17.0),
+                rect(58.0, ty, w - 88.0, 18.0),
             ));
             let mut detail = Vec::new();
             if let Some(c) = pl.track_count {
@@ -1111,12 +1067,12 @@ impl MediaPage {
             row.addSubview(&label(
                 self.mtm,
                 &detail.join(" · "),
-                &font(11.0, Weight::Regular),
-                &p.tertiary,
-                rect(54.0, 27.0, w - 84.0, 14.0),
+                &font(12.0, Weight::Regular),
+                &detail_color,
+                rect(58.0, ty + 18.0, w - 88.0, 15.0),
             ));
             if is_active {
-                row.addSubview(&equalizer_view(self.mtm, rect(w - 26.0, 18.0, 12.0, 12.0), &brand));
+                row.addSubview(&equalizer_view(self.mtm, rect(w - 26.0, (row_h - 12.0) / 2.0, 12.0, 12.0), &brand));
             }
             let (id, name) = (pl.id.clone(), pl.name.clone());
             let st = self.state.clone();
@@ -1124,7 +1080,7 @@ impl MediaPage {
                 st.borrow_mut().active_playlist = Some(id.clone());
                 glue::control(player, MediaAction::PlayPlaylist(id.clone()));
             });
-            row.addSubview(&click_overlay(self.mtm, &t, rect(0.0, 0.0, w, ROW_H), &format!("Play playlist {name}")));
+            row.addSubview(&click_overlay(self.mtm, &t, rect(0.0, 0.0, w, row_h), &format!("Play playlist {name}")));
             set_accessibility_label(&row, &format!("{}, {}", pl.name, detail.join(", ")));
             self.list_doc.addSubview(&row);
         }
