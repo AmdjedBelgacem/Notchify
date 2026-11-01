@@ -530,7 +530,10 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             screenshot(ctx, mtm, "04-peek", Some(island.outset(40.0, 40.0, 30.0, 0.0)));
         }
         // ── settings window ──
-        13 => app::show_settings_pane(crate::settings::Pane::Media),
+        13 => {
+            crate::settings::set_preview(true);
+            app::show_settings_pane(crate::settings::Pane::Media)
+        }
         14 => {
             let visible = app::settings_visible();
             ctx.report.borrow_mut().check("settings: window shown", visible, "");
@@ -538,6 +541,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 Some(png) => emit_png(ctx, "05-settings", png),
                 None => tracing::warn!("could not render the Settings window"),
             }
+            crate::settings::set_preview(false);
             // The other panes the design boards cover, then close.
             for (pane, name) in [
                 (crate::settings::Pane::Agents, "05b-settings-agents"),

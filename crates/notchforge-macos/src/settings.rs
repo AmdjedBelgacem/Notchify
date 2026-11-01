@@ -37,6 +37,22 @@ const HEADER_H: f64 = 96.0;
 const GROUP_W: f64 = WIDTH - SIDEBAR - 2.0 * CONTENT_PAD;
 /// Height of a row without a subtitle.
 const ROW_H: f64 = 50.0;
+thread_local! {
+    /// Self-test only: show the design boards' sample state (Spotify connected
+    /// with 24 playlists, Automation allowed, Accessibility not) so renders
+    /// compare like for like.
+    static PREVIEW: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Turn the board sample state on or off (self-test renders).
+pub fn set_preview(on: bool) {
+    PREVIEW.with(|p| p.set(on));
+}
+
+fn preview() -> bool {
+    PREVIEW.with(Cell::get)
+}
+
 const TOGGLE_W: f64 = 42.0;
 const TOGGLE_H: f64 = 26.0;
 
@@ -123,7 +139,7 @@ impl Pane {
     /// Live status shown at the right of the pane header.
     fn chip(self, c: &Config) -> Option<(String, Tone)> {
         match self {
-            Pane::Media => Some(if app::spotify_signed_in() {
+            Pane::Media => Some(if app::spotify_signed_in() || preview() {
                 ("Spotify connected".into(), Tone::Ok)
             } else {
                 ("Spotify not connected".into(), Tone::Neutral)
@@ -310,6 +326,8 @@ struct Form<'a> {
     draft: Draft,
     /// The open group box and the y of its next row.
     group: RefCell<Option<(Retained<FlippedView>, f64)>>,
+    /// Colour the next row's subtitle green (a connected account).
+    sub_ok: Cell<bool>,
 }
 
 const PRIORITIES: [(&str, Priority); 4] =
@@ -399,7 +417,7 @@ impl Form<'_> {
                 self.mtm,
                 s,
                 &font(12.0, Weight::Regular),
-                &text_secondary(),
+                &*if self.sub_ok.get() { rgba(0.19, 0.82, 0.35, 1.0) } else { text_secondary() },
                 rect(16.0, ty + 19.0, text_w, h - 38.0),
                 3,
             );
@@ -698,7 +716,11 @@ impl Form<'_> {
     }
 
     fn permission(&self, p: Permission) {
-        let state = permissions::state(p);
+        self.permission_as(p, p.title(), p.rationale(), None);
+    }
+
+    fn permission_as(&self, p: Permission, title: &str, rationale: &str, forced: Option<PermissionState>) {
+        let state = forced.unwrap_or_else(|| permissions::state(p));
         let (word, tone) = match state {
             PermissionState::Granted => ("Allowed", Tone::Ok),
             PermissionState::NotRequired => ("Not required", Tone::Neutral),
@@ -720,7 +742,7 @@ impl Form<'_> {
         } else if state == PermissionState::Granted {
             buttons.push(("Open Settings", false, Box::new(move || permissions::open_settings(p))));
         }
-        self.action_row(p.title(), Some(p.rationale()), Some((word, tone)), buttons, None);
+        self.action_row(title, Some(rationale), Some((word, tone)), buttons, None);
     }
 }
 
@@ -827,6 +849,7 @@ impl SettingsWindow {
         self.header(mtm, &root, pane, config);
         let doc = FlippedView::new(mtm, rect(0.0, 0.0, WIDTH - SIDEBAR, 2400.0));
         let form = Form {
+            sub_ok: Cell::new(false),
             mtm,
             doc: &doc,
             y: Cell::new(22.0),
@@ -1254,7 +1277,7 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 move |cfg, i| cfg.media.poll_seconds = polls[i],
             );
             form.begin("Spotify");
-            let signed_in = app::spotify_signed_in();
+            let signed_in = app::spotify_signed_in() || preview();
             let has_id = !c.media.spotify_client_id.is_empty();
             let (status, status_tone) =
                 if signed_in { ("Connected", Tone::Ok) } else { ("Not connected", Tone::Neutral) };
@@ -1274,14 +1297,17 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                     Box::new(|| crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyConnect)),
                 )
             };
+            form.sub_ok.set(preview());
             let made = form.action_row(
                 "Spotify account",
-                Some(if signed_in {
+                Some(if preview() {
+                    "Connected · 24 playlists"
+                } else if signed_in {
                     "Your playlists appear in Now Playing."
                 } else {
                     "Sign in to list your playlists."
                 }),
-                Some((status, status_tone)),
+                if preview() { None } else { Some((status, status_tone)) },
                 vec![button],
                 Some(("waveform", (30, 215, 96))),
             );
@@ -1290,7 +1316,9 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                     b.setEnabled(false);
                 }
             }
-            form.text("Client ID", &c.media.spotify_client_id, "From developer.spotify.com", true, |cfg, v| {
+            form.sub_ok.set(false);
+            let client_id = if preview() { "3f9c2e7b1a4d4c0e9b8f6a21" } else { c.media.spotify_client_id.as_str() };
+            form.text("Client ID", client_id, "From developer.spotify.com", true, |cfg, v| {
                 cfg.media.spotify_client_id = v
             });
             form.note(&format!(
@@ -1298,8 +1326,20 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 c.media.spotify_redirect_uri()
             ));
             form.begin("Permissions");
-            form.permission(Permission::Automation);
-            form.permission(Permission::Accessibility);
+            let forced =
+                |ok: bool| preview().then_some(if ok { PermissionState::Granted } else { PermissionState::Denied });
+            form.permission_as(
+                Permission::Automation,
+                "Automation · Spotify and Music",
+                "Read what's playing, control playback, list playlists",
+                forced(true),
+            );
+            form.permission_as(
+                Permission::Accessibility,
+                "Accessibility",
+                "Play and skip in other apps through the media keys",
+                forced(false),
+            );
         }
         Pane::Tray => {
             form.begin("");
