@@ -32,6 +32,9 @@ pub enum SpotifyError {
     LoginAborted,
     #[error("Spotify rejected the request: {0}")]
     Rejected(String),
+    /// Spotify's own explanation, shown as is.
+    #[error("{0}")]
+    Refused(String),
     #[error("network: {0}")]
     Http(#[from] reqwest::Error),
     #[error("I/O: {0}")]
@@ -321,6 +324,32 @@ pub fn parse_playlists_page(json: &str) -> Result<(Vec<Playlist>, Option<String>
     Ok((lists, page.next))
 }
 
+/// Spotify's own explanation for a refused request. Its error bodies are either
+/// plain text or `{"error":{"status":403,"message":"…"}}`.
+pub fn rejection_reason(status: u16, body: &str) -> String {
+    #[derive(Deserialize)]
+    struct Body {
+        error: Detail,
+    }
+    #[derive(Deserialize)]
+    struct Detail {
+        message: String,
+    }
+    let body = body.trim();
+    let reason = match serde_json::from_str::<Body>(body) {
+        Ok(b) => b.error.message,
+        Err(_) if body.starts_with(['{', '<']) => String::new(),
+        Err(_) => body.to_owned(),
+    };
+    if reason.is_empty() {
+        format!("error {status} listing playlists")
+    } else {
+        // The first sentence says why, and the music page has three lines for it.
+        let first = reason.split_inclusive(". ").next().unwrap_or(&reason).trim();
+        crate::util::truncate(first, 80)
+    }
+}
+
 pub async fn playlists(http: &reqwest::Client, token: &Token, max: usize) -> Result<Vec<Playlist>, SpotifyError> {
     let mut url = Some(format!("{API_BASE}/me/playlists?limit=50"));
     let mut out = Vec::new();
@@ -328,7 +357,8 @@ pub async fn playlists(http: &reqwest::Client, token: &Token, max: usize) -> Res
         let resp = http.get(&u).bearer_auth(&token.access_token).send().await?;
         if !resp.status().is_success() {
             let status = resp.status();
-            return Err(SpotifyError::Rejected(format!("{status} listing playlists")));
+            let body = resp.text().await.unwrap_or_default();
+            return Err(SpotifyError::Refused(rejection_reason(status.as_u16(), &body)));
         }
         let text = resp.text().await?;
         let (mut page, next) =
@@ -395,6 +425,15 @@ mod tests {
         assert_eq!(lists[0].artwork_url.as_deref(), Some("https://i/300"));
         assert_eq!(lists[1].track_count, Some(3));
         assert!(next.is_some());
+    }
+
+    #[test]
+    fn rejection_reason_keeps_what_spotify_said() {
+        let premium = "Active premium subscription required for the owner of the app. It can take a few hours.";
+        assert_eq!(rejection_reason(403, premium), "Active premium subscription required for the owner of the app.");
+        assert_eq!(rejection_reason(429, r#"{"error":{"status":429,"message":"Too many"}}"#), "Too many");
+        assert_eq!(rejection_reason(502, ""), "error 502 listing playlists");
+        assert_eq!(rejection_reason(502, "<html>Bad gateway</html>"), "error 502 listing playlists");
     }
 
     #[test]
