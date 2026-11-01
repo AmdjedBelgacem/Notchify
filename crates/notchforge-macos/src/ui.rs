@@ -98,6 +98,37 @@ define_class!(
     }
 );
 
+define_class!(
+    // SAFETY: NSTextField subclass without ivars or Drop; only drawing changes.
+    #[unsafe(super(NSTextField))]
+    #[thread_kind = MainThreadOnly]
+    pub struct TextLabel;
+
+    impl TextLabel {
+        /// Draw text without font smoothing (stem darkening), as the design
+        /// boards render it: smoothing thickens light-on-dark text.
+        #[unsafe(method(drawRect:))]
+        fn draw_rect(&self, rect: NSRect) {
+            if let Some(ctx) = objc2_app_kit::NSGraphicsContext::currentContext() {
+                let cg = ctx.CGContext();
+                objc2_core_graphics::CGContext::set_allows_font_smoothing(Some(&cg), false);
+                objc2_core_graphics::CGContext::set_should_smooth_fonts(Some(&cg), false);
+            }
+            // SAFETY: forwarding the same message to NSTextField.
+            unsafe {
+                let _: () = msg_send![super(self), drawRect: rect];
+            }
+        }
+    }
+);
+
+/// `+[NSTextField labelWithString:]` and friends allocate from the receiver,
+/// so sending them to `TextLabel` yields fully configured labels of our class.
+fn text_label_class() -> &'static objc2::runtime::AnyClass {
+    use objc2::ClassType;
+    TextLabel::class()
+}
+
 impl FlippedView {
     pub fn new(mtm: MainThreadMarker, frame: NSRect) -> Retained<Self> {
         let this = Self::alloc(mtm);
@@ -197,7 +228,9 @@ fn text_frame(frame: NSRect) -> NSRect {
 
 /// Non-editable, non-selectable single- or multi-line label.
 pub fn label(mtm: MainThreadMarker, text: &str, f: &NSFont, color: &NSColor, frame: NSRect) -> Retained<NSTextField> {
-    let l = NSTextField::labelWithString(&ns(text), mtm);
+    let _ = mtm;
+    // SAFETY: NSTextField's label factory, sent to our subclass.
+    let l: Retained<NSTextField> = unsafe { msg_send![text_label_class(), labelWithString: &*ns(text)] };
     l.setFont(Some(f));
     l.setTextColor(Some(color));
     l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
@@ -213,7 +246,9 @@ pub fn wrapping_label(
     frame: NSRect,
     lines: isize,
 ) -> Retained<NSTextField> {
-    let l = NSTextField::wrappingLabelWithString(&ns(text), mtm);
+    let _ = mtm;
+    // SAFETY: NSTextField's wrapping label factory, sent to our subclass.
+    let l: Retained<NSTextField> = unsafe { msg_send![text_label_class(), wrappingLabelWithString: &*ns(text)] };
     l.setFont(Some(f));
     l.setTextColor(Some(color));
     l.setMaximumNumberOfLines(lines);
@@ -631,7 +666,9 @@ pub fn rich_label(
     s: &objc2_foundation::NSAttributedString,
     frame: NSRect,
 ) -> Retained<NSTextField> {
-    let l = NSTextField::labelWithAttributedString(s, mtm);
+    let _ = mtm;
+    // SAFETY: NSTextField's attributed label factory, sent to our subclass.
+    let l: Retained<NSTextField> = unsafe { msg_send![text_label_class(), labelWithAttributedString: s] };
     l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
     l.setFrame(text_frame(frame));
     l
