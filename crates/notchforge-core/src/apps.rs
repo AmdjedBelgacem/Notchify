@@ -162,7 +162,7 @@ impl KnownApp {
         match self {
             KnownApp::Claude => "asterisk",
             KnownApp::ChatGpt => "bubble.left.and.text.bubble.right",
-            KnownApp::Cursor => "cursorarrow.rays",
+            KnownApp::Cursor => "cursorarrow",
             KnownApp::Zed => "chevron.left.forwardslash.chevron.right",
             KnownApp::OpenCode => "terminal",
             KnownApp::Qoder => "hammer",
