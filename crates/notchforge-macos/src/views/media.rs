@@ -908,8 +908,28 @@ impl MediaPage {
             match icons::source_icon(s.bundle_id.as_deref(), s.app_path.as_deref()) {
                 Some(img) => icon.setImage(Some(&img)),
                 None => {
-                    icon.setImage(crate::ui::symbol_image("app.fill", 12.0, &s.name).as_deref());
-                    icon.setContentTintColor(Some(&p.secondary));
+                    // Players without an installed icon get their brand tile (as on the board).
+                    let brand = match s.bundle_id.as_deref() {
+                        Some("com.spotify.client") => Some(MediaPlayer::Spotify.color()),
+                        Some("com.apple.Music") => Some(MediaPlayer::Music.color()),
+                        _ => None,
+                    };
+                    match brand {
+                        Some(c) => {
+                            icon.setImage(crate::ui::symbol_image("music.note", 10.0, &s.name).as_deref());
+                            icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleNone);
+                            icon.setContentTintColor(Some(&objc2_app_kit::NSColor::whiteColor()));
+                            icon.setWantsLayer(true);
+                            if let Some(l) = icon.layer() {
+                                l.setBackgroundColor(Some(&crate::ui::rgb8(c).CGColor()));
+                                l.setCornerRadius(5.0);
+                            }
+                        }
+                        None => {
+                            icon.setImage(crate::ui::symbol_image("app.fill", 12.0, &s.name).as_deref());
+                            icon.setContentTintColor(Some(&p.secondary));
+                        }
+                    }
                 }
             }
             chip.addSubview(&icon);
