@@ -69,6 +69,9 @@ inbox_enabled = true
 # Ask in the notch before a coding agent's notifications are shown the first
 # time (Allow / Deny, remembered per agent in trust.json).
 require_approval = true
+# Say when a coding-agent CLI session (claude, codex, opencode, gemini…) ends,
+# with no hooks needed. Settings › Coding Agents can also wire hooks for you.
+watch_sessions = true
 
 [notifications]
 max_items = 100
@@ -138,3 +141,6 @@ spotify_client_id = ""
 spotify_redirect_port = 47816
 # Maximum playlists listed per player.
 max_playlists = 100
+# Show audio playing in a web browser (YouTube, SoundCloud…) as music, titled
+# from the playing tab. macOS asks for Automation once per browser.
+browser_audio = true

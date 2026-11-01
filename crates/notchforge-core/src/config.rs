@@ -197,6 +197,8 @@ pub struct AgentsConfig {
     /// Ask in the notch before a coding agent's notifications are shown for
     /// the first time. Allow / Deny is remembered per agent.
     pub require_approval: bool,
+    /// Announce when a coding-agent CLI session ends (no hooks needed).
+    pub watch_sessions: bool,
 }
 
 impl Default for AgentsConfig {
@@ -210,6 +212,7 @@ impl Default for AgentsConfig {
             inbox_enabled: true,
             inbox_path: None,
             require_approval: true,
+            watch_sessions: true,
         }
     }
 }
@@ -338,6 +341,8 @@ pub struct MediaConfig {
     pub spotify_redirect_port: u16,
     /// Maximum playlists listed per player.
     pub max_playlists: usize,
+    /// Show audio playing in a web browser (YouTube, SoundCloud…) as music.
+    pub browser_audio: bool,
 }
 
 impl Default for MediaConfig {
@@ -348,6 +353,7 @@ impl Default for MediaConfig {
             spotify_client_id: String::new(),
             spotify_redirect_port: DEFAULT_SPOTIFY_REDIRECT_PORT,
             max_playlists: 100,
+            browser_audio: true,
         }
     }
 }

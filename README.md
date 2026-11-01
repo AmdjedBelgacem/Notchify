@@ -43,7 +43,12 @@ It surfaces:
   browser", with Cancel). When a browser tab, a video or a call is playing
   sound, the collapsed notch shows that app's icon and a live equaliser. Other
   apps (browsers, podcasts…) get play/pause and skip through the system media
-  keys.
+  keys. **Browser audio is shown as music**: the notch titles it from the
+  playing tab (YouTube thumbnails included).
+- **Agents that finished.** Hooks report every finished turn, and a session
+  watcher says when a coding-agent CLI (Claude Code, Codex, OpenCode, Cursor
+  Agent, Gemini CLI…) ends, with no setup. **Settings › Coding Agents** connects
+  Claude Code, Codex and OpenCode in one click.
 
 > **A note on names.** The crates, binaries (`notchforge`, `notchforge-notify`),
 > the `NotchForge.app` bundle and the `NotchForge` data folder keep the project's

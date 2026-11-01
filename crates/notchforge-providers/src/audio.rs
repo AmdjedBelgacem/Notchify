@@ -75,6 +75,28 @@ pub fn sort_devices(devices: &mut [AudioDevice]) {
     });
 }
 
+/// Apps producing audio right now (empty before macOS 14.2 and off macOS).
+pub fn playing_sources() -> Vec<AudioSource> {
+    #[cfg(target_os = "macos")]
+    {
+        mac::read().state.sources
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
+}
+
+/// Resolves when CoreAudio reports a device or per-app activity change.
+/// Never resolves off macOS. Needs the audio provider's listeners (it
+/// installs them), so it only fires while that provider runs.
+pub async fn wait_changed() {
+    #[cfg(target_os = "macos")]
+    mac::changed().notified().await;
+    #[cfg(not(target_os = "macos"))]
+    std::future::pending::<()>().await;
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use super::*;

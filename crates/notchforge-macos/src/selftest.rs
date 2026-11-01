@@ -48,10 +48,8 @@ impl Raster {
         use objc2_core_graphics::{CGBitmapContextCreate, CGColorSpace, CGImageAlphaInfo};
         let (layer, island) = with_controller(|c| (c.island_layer(), c.island_global()))?;
         let layer = layer?;
-        // The bitmap is sized to the *visible* island. The layer is taller (it
-        // overhangs the window's top edge by one corner radius); in CoreGraphics'
-        // y-up space that overhang lies above the bitmap and is clipped, exactly
-        // as the window clips it on screen.
+        // The bitmap is sized to the island; the silhouette (flared top
+        // corners, rounded bottom) is the layer's own mask, so it renders as is.
         let (w, h) = (island.width.round() as usize, island.height.round() as usize);
         if w == 0 || h == 0 {
             return None;
@@ -150,7 +148,7 @@ fn check_pixels(ctx: &Ctx, stage: &str, expect_content: bool, rounded_bottom: bo
         println!("|{line}|");
     }
     let corner = |x: usize, y: usize| r.at(x, y).0;
-    let (tl, bl) = (corner(0, 0), corner(0, r.h - 1));
+    let (tl, bl) = (corner(r.w / 2, 0), corner(0, r.h - 1));
     let mut rep = ctx.report.borrow_mut();
     rep.check(
         &format!("{stage}: island is an opaque black shape"),
@@ -164,9 +162,15 @@ fn check_pixels(ctx: &Ctx, stage: &str, expect_content: bool, rounded_bottom: bo
             format!("{:.2}% bright pixels", bright * 100.0),
         );
     }
-    rep.check(&format!("{stage}: top edge is square (merges with bezel)"), tl > 0.8, format!("top-left alpha {tl:.2}"));
+    rep.check(&format!("{stage}: top edge is flush with the bezel"), tl > 0.8, format!("top-centre alpha {tl:.2}"));
     if rounded_bottom {
         rep.check(&format!("{stage}: bottom corners are rounded"), bl < 0.5, format!("bottom-left alpha {bl:.2}"));
+        let side = corner(0, 18.min(r.h - 1));
+        rep.check(
+            &format!("{stage}: top corners flare out to the screen edge"),
+            side < 0.5,
+            format!("alpha {side:.2} beside the body, 18 pt down"),
+        );
     }
     rep.metrics.insert(format!("render_{stage}"), json!({ "w": r.w, "h": r.h, "opaque": opaque, "bright": bright }));
 }
@@ -537,9 +541,20 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
         14 => {
             let visible = app::settings_visible();
             ctx.report.borrow_mut().check("settings: window shown", visible, "");
-            match app::settings_content_view().as_deref().and_then(png_from_view) {
-                Some(png) => emit_png(ctx, "05-settings", png),
-                None => tracing::warn!("could not render the Settings window"),
+            // Every pane is rebuilt synchronously, so each can be rendered in turn.
+            for (name, pane) in [
+                ("05-settings", None),
+                ("05b-settings-agents", Some(crate::settings::Pane::Agents)),
+                ("05c-settings-general", Some(crate::settings::Pane::General)),
+                ("05d-settings-permissions", Some(crate::settings::Pane::Permissions)),
+            ] {
+                if let Some(p) = pane {
+                    app::show_settings_pane(p);
+                }
+                match app::settings_content_view().as_deref().and_then(png_from_view) {
+                    Some(png) => emit_png(ctx, name, png),
+                    None => tracing::warn!(name, "could not render the Settings window"),
+                }
             }
             crate::settings::set_preview(false);
             // The other panes the design boards cover, then close.
@@ -909,6 +924,37 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
             }
         })
     });
+    // Audio from a browser tab, shown as music (no duration, no shuffle / repeat).
+    let mut browser = music.clone();
+    browser.generation = u64::MAX - 5;
+    browser.media = notchforge_core::model::MediaState {
+        players: vec![notchforge_core::model::NowPlaying {
+            player: notchforge_core::model::MediaPlayer::Browser,
+            state: notchforge_core::model::PlaybackState::Playing,
+            title: "Daft Punk - One More Time".into(),
+            artist: "YouTube".into(),
+            album: "Chrome".into(),
+            duration: None,
+            position: None,
+            sampled_at_ms: notchforge_core::time::now_ms(),
+            track_id: Some("https://www.youtube.com/watch?v=FGBhQbmPwH8".into()),
+            artwork_path: None,
+            shuffle: None,
+            repeat: None,
+            volume: None,
+            source_bundle: Some("com.google.Chrome".into()),
+        }],
+        ..Default::default()
+    };
+    with_controller(|c| {
+        c.notched_previews(overview, &browser, &peek, &prompts, &mut |name, view, w, h| {
+            if name == "07b-notched-music" {
+                if let Some(png) = view.layer().and_then(|l| png_from_layer(&l, w, h, 2.0)) {
+                    emit_png(ctx, "07e-notched-browser", png);
+                }
+            }
+        })
+    });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
     r.check("notched: eight views rendered", sizes.len() == 8, format!("{sizes:?}"));
@@ -1098,6 +1144,7 @@ fn board_snapshots(
             shuffle: Some(true),
             repeat: Some(false),
             volume: Some(62),
+            source_bundle: None,
         }],
         running: vec![MediaPlayer::Spotify],
         playlists,
@@ -1187,6 +1234,7 @@ fn sample_media() -> notchforge_core::model::MediaState {
             shuffle: Some(true),
             repeat: Some(false),
             volume: Some(70),
+            source_bundle: None,
         }],
         running: vec![MediaPlayer::Spotify],
         playlists: (1..=3)

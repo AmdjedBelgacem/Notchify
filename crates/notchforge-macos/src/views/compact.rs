@@ -243,7 +243,7 @@ impl CompactView {
                 ));
                 self.set_wash(Some(tint));
                 self.lead_kicker.setAttributedStringValue(&attributed(
-                    pl.display_name(),
+                    n.source_name(),
                     &font(11.0, Weight::Semibold),
                     &brand,
                 ));
@@ -261,7 +261,7 @@ impl CompactView {
                 self.set_equalizer(n.is_playing().then_some(&*brand));
                 set_accessibility_label(
                     &self.lead,
-                    &format!("{}: {}, {}. Click to open the player.", pl.display_name(), n.title, n.subtitle()),
+                    &format!("{}: {}, {}. Click to open the player.", n.source_name(), n.title, n.subtitle()),
                 );
                 true
             }

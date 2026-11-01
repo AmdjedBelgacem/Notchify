@@ -666,6 +666,10 @@ impl AudioState {
 pub enum MediaPlayer {
     Spotify,
     Music,
+    /// Audio playing in a web browser (YouTube, SoundCloud…). Not a scriptable
+    /// player: it has no playlists, and transport goes through the media keys.
+    /// Deliberately absent from [`MediaPlayer::ALL`].
+    Browser,
 }
 
 impl MediaPlayer {
@@ -675,6 +679,7 @@ impl MediaPlayer {
         match self {
             MediaPlayer::Spotify => "Spotify",
             MediaPlayer::Music => "Apple Music",
+            MediaPlayer::Browser => "Browser",
         }
     }
 
@@ -682,6 +687,7 @@ impl MediaPlayer {
         match self {
             MediaPlayer::Spotify => "com.spotify.client",
             MediaPlayer::Music => "com.apple.Music",
+            MediaPlayer::Browser => "",
         }
     }
 
@@ -694,6 +700,7 @@ impl MediaPlayer {
         match self {
             MediaPlayer::Spotify => (30, 215, 96),
             MediaPlayer::Music => (250, 45, 72),
+            MediaPlayer::Browser => (10, 132, 255),
         }
     }
 }
@@ -728,11 +735,27 @@ pub struct NowPlaying {
     pub repeat: Option<bool>,
     /// Player's own volume, 0–100.
     pub volume: Option<u8>,
+    /// For [`MediaPlayer::Browser`]: the browser's bundle id (to bring it forward).
+    #[serde(default)]
+    pub source_bundle: Option<String>,
 }
 
 impl NowPlaying {
     pub fn is_playing(&self) -> bool {
         self.state == PlaybackState::Playing
+    }
+
+    /// What to call the source: the player, or the browser's own name.
+    pub fn source_name(&self) -> &str {
+        match self.player {
+            MediaPlayer::Browser if !self.album.is_empty() => &self.album,
+            p => p.display_name(),
+        }
+    }
+
+    /// Whether the source has shuffle, repeat, seeking and playlists.
+    pub fn is_rich(&self) -> bool {
+        self.player != MediaPlayer::Browser
     }
 
     /// Position extrapolated to `now_ms` while playing, clamped to the duration.
@@ -748,11 +771,8 @@ impl NowPlaying {
 
     /// "Artist — Album", skipping empty parts.
     pub fn subtitle(&self) -> String {
-        [self.artist.as_str(), self.album.as_str()]
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" — ")
+        let album = if self.player == MediaPlayer::Browser { "" } else { self.album.as_str() };
+        [self.artist.as_str(), album].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" — ")
     }
 
     /// Same track (ignoring position/state), so the UI can skip artwork reloads.
@@ -995,6 +1015,7 @@ mod tests {
             shuffle: None,
             repeat: None,
             volume: None,
+            source_bundle: None,
         }
     }
 

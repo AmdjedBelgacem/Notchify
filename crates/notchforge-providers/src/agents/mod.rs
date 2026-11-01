@@ -9,15 +9,21 @@
 //! | [`socket`] — `<data dir>/agent.sock` (JSON lines) | long-running local tools; no TCP port needed |
 //! | [`inbox`] — `<data dir>/inbox.jsonl` (append lines) | the simplest shell one-liners, editors' task runners |
 //!
+//! [`watch`] announces an agent CLI session that ends, with no setup, and
+//! [`connect`] installs the hooks that report every finished turn.
+//!
 //! Desktop agents that post regular macOS notifications (Claude, ChatGPT,
 //! Cursor, Zed, Qoder…) are additionally picked up by the Notification Center
 //! watcher and attributed through [`KnownApp`](notchforge_core::apps::KnownApp).
 
+pub mod connect;
 pub mod http;
 pub mod inbox;
 pub mod payload;
 pub mod socket;
+pub mod watch;
 
 pub use http::HttpAgentProvider;
 pub use inbox::InboxAgentProvider;
 pub use socket::SocketAgentProvider;
+pub use watch::AgentWatchProvider;

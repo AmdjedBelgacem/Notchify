@@ -17,7 +17,8 @@ use crate::ui::{
 use notchforge_core::apps::KnownApp;
 use notchforge_core::config::{Config, ReducedMotion, ScreenChoice};
 use notchforge_core::engine::Command;
-use notchforge_core::model::{Permission, PermissionState, Priority, TemperatureUnit};
+use notchforge_core::model::{MediaPlayer, Permission, PermissionState, Priority, TemperatureUnit};
+use notchforge_providers::agents::connect;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
@@ -1301,6 +1302,64 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                     cfg.agents.token = if v.is_empty() { None } else { Some(v) };
                 },
             );
+            form.switch(
+                "Say when an agent session ends",
+                Some("Notices Claude Code, Codex, OpenCode, Cursor Agent, Gemini CLI and others finishing, with no setup"),
+                c.agents.watch_sessions,
+                |cfg, on| cfg.agents.watch_sessions = on,
+            );
+            form.begin("Connect agents");
+            let env = connect::Env::current(c.agents.http_port, c.agents.token.clone());
+            for def in connect::AGENTS {
+                let icon = match def.key {
+                    "claude" => ("sparkle", (217, 119, 87)),
+                    "chatgpt" => ("terminal.fill", (16, 163, 127)),
+                    _ => ("curlybraces", (170, 170, 178)),
+                };
+                let (def, env) = (*def, env.clone());
+                let (word, tone, detail, button): (&str, Tone, String, RowButton<'_>) =
+                    match connect::status(&def, &env) {
+                        connect::Status::Connected => (
+                            "Connected",
+                            Tone::Ok,
+                            "Reports finished turns and requests for input.".to_owned(),
+                            (
+                                "Disconnect",
+                                false,
+                                Box::new(move || {
+                                    if let Err(e) = connect::disconnect(&def, &env) {
+                                        app::alert(&format!("Disconnect {}", def.name), &e);
+                                    }
+                                    app::show_settings_soon();
+                                }),
+                            ),
+                        ),
+                        connect::Status::NotConnected => (
+                            "Not connected",
+                            Tone::Neutral,
+                            def.detail.to_owned(),
+                            (
+                                "Connect",
+                                true,
+                                Box::new(move || {
+                                    match connect::connect(&def, &env) {
+                                        Ok(note) => app::alert(&format!("{} connected", def.name), &note),
+                                        Err(e) => app::alert(&format!("Connect {}", def.name), &e),
+                                    }
+                                    app::show_settings_soon();
+                                }),
+                            ),
+                        ),
+                        connect::Status::Blocked(why) => (
+                            "Needs attention",
+                            Tone::Neutral,
+                            why,
+                            ("Check again", false, Box::new(app::show_settings_soon)),
+                        ),
+                    };
+                form.action_row(def.name, Some(&detail), Some((word, tone)), vec![button], Some(icon));
+            }
+            form.note("Connecting edits that agent's own configuration (a .notchforge.bak copy is kept) so it reports every finished turn here. It signs in to nothing: an agent is connected once it reports to the notch.");
             form.begin("Approval");
             form.switch(
                 "Ask before a new agent shows notifications",
@@ -1377,6 +1436,12 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 Some("Reads CoreAudio. No permission needed."),
                 c.providers.audio,
                 |cfg, on| cfg.providers.audio = on,
+            );
+            form.switch(
+                "Browser audio as music",
+                Some("YouTube, SoundCloud and other tabs, titled from the playing tab. macOS asks once per browser."),
+                c.media.browser_audio,
+                |cfg, on| cfg.media.browser_audio = on,
             );
             let polls = [5u64, 10, 30, 60];
             form.popup(
@@ -1458,6 +1523,46 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 "Only needed to list playlists; play, pause and skip work without it. Create an app at developer.spotify.com/dashboard and add the redirect URI {}.",
                 c.media.spotify_redirect_uri()
             ));
+            form.begin("Apple Music");
+            {
+                let snap = app::with_controller(|c| c.current_snapshot());
+                let installed = crate::media::is_installed(MediaPlayer::Music);
+                let running = snap.as_deref().is_some_and(|s| s.media.running.contains(&MediaPlayer::Music));
+                let automation = permissions::state(Permission::Automation);
+                let (word, tone, detail, buttons): (&str, Tone, &str, Vec<RowButton<'_>>) = if !installed {
+                    ("Not installed", Tone::Neutral, "The Music app was not found on this Mac.", vec![])
+                } else if running && automation == PermissionState::Granted {
+                    ("Connected", Tone::Ok, "Now playing, controls and playlists.", vec![])
+                } else if running && automation == PermissionState::Denied {
+                    (
+                        "Not allowed",
+                        Tone::Neutral,
+                        "Automation for Music was refused in System Settings.",
+                        vec![("Open Settings", true, Box::new(|| permissions::open_settings(Permission::Automation)))],
+                    )
+                } else {
+                    (
+                        "Not connected",
+                        Tone::Neutral,
+                        "Opens Music and asks macOS to let Notchisland read and control it.",
+                        vec![(
+                            "Connect",
+                            true,
+                            Box::new(|| {
+                                crate::media::connect_music();
+                                app::show_settings_soon();
+                            }),
+                        )],
+                    )
+                };
+                form.action_row(
+                    "Apple Music",
+                    Some(detail),
+                    Some((word, tone)),
+                    buttons,
+                    Some(("music.note", (250, 45, 72))),
+                );
+            }
             form.begin("Permissions");
             let forced =
                 |ok: bool| preview().then_some(if ok { PermissionState::Granted } else { PermissionState::Denied });

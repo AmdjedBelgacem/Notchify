@@ -765,9 +765,11 @@ impl MediaPage {
                     Some(PlaybackState::Paused) => "  ·  Paused".into(),
                     _ => String::new(),
                 };
-                let short = match pl {
-                    MediaPlayer::Spotify => "Spotify",
-                    MediaPlayer::Music => "Music",
+                let short = match (pl, n) {
+                    (MediaPlayer::Spotify, _) => "Spotify",
+                    (MediaPlayer::Music, _) => "Music",
+                    (MediaPlayer::Browser, Some(n)) => n.source_name(),
+                    (MediaPlayer::Browser, None) => "Browser",
                 };
                 self.badge
                     .setAttributedStringValue(&attributed_parts(&[(short, &f, &brand), (&state, &fm, &p.tertiary)]));
@@ -794,7 +796,7 @@ impl MediaPage {
                     self.progress.set_fill_color(&rgba(1.0, 1.0, 1.0, 0.92));
                     set_accessibility_label(&self.title, &format!("{}, {}", n.title, n.subtitle()));
                 }
-                (true, true)
+                (true, n.is_none_or(|n| n.duration.is_some()))
             }
             Featured::App { name, bundle_id, app_path } => {
                 make_card(&self.badge_dot, &p.success, 3.5);
@@ -827,7 +829,7 @@ impl MediaPage {
                 (false, false)
             }
         };
-        let rich = matches!(featured, Featured::Player(_));
+        let rich = matches!(featured, Featured::Player(p) if *p != MediaPlayer::Browser);
         for b in [&self.prev, &self.play, &self.next] {
             b.setHidden(!has_controls);
         }

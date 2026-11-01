@@ -733,6 +733,7 @@ mod tests {
             shuffle: None,
             repeat: None,
             volume: None,
+            source_bundle: None,
         }
     }
 

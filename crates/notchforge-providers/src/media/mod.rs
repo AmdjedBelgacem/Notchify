@@ -7,17 +7,22 @@
 //!   layer forwards the players' own change announcements
 //!   (`com.spotify.client.PlaybackStateChanged`, `com.apple.Music.playerInfo`)
 //!   as [`ProviderCommand::MediaChanged`], so the poll can stay slow.
+//! * **Browser audio** ([`browser`]): a browser that is making sound is shown
+//!   as a track too, titled from its tabs.
 //! * **Cover art** is cached under `artwork/`: Spotify's artwork URL is
 //!   downloaded; Music's embedded artwork is exported by a script.
 //! * **Playlists**: Music via AppleScript; Spotify via the Web API
 //!   ([`spotify`]) once the user has signed in. Loading runs in a background
 //!   task so controls stay responsive.
 
+pub mod browser;
 pub mod script;
 pub mod spotify;
 
 use notchforge_core::config::Paths;
-use notchforge_core::model::{MediaAction, MediaPlayer, MediaState, NowPlaying, Playlist, PlaylistStatus};
+use notchforge_core::model::{
+    MediaAction, MediaPlayer, MediaState, NowPlaying, PlaybackState, Playlist, PlaylistStatus,
+};
 use notchforge_core::model::{Permission, ProviderStatus};
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderCommand, ProviderContext, ProviderDescriptor, ProviderError,
@@ -95,6 +100,7 @@ enum Wake {
     Tick,
     Playlists(PlaylistResult),
     Login(Result<Result<(), spotify::SpotifyError>, tokio::task::JoinError>),
+    AudioChanged,
     Command(ProviderCommand),
 }
 
@@ -107,6 +113,7 @@ async fn load_playlists(
     max: usize,
 ) -> PlaylistResult {
     match player {
+        MediaPlayer::Browser => (player, PlaylistStatus::Loaded, vec![]),
         MediaPlayer::Music => match script::run(script::MUSIC_PLAYLISTS_SCRIPT, &[&max.to_string()]).await {
             Ok(out) => (player, PlaylistStatus::Loaded, script::parse_music_playlists(&out)),
             Err(script::ScriptError::NotPermitted) => (player, PlaylistStatus::NeedsAutomation, vec![]),
@@ -152,6 +159,7 @@ fn is_running(player: MediaPlayer) -> bool {
     match player {
         MediaPlayer::Spotify => crate::sys::process::is_app_running("Spotify", "Spotify.app/Contents/MacOS/Spotify"),
         MediaPlayer::Music => crate::sys::process::is_app_running("Music", "Music.app/Contents/MacOS/Music"),
+        MediaPlayer::Browser => false,
     }
 }
 
@@ -169,7 +177,12 @@ struct Session {
     playlists_loaded_ms: std::collections::HashMap<MediaPlayer, i64>,
     playlist_tx: tokio::sync::mpsc::Sender<PlaylistResult>,
     loading: std::collections::HashSet<MediaPlayer>,
+    /// The last browser track, kept as "paused" for a while after the sound stops.
+    last_browser: Option<(NowPlaying, std::time::Instant)>,
 }
+
+/// How long a silent browser tab stays on the notch as a paused track.
+const BROWSER_LINGER: Duration = Duration::from_secs(120);
 
 impl Session {
     async fn artwork_for(&mut self, n: &NowPlaying, script_out: &str) -> Option<PathBuf> {
@@ -184,6 +197,13 @@ impl Session {
         let dir = self.paths.artwork_dir();
         let _ = tokio::fs::create_dir_all(&dir).await;
         let path = match n.player {
+            MediaPlayer::Browser => match n.track_id.as_deref().and_then(browser::youtube_id) {
+                Some(id) => {
+                    let url = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
+                    download(&self.http, &url, &dir.join(format!("yt-{id}.jpg"))).await
+                }
+                None => None,
+            },
             MediaPlayer::Spotify => match script::artwork_url(script_out) {
                 Some(url) => download(&self.http, &url, &dir.join(format!("sp-{:016x}.jpg", fnv(&url)))).await,
                 None => None,
@@ -210,7 +230,7 @@ impl Session {
     }
 
     /// Read every running player. Returns players that just started running.
-    async fn read_players(&mut self) -> Vec<MediaPlayer> {
+    async fn read_players(&mut self, browser_audio: bool) -> Vec<MediaPlayer> {
         let mut players = Vec::new();
         let mut running = Vec::new();
         let mut denied = Vec::new();
@@ -232,11 +252,49 @@ impl Session {
                 Err(e) => tracing::debug!(?player, error = %e, "could not read player"),
             }
         }
+        if browser_audio {
+            if let Some(np) = self.read_browser().await {
+                players.push(np);
+            }
+        } else {
+            self.last_browser = None;
+        }
         let started = running.iter().copied().filter(|p| !self.state.running.contains(p)).collect();
         self.state.players = players;
         self.state.running = running;
         self.state.automation_denied = denied;
         started
+    }
+
+    /// A browser that is making sound, as a track (or the one it just played).
+    async fn read_browser(&mut self) -> Option<NowPlaying> {
+        let now = notchforge_core::time::now_ms();
+        let sources = tokio::task::spawn_blocking(crate::audio::playing_sources).await.unwrap_or_default();
+        if let Some((b, _)) = browser::find(&sources) {
+            let tabs = match browser::tabs_script(b) {
+                Some(src) => match script::run(&src, &[]).await {
+                    Ok(out) => browser::parse_tabs(&out),
+                    Err(e) => {
+                        tracing::debug!(browser = b.name, error = %e, "could not read browser tabs");
+                        vec![]
+                    }
+                },
+                None => vec![],
+            };
+            let mut np = browser::now_playing(b, browser::pick(&tabs), PlaybackState::Playing, now);
+            np.artwork_path = self.artwork_for(&np, "").await;
+            self.last_browser = Some((np.clone(), std::time::Instant::now()));
+            return Some(np);
+        }
+        match &self.last_browser {
+            Some((np, at)) if at.elapsed() < BROWSER_LINGER => {
+                Some(NowPlaying { state: PlaybackState::Paused, sampled_at_ms: np.sampled_at_ms, ..np.clone() })
+            }
+            _ => {
+                self.last_browser = None;
+                None
+            }
+        }
     }
 
     fn reload_playlists(&mut self, player: MediaPlayer, ctx: &ProviderContext, force: bool) {
@@ -268,6 +326,9 @@ impl Session {
     async fn control(&mut self, player: MediaPlayer, action: &MediaAction) {
         // Only "play this playlist" may launch a player; other controls are
         // meaningless when it is not running.
+        if player == MediaPlayer::Browser {
+            return; // the macOS layer sends media keys instead
+        }
         let launches = matches!(action, MediaAction::PlayPlaylist(_));
         if !launches && !tokio::task::spawn_blocking(move || is_running(player)).await.unwrap_or(false) {
             return;
@@ -310,6 +371,7 @@ impl Provider for MediaProvider {
                 playlists_loaded_ms: Default::default(),
                 playlist_tx,
                 loading: Default::default(),
+                last_browser: None,
             };
             let mut login: Option<tokio::task::JoinHandle<Result<(), spotify::SpotifyError>>> = None;
             let mut last_emitted: Option<MediaState> = None;
@@ -317,7 +379,7 @@ impl Provider for MediaProvider {
             ctx.set_status(ProviderStatus::Running).await;
 
             loop {
-                let started = s.read_players().await;
+                let started = s.read_players(ctx.config().media.browser_audio).await;
                 for p in started {
                     s.reload_playlists(p, &ctx, true);
                 }
@@ -354,8 +416,13 @@ impl Provider for MediaProvider {
                         None => std::future::pending().await,
                     }
                 };
+                let browser_audio = ctx.config().media.browser_audio;
+                let audio_changed = async {
+                    if browser_audio { crate::audio::wait_changed().await } else { std::future::pending().await }
+                };
                 let next = tokio::select! {
                     _ = tokio::time::sleep(poll) => Wake::Tick,
+                    _ = audio_changed => Wake::AudioChanged,
                     _ = refresh.notified() => Wake::Tick,
                     Some(result) = playlist_rx.recv() => Wake::Playlists(result),
                     r = login_done => Wake::Login(r),
@@ -366,6 +433,8 @@ impl Provider for MediaProvider {
                 };
                 match next {
                     Wake::Tick => {}
+                    // Let a burst of CoreAudio callbacks settle into one read.
+                    Wake::AudioChanged => tokio::time::sleep(Duration::from_millis(600)).await,
                     Wake::Playlists(result) => {
                         s.loading.remove(&result.0);
                         // A reload racing the browser sign-in must not erase

@@ -589,6 +589,63 @@ pub fn without_animation(f: impl FnOnce()) {
     objc2_quartz_core::CATransaction::commit();
 }
 
+/// How far the notch's top corners flare outward to meet the screen edge.
+///
+/// `radius` is the island's bottom-corner radius and `notch_w` the hardware
+/// notch width: the flare grows in as the island widens past the notch, so a
+/// collapsed island stays exactly the hardware notch.
+pub fn top_flare(radius: f64, width: f64, notch_w: f64) -> f64 {
+    let t = ((width - notch_w) / 16.0).clamp(0.0, 1.0);
+    (radius * 0.42).min(12.0) * t * t * (3.0 - 2.0 * t)
+}
+
+/// The island silhouette in a `w` × `h` box, y up like a layer: the top edge
+/// is flush with the bezel and its corners sweep outward (concave), the body
+/// below is inset by `top_r`, and the lower corners are rounded by `bottom_r`.
+pub fn notch_path(
+    w: f64,
+    h: f64,
+    top_r: f64,
+    bottom_r: f64,
+) -> objc2_core_foundation::CFRetained<objc2_core_graphics::CGMutablePath> {
+    use objc2_core_graphics::CGMutablePath as P;
+    let tr = top_r.clamp(0.0, (w / 2.0).max(0.0));
+    let br = bottom_r.clamp(0.0, ((w - 2.0 * tr) / 2.0).max(0.0)).min((h - tr).max(0.0));
+    let path = P::new();
+    // SAFETY: `path` is a valid mutable path; the transform is optional (null).
+    unsafe {
+        P::move_to_point(Some(&path), std::ptr::null(), 0.0, h);
+        P::add_line_to_point(Some(&path), std::ptr::null(), w, h);
+        P::add_quad_curve_to_point(Some(&path), std::ptr::null(), w - tr, h, w - tr, h - tr);
+        P::add_line_to_point(Some(&path), std::ptr::null(), w - tr, br);
+        P::add_quad_curve_to_point(Some(&path), std::ptr::null(), w - tr, 0.0, w - tr - br, 0.0);
+        P::add_line_to_point(Some(&path), std::ptr::null(), tr + br, 0.0);
+        P::add_quad_curve_to_point(Some(&path), std::ptr::null(), tr, 0.0, tr, br);
+        P::add_line_to_point(Some(&path), std::ptr::null(), tr, h - tr);
+        P::add_quad_curve_to_point(Some(&path), std::ptr::null(), tr, h, 0.0, h);
+        P::close_subpath(Some(&path));
+    }
+    path
+}
+
+/// Make `layer` (black, `w` × `h`) the notch silhouette by masking it.
+pub fn apply_notch_mask(layer: &objc2_quartz_core::CALayer, w: f64, h: f64, top_r: f64, bottom_r: f64) {
+    use objc2_quartz_core::CAShapeLayer;
+    let mask = match layer.mask().and_then(|m| m.downcast::<CAShapeLayer>().ok()) {
+        Some(m) => m,
+        None => {
+            let m = CAShapeLayer::new();
+            // SAFETY: a shape layer is a valid layer mask.
+            unsafe { layer.setMask(Some(&m)) };
+            m
+        }
+    };
+    without_animation(|| {
+        mask.setFrame(rect(0.0, 0.0, w, h));
+        mask.setPath(Some(&*notch_path(w, h, top_r, bottom_r)));
+    });
+}
+
 /// A gradient layer from `(r, g, b, a)` stops (sRGB 0–1).
 pub fn gradient_layer(
     stops: &[(f64, f64, f64, f64)],

@@ -27,6 +27,16 @@ pub fn send(cmd: ProviderCommand) {
 }
 
 pub fn control(player: MediaPlayer, action: MediaAction) {
+    if player == MediaPlayer::Browser {
+        // Browsers have no script interface: the system media keys reach them.
+        match action {
+            MediaAction::PlayPause => drop(press(MediaKey::PlayPause)),
+            MediaAction::Next => drop(press(MediaKey::Next)),
+            MediaAction::Previous => drop(press(MediaKey::Previous)),
+            _ => {}
+        }
+        return;
+    }
     send(ProviderCommand::Media { player, action });
 }
 
@@ -262,6 +272,21 @@ pub fn automation_state() -> PermissionState {
         });
     }
     decode(AUTOMATION.load(Ordering::Acquire))
+}
+
+/// Open Music, give it a moment to start, then ask for Automation so macOS
+/// shows its consent prompt for it (the prompt needs the app running).
+pub fn connect_music() {
+    open_player(MediaPlayer::Music);
+    std::thread::spawn(|| {
+        for _ in 0..12 {
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            if automation_status(MediaPlayer::Music, true) != -600 {
+                break;
+            }
+        }
+        dispatch2::DispatchQueue::main().exec_async(|| send(ProviderCommand::MediaChanged(None)));
+    });
 }
 
 /// Ask for Automation for every running player (background thread), then

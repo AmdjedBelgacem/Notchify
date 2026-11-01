@@ -84,6 +84,7 @@ end txt
 /// or `stopped`.
 pub fn state_script(player: MediaPlayer) -> String {
     let body = match player {
+        MediaPlayer::Browser => return String::new(),
         MediaPlayer::Spotify => {
             r#"
 	tell application id "com.spotify.client"
@@ -193,6 +194,7 @@ pub fn parse_now_playing(player: MediaPlayer, out: &str, now_ms: i64) -> Option<
         shuffle: parse_bool(get(8)),
         repeat: parse_bool(get(9)),
         volume: get(10).trim().parse::<f64>().ok().map(|v| v.clamp(0.0, 100.0) as u8),
+        source_bundle: None,
     })
     .filter(|n| !n.title.is_empty() || !n.artist.is_empty())
 }
@@ -310,6 +312,8 @@ pub fn control(player: MediaPlayer, action: &MediaAction) -> (String, Vec<String
         (MediaPlayer::Music, MediaAction::PlayPlaylist(id)) => {
             (tell("play (first user playlist whose persistent ID is (item 1 of argv))"), vec![id.clone()])
         }
+        // Browsers are driven by media keys in the macOS layer, never by script.
+        (MediaPlayer::Browser, _) => (String::new(), vec![]),
     }
 }
 
