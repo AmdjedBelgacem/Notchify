@@ -24,7 +24,7 @@ use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSBackingStoreType, NSButton, NSColor, NSControlSize,
     NSControlStateValueOff, NSControlStateValueOn, NSImageView, NSPopUpButton, NSScrollView, NSSearchField, NSSlider,
-    NSSwitch, NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -37,6 +37,24 @@ const HEADER_H: f64 = 96.0;
 const GROUP_W: f64 = WIDTH - SIDEBAR - 2.0 * CONTENT_PAD;
 /// Height of a row without a subtitle.
 const ROW_H: f64 = 50.0;
+const TOGGLE_W: f64 = 42.0;
+const TOGGLE_H: f64 = 26.0;
+
+/// Track colour and knob position of the board's switch (blue on, grey off,
+/// white knob).
+fn style_toggle(b: &NSButton, on: bool) {
+    let Some(l) = b.layer() else { return };
+    let track = if on { rgba(0.17, 0.48, 0.97, 1.0) } else { rgba(1.0, 1.0, 1.0, 0.16) };
+    l.setBackgroundColor(Some(&track.CGColor()));
+    let r = (TOGGLE_H - 4.0) / 2.0;
+    let x = if on { TOGGLE_W - 2.0 - r } else { 2.0 + r };
+    // SAFETY: plain read of the layer's sublayer list on the main thread.
+    if let Some(subs) = unsafe { l.sublayers() } {
+        for k in subs.iter() {
+            k.setPosition(objc2_foundation::NSPoint::new(x, TOGGLE_H / 2.0));
+        }
+    }
+}
 
 /// Settings panes, in sidebar order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,14 +414,32 @@ impl Form<'_> {
         self.put_texts(&row, title, subtitle, text_w, h);
         let draft = self.draft.clone();
         let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
-            if let Some(s) = sender.and_then(|s| s.downcast_ref::<NSSwitch>()) {
-                set(&mut draft.borrow_mut(), s.state() == NSControlStateValueOn);
+            if let Some(b) = sender.and_then(|s| s.downcast_ref::<NSButton>()) {
+                let on = b.state() == NSControlStateValueOn;
+                style_toggle(b, on);
+                set(&mut draft.borrow_mut(), on);
                 Self::commit(&draft);
             }
         });
-        let sw = NSSwitch::new(self.mtm);
+        let sw = NSButton::new(self.mtm);
+        sw.setButtonType(objc2_app_kit::NSButtonType::PushOnPushOff);
+        sw.setBordered(false);
+        sw.setTitle(&ns(""));
         sw.setState(if value { NSControlStateValueOn } else { NSControlStateValueOff });
-        sw.setFrame(rect(w - 16.0 - 40.0, (h - 22.0) / 2.0, 40.0, 22.0));
+        sw.setFrame(rect(w - 16.0 - TOGGLE_W, (h - TOGGLE_H) / 2.0, TOGGLE_W, TOGGLE_H));
+        sw.setWantsLayer(true);
+        if let Some(l) = sw.layer() {
+            l.setCornerRadius(TOGGLE_H / 2.0);
+            let knob = objc2_quartz_core::CALayer::new();
+            knob.setBounds(rect(0.0, 0.0, TOGGLE_H - 4.0, TOGGLE_H - 4.0));
+            knob.setCornerRadius((TOGGLE_H - 4.0) / 2.0);
+            knob.setBackgroundColor(Some(&rgba(1.0, 1.0, 1.0, 1.0).CGColor()));
+            knob.setShadowOpacity(0.3);
+            knob.setShadowRadius(1.5);
+            knob.setName(Some(&ns("knob")));
+            l.addSublayer(&knob);
+        }
+        style_toggle(&sw, value);
         // SAFETY: target kept alive by `targets`.
         unsafe {
             sw.setTarget(Some(t.as_any()));
@@ -418,13 +454,21 @@ impl Form<'_> {
         self.put_texts(&row, title, None, w - 250.0, ROW_H);
         let p = NSPopUpButton::initWithFrame_pullsDown(
             NSPopUpButton::alloc(self.mtm),
-            rect(w - 16.0 - 190.0, (ROW_H - 26.0) / 2.0, 190.0, 26.0),
+            rect(w - 16.0 - 110.0, (ROW_H - 27.0) / 2.0, 110.0, 27.0),
             false,
         );
         for o in options {
             p.addItemWithTitle(&ns(o));
         }
         p.selectItemAtIndex(selected as isize);
+        p.setBordered(false);
+        p.setWantsLayer(true);
+        if let Some(l) = p.layer() {
+            l.setCornerRadius(8.0);
+            l.setBackgroundColor(Some(&rgba(0.11, 0.11, 0.125, 1.0).CGColor()));
+            l.setBorderWidth(1.0);
+            l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.10).CGColor()));
+        }
         crate::ui::set_accessibility_label(&p, title);
         let draft = self.draft.clone();
         let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
