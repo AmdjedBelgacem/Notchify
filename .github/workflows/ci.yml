@@ -54,7 +54,7 @@ jobs:
           CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
           if [ ! -x "$CHROME" ]; then echo "Chrome not installed on this image; skipping"; exit 0; fi
           mkdir -p selftest/boards
-          for b in Main:1200,600 Overview:1200,600 Hover:1200,340 Peek:1200,240; do
+          for b in Main:1200,600 Overview:1200,600 Hover:1200,340 Peek:1200,240 Settings:1000,740 SettingsAgents:1000,740; do
             n=${b%%:*}; size=${b#*:}
             "$CHROME" --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=2 \
               --window-size="$size" --screenshot="$PWD/selftest/boards/$n.png" "file://$PWD/design/boards/$n.html"

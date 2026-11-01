@@ -496,6 +496,33 @@ pub fn set_notch_flare(layer: &objc2_quartz_core::CAShapeLayer, e: f64, left: bo
     layer.setPath(Some(&path));
 }
 
+/// Like [`attributed`], with `kern` pt of extra space after every character
+/// (letter-spaced captions).
+pub fn attributed_tracked(
+    text: &str,
+    f: &NSFont,
+    color: &NSColor,
+    kern: f64,
+) -> Retained<objc2_foundation::NSAttributedString> {
+    use objc2::AnyThread;
+    use objc2_foundation::{NSAttributedString, NSDictionary, NSNumber};
+    // SAFETY: AppKit's attribute-name constants.
+    let (fk, ck, kk) = unsafe {
+        (
+            objc2_app_kit::NSFontAttributeName,
+            objc2_app_kit::NSForegroundColorAttributeName,
+            objc2_app_kit::NSKernAttributeName,
+        )
+    };
+    let fv: &AnyObject = f;
+    let cv: &AnyObject = color;
+    let n = NSNumber::new_f64(kern);
+    let kv: &AnyObject = &n;
+    let dict = NSDictionary::<NSString, AnyObject>::from_slices(&[fk, ck, kk], &[fv, cv, kv]);
+    // SAFETY: the attributes have the documented value types.
+    unsafe { NSAttributedString::initWithString_attributes(NSAttributedString::alloc(), &ns(text), Some(&dict)) }
+}
+
 /// Run `f` without Core Animation's implicit 0.25 s animations.
 pub fn without_animation(f: impl FnOnce()) {
     objc2_quartz_core::CATransaction::begin();

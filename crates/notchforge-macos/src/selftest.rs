@@ -538,6 +538,18 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 Some(png) => emit_png(ctx, "05-settings", png),
                 None => tracing::warn!("could not render the Settings window"),
             }
+            // The other panes the design boards cover, then close.
+            for (pane, name) in [
+                (crate::settings::Pane::Agents, "05b-settings-agents"),
+                (crate::settings::Pane::General, "05c-settings-general"),
+                (crate::settings::Pane::Permissions, "05d-settings-permissions"),
+            ] {
+                app::show_settings_pane(pane);
+                match app::settings_content_view().as_deref().and_then(png_from_view) {
+                    Some(png) => emit_png(ctx, name, png),
+                    None => tracing::warn!(name, "could not render the Settings pane"),
+                }
+            }
             app::close_settings();
         }
         // ── display reconfiguration keeps the UI consistent ──

@@ -1,7 +1,8 @@
-//! Settings window, built to the *Settings · Media* board: a dark
-//! System-Settings-style window with a sidebar of panes and grouped rows of
-//! native controls (switches, pop-ups, fields, buttons), fully VoiceOver
-//! accessible.
+//! Settings window, built to the *Settings · Media* and *Settings · Coding
+//! Agents* boards: an ink-black window with a brand header and grouped
+//! sidebar, a pane header with a live status chip, and hairline-separated
+//! cards of native controls (switches, pop-ups, fields, buttons), fully
+//! VoiceOver accessible.
 //!
 //! Every change applies immediately: the edited draft config is sent to the
 //! engine, which persists it and broadcasts it. A pane is rebuilt each time
@@ -10,7 +11,8 @@
 use crate::app;
 use crate::permissions;
 use crate::ui::{
-    ActionTarget, FlippedView, Targets, Weight, attributed, font, label, ns, rect, rgba, shape_view, text_width,
+    ActionTarget, FlippedView, Targets, Weight, attributed, attributed_tracked, font, label, ns, rect, rgba,
+    shape_view, text_width,
 };
 use notchforge_core::apps::KnownApp;
 use notchforge_core::config::{Config, ReducedMotion, ScreenChoice};
@@ -21,18 +23,20 @@ use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSBackingStoreType, NSButton, NSColor, NSControlSize,
-    NSControlStateValueOff, NSControlStateValueOn, NSPopUpButton, NSScrollView, NSSearchField, NSSlider, NSSwitch,
-    NSTextAlignment, NSTextField, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectView,
-    NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSControlStateValueOff, NSControlStateValueOn, NSImageView, NSPopUpButton, NSScrollView, NSSearchField, NSSlider,
+    NSSwitch, NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-const WIDTH: f64 = 920.0;
-const HEIGHT: f64 = 580.0;
-const SIDEBAR: f64 = 230.0;
-const CONTENT_PAD: f64 = 32.0;
+const WIDTH: f64 = 960.0;
+const HEIGHT: f64 = 680.0;
+const SIDEBAR: f64 = 248.0;
+const CONTENT_PAD: f64 = 36.0;
+const HEADER_H: f64 = 96.0;
 const GROUP_W: f64 = WIDTH - SIDEBAR - 2.0 * CONTENT_PAD;
+/// Height of a row without a subtitle.
+const ROW_H: f64 = 50.0;
 
 /// Settings panes, in sidebar order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,12 +58,76 @@ impl Pane {
         Pane::Appearance,
         Pane::Notifications,
         Pane::Agents,
-        Pane::Weather,
         Pane::Media,
+        Pane::Weather,
         Pane::Tray,
         Pane::Controls,
         Pane::Permissions,
     ];
+
+    /// The sidebar's captioned sections.
+    const SECTIONS: [(&'static str, &'static [Pane]); 3] = [
+        ("Surface", &[Pane::General, Pane::Appearance]),
+        ("Content", &[Pane::Notifications, Pane::Agents, Pane::Media, Pane::Weather, Pane::Tray]),
+        ("System", &[Pane::Controls, Pane::Permissions]),
+    ];
+
+    /// One line under the pane title.
+    fn blurb(self) -> &'static str {
+        match self {
+            Pane::General => "Launch, menu bar, display and how the notch reacts.",
+            Pane::Appearance => "Motion, animation speed and the live indicators.",
+            Pane::Notifications => "Which notifications peek out, and from where.",
+            Pane::Agents => "Claude Code, Codex, Cursor, Zed and anything that can post JSON.",
+            Pane::Media => "What plays beside the notch, and how your music apps connect.",
+            Pane::Weather => "Location, units and how often the forecast refreshes.",
+            Pane::Tray => "A temporary shelf for files you drag onto the notch.",
+            Pane::Controls => "Brightness, volume, resolution and Focus from the island.",
+            Pane::Permissions => "Every permission is optional; features wait until it is granted.",
+        }
+    }
+
+    /// Top and bottom colour of the pane's icon tile.
+    fn gradient(self) -> ((u8, u8, u8), (u8, u8, u8)) {
+        match self {
+            Pane::General => ((154, 154, 160), (110, 110, 116)),
+            Pane::Appearance => ((156, 139, 255), (111, 92, 255)),
+            Pane::Notifications => ((255, 106, 96), (232, 55, 47)),
+            Pane::Agents => ((238, 149, 119), (217, 119, 87)),
+            Pane::Media => ((255, 100, 130), (245, 43, 73)),
+            Pane::Weather => ((99, 208, 255), (47, 155, 224)),
+            Pane::Tray => ((90, 165, 255), (31, 112, 240)),
+            Pane::Controls => ((134, 131, 242), (94, 92, 230)),
+            Pane::Permissions => ((69, 214, 234), (20, 166, 196)),
+        }
+    }
+
+    /// Live status shown at the right of the pane header.
+    fn chip(self, c: &Config) -> Option<(String, Tone)> {
+        match self {
+            Pane::Media => Some(if app::spotify_signed_in() {
+                ("Spotify connected".into(), Tone::Ok)
+            } else {
+                ("Spotify not connected".into(), Tone::Neutral)
+            }),
+            Pane::Agents => Some(if c.providers.agents {
+                (format!("Listening on {}", c.agents.http_port), Tone::Ok)
+            } else {
+                ("Off".into(), Tone::Neutral)
+            }),
+            Pane::Permissions => {
+                let all = Permission::ALL;
+                let ok = all
+                    .iter()
+                    .filter(|p| {
+                        matches!(permissions::state(**p), PermissionState::Granted | PermissionState::NotRequired)
+                    })
+                    .count();
+                Some((format!("{ok} of {} allowed", all.len()), if ok == all.len() { Tone::Ok } else { Tone::Neutral }))
+            }
+            _ => None,
+        }
+    }
 
     pub fn title(self) -> &'static str {
         match self {
@@ -117,16 +185,102 @@ pub struct SettingsWindow {
 type Draft = Rc<RefCell<Config>>;
 /// (title, primary, action) for a row button.
 type RowButton<'a> = (&'a str, bool, Box<dyn Fn()>);
-type SidebarItems = Rc<RefCell<Vec<(Pane, Retained<FlippedView>)>>>;
 
 fn text_primary() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.92)
+    rgba(1.0, 1.0, 1.0, 0.94)
 }
 fn text_secondary() -> Retained<NSColor> {
+    rgba(1.0, 1.0, 1.0, 0.6)
+}
+fn text_tertiary() -> Retained<NSColor> {
     rgba(1.0, 1.0, 1.0, 0.5)
 }
 fn hairline() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.08)
+    rgba(1.0, 1.0, 1.0, 0.07)
+}
+fn ink() -> Retained<NSColor> {
+    rgba(0.043, 0.043, 0.051, 1.0)
+}
+fn side_bg() -> Retained<NSColor> {
+    rgba(0.063, 0.063, 0.075, 1.0)
+}
+fn card_bg() -> Retained<NSColor> {
+    rgba(0.082, 0.082, 0.094, 1.0)
+}
+fn accent() -> Retained<NSColor> {
+    rgba(0.298, 0.553, 1.0, 1.0)
+}
+
+/// Meaning of a status capsule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tone {
+    Ok,
+    Warn,
+    Neutral,
+}
+
+/// A status capsule: icon and text on a tinted pill. Returns it and its width.
+fn chip_view(mtm: MainThreadMarker, text: &str, tone: Tone) -> (Retained<FlippedView>, f64) {
+    let (fg, bg, edge, symbol) = match tone {
+        Tone::Ok => (
+            rgba(0.247, 0.878, 0.478, 1.0),
+            rgba(0.188, 0.82, 0.345, 0.14),
+            rgba(0.188, 0.82, 0.345, 0.4),
+            Some("checkmark.circle.fill"),
+        ),
+        Tone::Warn => (
+            rgba(1.0, 0.702, 0.251, 1.0),
+            rgba(1.0, 0.624, 0.039, 0.14),
+            rgba(1.0, 0.624, 0.039, 0.4),
+            Some("exclamationmark.triangle.fill"),
+        ),
+        Tone::Neutral => (text_secondary(), rgba(1.0, 1.0, 1.0, 0.07), rgba(1.0, 1.0, 1.0, 0.1), None),
+    };
+    let f = font(12.0, Weight::Semibold);
+    let tw = text_width(&attributed(text, &f, &fg));
+    let text_x = if symbol.is_some() { 28.0 } else { 11.0 };
+    let w = text_x + tw + 11.0;
+    let v = shape_view(mtm, rect(0.0, 0.0, w, 26.0), &bg, 13.0);
+    if let Some(l) = v.layer() {
+        l.setBorderWidth(0.5);
+        l.setBorderColor(Some(&edge.CGColor()));
+    }
+    if let Some(sym) = symbol {
+        v.addSubview(&crate::ui::symbol_view(mtm, sym, 12.0, &fg, rect(9.0, 6.5, 13.0, 13.0), ""));
+    }
+    v.addSubview(&label(mtm, text, &f, &fg, rect(text_x, 5.0, tw + 2.0, 16.0)));
+    crate::ui::set_accessibility_label(&v, text);
+    (v, w)
+}
+
+/// A small tile filled with a vertical gradient (pane icons).
+fn gradient_tile(
+    mtm: MainThreadMarker,
+    frame: objc2_foundation::NSRect,
+    (a, b): ((u8, u8, u8), (u8, u8, u8)),
+    radius: f64,
+) -> Retained<FlippedView> {
+    let v = shape_view(mtm, frame, &rgba(0.0, 0.0, 0.0, 0.0), radius);
+    if let Some(l) = v.layer() {
+        let c = |t: (u8, u8, u8)| (f64::from(t.0) / 255.0, f64::from(t.1) / 255.0, f64::from(t.2) / 255.0, 1.0);
+        let g = crate::ui::gradient_layer(
+            &[c(a), c(b)],
+            objc2_foundation::NSPoint::new(0.5, 0.0),
+            objc2_foundation::NSPoint::new(0.5, 1.0),
+        );
+        g.setFrame(l.bounds());
+        l.setMasksToBounds(true);
+        l.addSublayer(&g);
+        l.setBorderWidth(0.5);
+        l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.22).CGColor()));
+    }
+    v
+}
+
+/// An uppercase, letter-spaced caption.
+fn caption(mtm: MainThreadMarker, text: &str, size: f64, frame: objc2_foundation::NSRect) -> Retained<NSTextField> {
+    let a = attributed_tracked(&text.to_uppercase(), &font(size, Weight::Semibold), &text_tertiary(), size * 0.08);
+    crate::ui::rich_label(mtm, &a, frame)
 }
 
 /// Lays out groups of rows top-to-bottom inside a pane.
@@ -150,20 +304,11 @@ impl Form<'_> {
 
     fn begin(&self, title: &str) {
         self.end();
-        self.y.set(self.y.get() + 6.0);
         if !title.is_empty() {
-            let h = label(
-                self.mtm,
-                title,
-                &font(12.0, Weight::Semibold),
-                &text_secondary(),
-                rect(CONTENT_PAD + 10.0, self.y.get(), GROUP_W, 15.0),
-            );
-            self.doc.addSubview(&h);
-            self.y.set(self.y.get() + 21.0);
+            self.doc.addSubview(&caption(self.mtm, title, 11.0, rect(CONTENT_PAD + 6.0, self.y.get(), GROUP_W, 14.0)));
+            self.y.set(self.y.get() + 22.0);
         }
-        let g =
-            shape_view(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, 0.0), &rgba(0.173, 0.173, 0.18, 1.0), 11.0);
+        let g = shape_view(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, 0.0), &card_bg(), 13.0);
         if let Some(l) = g.layer() {
             l.setBorderWidth(0.5);
             l.setBorderColor(Some(&hairline().CGColor()));
@@ -176,27 +321,26 @@ impl Form<'_> {
         if let Some((g, h)) = self.group.borrow_mut().take() {
             let f = g.frame();
             g.setFrame(rect(f.origin.x, f.origin.y, f.size.width, h));
-            self.y.set(f.origin.y + h + 16.0);
+            self.y.set(f.origin.y + h + 22.0);
         }
     }
 
     /// Footnote under the last group.
     fn note(&self, text: &str) {
         self.end();
-        let lines = (text_width(&attributed(text, &font(11.5, Weight::Regular), &text_secondary())) / (GROUP_W - 20.0))
-            .ceil()
-            .max(1.0);
-        let h = lines * 16.0;
+        let f = font(12.0, Weight::Regular);
+        let lines = (text_width(&attributed(text, &f, &text_tertiary())) / (GROUP_W - 16.0)).ceil().max(1.0);
+        let h = lines * 17.0;
         let l = crate::ui::wrapping_label(
             self.mtm,
             text,
-            &font(11.5, Weight::Regular),
-            &text_secondary(),
-            rect(CONTENT_PAD + 10.0, self.y.get() - 10.0, GROUP_W - 20.0, h),
+            &f,
+            &text_tertiary(),
+            rect(CONTENT_PAD + 8.0, self.y.get() - 14.0, GROUP_W - 16.0, h),
             4,
         );
         self.doc.addSubview(&l);
-        self.y.set(self.y.get() - 10.0 + h + 14.0);
+        self.y.set(self.y.get() - 14.0 + h + 22.0);
     }
 
     /// Append a row of `height` to the open group; returns (row view, width).
@@ -205,40 +349,40 @@ impl Form<'_> {
         let (group, y) = g.as_mut().expect("row outside a group");
         let row = FlippedView::new(self.mtm, rect(0.0, *y, GROUP_W, height));
         if *y > 0.0 {
-            row.addSubview(&shape_view(self.mtm, rect(14.0, 0.0, GROUP_W - 14.0, 0.5), &hairline(), 0.0));
+            row.addSubview(&shape_view(self.mtm, rect(16.0, 0.0, GROUP_W - 16.0, 0.5), &hairline(), 0.0));
         }
         group.addSubview(&row);
         *y += height;
         (row, GROUP_W)
     }
 
-    /// Title (and optional subtitle) on the left of a row; returns row height.
+    /// Row height for a title with an optional subtitle in `text_w` points.
     fn texts(&self, subtitle: Option<&str>, text_w: f64) -> f64 {
         let lines = subtitle.map_or(0.0, |s| {
-            (text_width(&attributed(s, &font(11.5, Weight::Regular), &text_secondary())) / text_w)
+            (text_width(&attributed(s, &font(12.0, Weight::Regular), &text_secondary())) / text_w)
                 .ceil()
                 .clamp(1.0, 3.0)
         });
-        if lines == 0.0 { 44.0 } else { 34.0 + lines * 15.0 }
+        if lines == 0.0 { ROW_H } else { 38.0 + lines * 16.0 }
     }
 
     fn put_texts(&self, row: &FlippedView, title: &str, subtitle: Option<&str>, text_w: f64, h: f64) {
         let has_sub = subtitle.is_some();
-        let ty = if has_sub { 9.0 } else { (h - 17.0) / 2.0 };
+        let ty = if has_sub { 10.0 } else { (h - 18.0) / 2.0 };
         row.addSubview(&label(
             self.mtm,
             title,
-            &font(13.0, Weight::Regular),
+            &font(13.5, Weight::Medium),
             &text_primary(),
-            rect(14.0, ty, text_w, 17.0),
+            rect(16.0, ty, text_w, 18.0),
         ));
         if let Some(s) = subtitle {
             let l = crate::ui::wrapping_label(
                 self.mtm,
                 s,
-                &font(11.5, Weight::Regular),
+                &font(12.0, Weight::Regular),
                 &text_secondary(),
-                rect(14.0, 27.0, text_w, h - 29.0),
+                rect(16.0, ty + 19.0, text_w, h - 38.0),
                 3,
             );
             row.addSubview(&l);
@@ -246,7 +390,7 @@ impl Form<'_> {
     }
 
     fn switch(&self, title: &str, subtitle: Option<&str>, value: bool, set: impl Fn(&mut Config, bool) + 'static) {
-        let text_w = GROUP_W - 90.0;
+        let text_w = GROUP_W - 96.0;
         let h = self.texts(subtitle, text_w);
         let (row, w) = self.row(h);
         self.put_texts(&row, title, subtitle, text_w, h);
@@ -259,7 +403,7 @@ impl Form<'_> {
         });
         let sw = NSSwitch::new(self.mtm);
         sw.setState(if value { NSControlStateValueOn } else { NSControlStateValueOff });
-        sw.setFrame(rect(w - 14.0 - 40.0, (h - 22.0) / 2.0, 40.0, 22.0));
+        sw.setFrame(rect(w - 16.0 - 40.0, (h - 22.0) / 2.0, 40.0, 22.0));
         // SAFETY: target kept alive by `targets`.
         unsafe {
             sw.setTarget(Some(t.as_any()));
@@ -270,11 +414,11 @@ impl Form<'_> {
     }
 
     fn popup(&self, title: &str, options: &[&str], selected: usize, set: impl Fn(&mut Config, usize) + 'static) {
-        let (row, w) = self.row(44.0);
-        self.put_texts(&row, title, None, w - 240.0, 44.0);
+        let (row, w) = self.row(ROW_H);
+        self.put_texts(&row, title, None, w - 250.0, ROW_H);
         let p = NSPopUpButton::initWithFrame_pullsDown(
             NSPopUpButton::alloc(self.mtm),
-            rect(w - 14.0 - 190.0, 9.0, 190.0, 26.0),
+            rect(w - 16.0 - 190.0, (ROW_H - 26.0) / 2.0, 190.0, 26.0),
             false,
         );
         for o in options {
@@ -307,11 +451,11 @@ impl Form<'_> {
         mono: bool,
         set: impl Fn(&mut Config, String) + 'static,
     ) {
-        let (row, w) = self.row(44.0);
-        self.put_texts(&row, title, None, w - 340.0, 44.0);
+        let (row, w) = self.row(ROW_H);
+        self.put_texts(&row, title, None, w - 350.0, ROW_H);
         let f = NSTextField::textFieldWithString(&ns(value), self.mtm);
         f.setPlaceholderString(Some(&ns(placeholder)));
-        f.setFrame(rect(w - 14.0 - 300.0, 11.0, 300.0, 22.0));
+        f.setFrame(rect(w - 16.0 - 300.0, (ROW_H - 24.0) / 2.0, 300.0, 24.0));
         f.setAlignment(NSTextAlignment::Right);
         if mono {
             f.setFont(Some(&objc2_app_kit::NSFont::monospacedSystemFontOfSize_weight(
@@ -339,8 +483,8 @@ impl Form<'_> {
     }
 
     fn slider(&self, title: &str, min: f64, max: f64, value: f64, set: impl Fn(&mut Config, f64) + 'static) {
-        let (row, w) = self.row(44.0);
-        self.put_texts(&row, title, None, w - 260.0, 44.0);
+        let (row, w) = self.row(ROW_H);
+        self.put_texts(&row, title, None, w - 270.0, ROW_H);
         let draft = self.draft.clone();
         let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
             if let Some(s) = sender.and_then(|s| s.downcast_ref::<NSSlider>()) {
@@ -361,52 +505,58 @@ impl Form<'_> {
         };
         s.setControlSize(NSControlSize::Small);
         s.setContinuous(false);
-        s.setFrame(rect(w - 14.0 - 220.0, 12.0, 220.0, 20.0));
+        s.setFrame(rect(w - 16.0 - 220.0, (ROW_H - 20.0) / 2.0, 220.0, 20.0));
         crate::ui::set_accessibility_label(&s, title);
         row.addSubview(&s);
     }
 
-    /// A row with a status word and buttons on the right.
+    /// A row with a status capsule and buttons on the right.
     fn action_row(
         &self,
         title: &str,
         subtitle: Option<&str>,
-        status: Option<(&str, Retained<NSColor>)>,
+        status: Option<(&str, Tone)>,
         buttons: Vec<RowButton<'_>>,
         leading_icon: Option<(&str, (u8, u8, u8))>,
     ) -> Vec<Retained<NSButton>> {
         let bw: Vec<f64> = buttons
             .iter()
             .map(|(t, _, _)| {
-                (text_width(&attributed(t, &font(13.0, Weight::Regular), &text_primary())) + 26.0).max(70.0)
+                (text_width(&attributed(t, &font(12.5, Weight::Regular), &text_primary())) + 26.0).max(70.0)
             })
             .collect();
-        let status_w = status
-            .as_ref()
-            .map_or(0.0, |(s, _)| text_width(&attributed(s, &font(12.5, Weight::Regular), &text_primary())) + 26.0);
-        let controls_w = bw.iter().sum::<f64>() + 8.0 * bw.len() as f64 + status_w;
-        let icon_w = if leading_icon.is_some() { 42.0 } else { 0.0 };
-        let text_w = GROUP_W - 28.0 - controls_w - icon_w;
-        let h = self.texts(subtitle, text_w).max(if leading_icon.is_some() { 52.0 } else { 44.0 });
+        let chip = status.map(|(t, tone)| chip_view(self.mtm, t, tone));
+        let chip_w = chip.as_ref().map_or(0.0, |(_, w)| w + 10.0);
+        let controls_w = bw.iter().sum::<f64>() + 8.0 * bw.len() as f64 + chip_w;
+        let icon_w = if leading_icon.is_some() { 46.0 } else { 0.0 };
+        let text_w = GROUP_W - 32.0 - controls_w - icon_w;
+        let h = self.texts(subtitle, text_w).max(if leading_icon.is_some() { 62.0 } else { ROW_H });
         let (row, w) = self.row(h);
         if let Some((sym, color)) = leading_icon {
-            let disc = shape_view(self.mtm, rect(14.0, (h - 30.0) / 2.0, 30.0, 30.0), &crate::ui::rgb8(color), 15.0);
+            let tile =
+                shape_view(self.mtm, rect(16.0, (h - 34.0) / 2.0, 34.0, 34.0), &rgba(0.047, 0.047, 0.055, 1.0), 10.0);
+            if let Some(l) = tile.layer() {
+                l.setBorderWidth(0.5);
+                l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.14).CGColor()));
+            }
+            let disc = shape_view(self.mtm, rect(6.0, 6.0, 22.0, 22.0), &crate::ui::rgb8(color), 11.0);
             disc.addSubview(&crate::ui::symbol_view(
                 self.mtm,
                 sym,
-                14.0,
+                12.0,
                 &NSColor::blackColor(),
-                rect(7.0, 7.0, 16.0, 16.0),
+                rect(4.0, 4.0, 14.0, 14.0),
                 title,
             ));
-            row.addSubview(&disc);
+            tile.addSubview(&disc);
+            row.addSubview(&tile);
             let inner = FlippedView::new(self.mtm, rect(icon_w, 0.0, w - icon_w, h));
             self.put_texts(&inner, title, subtitle, text_w, h);
             row.addSubview(&inner);
         } else {
             self.put_texts(&row, title, subtitle, text_w, h);
         }
-        let mut x = w - 14.0;
+        let mut x = w - 16.0;
         let mut made = Vec::new();
         for ((t, primary, f), width) in buttons.into_iter().zip(bw).rev() {
             x -= width;
@@ -414,35 +564,69 @@ impl Form<'_> {
             let b = crate::ui::text_button(self.mtm, t, &target, rect(x, (h - 24.0) / 2.0, width, 24.0));
             b.setControlSize(NSControlSize::Regular);
             if primary {
-                b.setBezelColor(Some(&NSColor::controlAccentColor()));
+                b.setBezelColor(Some(&accent()));
                 b.setKeyEquivalent(&ns(""));
             }
             row.addSubview(&b);
             made.push(b);
             x -= 8.0;
         }
-        if let Some((s, color)) = status {
-            let l = label(
-                self.mtm,
-                s,
-                &font(12.5, Weight::Regular),
-                &color,
-                rect(x - status_w + 18.0, (h - 16.0) / 2.0, status_w - 18.0, 16.0),
-            );
-            l.setAlignment(NSTextAlignment::Right);
-            row.addSubview(&l);
+        if let Some((chip, cw)) = chip {
+            chip.setFrameOrigin(objc2_foundation::NSPoint::new(x - cw - 2.0, (h - 26.0) / 2.0));
+            row.addSubview(&chip);
         }
         made
     }
 
+    /// A monospaced snippet in its own dark card, with a Copy button.
+    fn code_block(&self, title: &str, runs: &[(&str, Retained<NSColor>)], copy: Box<dyn Fn()>) {
+        self.end();
+        let lines = 1 + runs.iter().map(|(t, _)| t.matches('\n').count()).sum::<usize>();
+        let body_h = lines as f64 * 18.0 + 24.0;
+        let h = 34.0 + body_h;
+        let card =
+            shape_view(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, h), &rgba(0.039, 0.039, 0.047, 1.0), 12.0);
+        if let Some(l) = card.layer() {
+            l.setBorderWidth(0.5);
+            l.setBorderColor(Some(&hairline().CGColor()));
+        }
+        card.addSubview(&label(
+            self.mtm,
+            title,
+            &font(11.5, Weight::Regular),
+            &text_tertiary(),
+            rect(14.0, 9.0, GROUP_W - 120.0, 16.0),
+        ));
+        let target = self.targets.add(self.mtm, move |_| copy());
+        let b = crate::ui::text_button(self.mtm, "Copy", &target, rect(GROUP_W - 8.0 - 64.0, 5.0, 64.0, 24.0));
+        b.setControlSize(NSControlSize::Regular);
+        card.addSubview(&b);
+        card.addSubview(&shape_view(self.mtm, rect(0.0, 34.0, GROUP_W, 0.5), &hairline(), 0.0));
+        let mono = objc2_app_kit::NSFont::monospacedSystemFontOfSize_weight(11.5, crate::ui::weight(Weight::Regular));
+        let parts: Vec<(&str, &objc2_app_kit::NSFont, &NSColor)> =
+            runs.iter().map(|(t, c)| (*t, &*mono, &**c)).collect();
+        let body = crate::ui::wrapping_label(
+            self.mtm,
+            "",
+            &mono,
+            &text_primary(),
+            rect(14.0, 46.0, GROUP_W - 28.0, lines as f64 * 18.0),
+            0,
+        );
+        body.setAttributedStringValue(&crate::ui::attributed_parts(&parts));
+        card.addSubview(&body);
+        self.doc.addSubview(&card);
+        self.y.set(self.y.get() + h + 22.0);
+    }
+
     fn permission(&self, p: Permission) {
         let state = permissions::state(p);
-        let (word, color) = match state {
-            PermissionState::Granted => ("Allowed", NSColor::systemGreenColor()),
-            PermissionState::NotRequired => ("Not required", text_secondary()),
-            PermissionState::Denied => ("Not allowed", NSColor::systemOrangeColor()),
-            PermissionState::NotDetermined => ("Not asked yet", text_secondary()),
-            PermissionState::Unknown => ("Unknown", text_secondary()),
+        let (word, tone) = match state {
+            PermissionState::Granted => ("Allowed", Tone::Ok),
+            PermissionState::NotRequired => ("Not required", Tone::Neutral),
+            PermissionState::Denied => ("Not allowed", Tone::Warn),
+            PermissionState::NotDetermined => ("Not asked yet", Tone::Neutral),
+            PermissionState::Unknown => ("Unknown", Tone::Neutral),
         };
         let mut buttons: Vec<RowButton<'_>> = Vec::new();
         if !matches!(state, PermissionState::Granted | PermissionState::NotRequired) {
@@ -458,12 +642,54 @@ impl Form<'_> {
         } else if state == PermissionState::Granted {
             buttons.push(("Open Settings", false, Box::new(move || permissions::open_settings(p))));
         }
-        self.action_row(p.title(), Some(p.rationale()), Some((word, color)), buttons, None);
+        self.action_row(p.title(), Some(p.rationale()), Some((word, tone)), buttons, None);
     }
 }
 
 fn index_of<T: PartialEq>(items: &[T], v: &T) -> usize {
     items.iter().position(|x| x == v).unwrap_or(0)
+}
+
+/// The sidebar's rows and captions, placed (and re-placed by search) together.
+struct SideRows {
+    items: Vec<(Pane, Retained<FlippedView>)>,
+    captions: Vec<Retained<NSTextField>>,
+}
+
+const NAV_TOP: f64 = 128.0;
+const NAV_ITEM_H: f64 = 32.0;
+
+impl SideRows {
+    /// Lay out the captions and the rows that match `query`.
+    fn place(&self, query: &str) {
+        let q = query.to_lowercase();
+        let mut y = NAV_TOP;
+        for (si, (_, panes)) in Pane::SECTIONS.iter().enumerate() {
+            let hits: Vec<Pane> = panes
+                .iter()
+                .copied()
+                .filter(|p| q.is_empty() || p.title().to_lowercase().contains(&q) || p.keywords().contains(&q))
+                .collect();
+            let cap = &self.captions[si];
+            cap.setHidden(hits.is_empty());
+            if hits.is_empty() {
+                continue;
+            }
+            y += 14.0;
+            cap.setFrameOrigin(objc2_foundation::NSPoint::new(22.0, y));
+            y += 20.0;
+            for (pane, view) in &self.items {
+                if panes.contains(pane) {
+                    let hit = hits.contains(pane);
+                    view.setHidden(!hit);
+                    if hit {
+                        view.setFrameOrigin(objc2_foundation::NSPoint::new(12.0, y));
+                        y += NAV_ITEM_H + 2.0;
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl SettingsWindow {
@@ -485,7 +711,7 @@ impl SettingsWindow {
         window.setTitle(&ns("Notchisland Settings"));
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
-        window.setBackgroundColor(Some(&rgba(0.118, 0.118, 0.125, 1.0)));
+        window.setBackgroundColor(Some(&ink()));
         // SAFETY: AppKit's appearance-name constant.
         if let Some(dark) = NSAppearance::appearanceNamed(unsafe { objc2_app_kit::NSAppearanceNameDarkAqua }) {
             window.setAppearance(Some(&dark));
@@ -514,38 +740,29 @@ impl SettingsWindow {
     pub fn show(&self, config: &Config) {
         let mtm = MainThreadMarker::from(&*self.window);
         self.targets.clear();
-        // The content draws its own dark ground (it must not depend on the
-        // window background, which offscreen renders and some transitions skip).
-        let root = shape_view(mtm, rect(0.0, 0.0, WIDTH, HEIGHT), &rgba(0.118, 0.118, 0.125, 1.0), 0.0);
+        // The content draws its own ground (it must not depend on the window
+        // background, which offscreen renders and some transitions skip).
+        let root = shape_view(mtm, rect(0.0, 0.0, WIDTH, HEIGHT), &ink(), 0.0);
         root.addSubview(&self.sidebar(mtm));
 
-        // ── pane ──
         let pane = self.pane.get();
-        let title = label(
-            mtm,
-            pane.title(),
-            &font(15.0, Weight::Semibold),
-            &text_primary(),
-            rect(SIDEBAR, 14.0, WIDTH - SIDEBAR, 20.0),
-        );
-        title.setAlignment(NSTextAlignment::Center);
-        root.addSubview(&title);
+        self.header(mtm, &root, pane, config);
         let doc = FlippedView::new(mtm, rect(0.0, 0.0, WIDTH - SIDEBAR, 2400.0));
         let form = Form {
             mtm,
             doc: &doc,
-            y: Cell::new(8.0),
+            y: Cell::new(22.0),
             targets: &self.targets,
             draft: Rc::new(RefCell::new(config.clone())),
             group: RefCell::new(None),
         };
         build_pane(&form, pane, config);
         form.end();
-        let total = form.y.get() + 12.0;
-        let view_h = HEIGHT - 48.0;
+        let total = form.y.get() + 6.0;
+        let view_h = HEIGHT - HEADER_H;
         doc.setFrame(rect(0.0, 0.0, WIDTH - SIDEBAR, total.max(view_h)));
         let scroll =
-            NSScrollView::initWithFrame(NSScrollView::alloc(mtm), rect(SIDEBAR, 48.0, WIDTH - SIDEBAR, view_h));
+            NSScrollView::initWithFrame(NSScrollView::alloc(mtm), rect(SIDEBAR, HEADER_H, WIDTH - SIDEBAR, view_h));
         scroll.setDrawsBackground(false);
         scroll.setHasVerticalScroller(true);
         scroll.setAutohidesScrollers(true);
@@ -562,62 +779,109 @@ impl SettingsWindow {
         self.window.makeKeyAndOrderFront(None);
     }
 
+    /// The pane's icon tile, title, one-line description and status chip.
+    fn header(&self, mtm: MainThreadMarker, root: &FlippedView, pane: Pane, c: &Config) {
+        let x0 = SIDEBAR + CONTENT_PAD;
+        let tile = gradient_tile(mtm, rect(x0, 28.0, 40.0, 40.0), pane.gradient(), 11.0);
+        tile.addSubview(&crate::ui::symbol_view(
+            mtm,
+            pane.icon().0,
+            20.0,
+            &NSColor::whiteColor(),
+            rect(8.0, 8.0, 24.0, 24.0),
+            "",
+        ));
+        root.addSubview(&tile);
+        let chip = pane.chip(c).map(|(t, tone)| chip_view(mtm, &t, tone));
+        let chip_w = chip.as_ref().map_or(0.0, |(_, w)| w + 16.0);
+        let text_x = x0 + 54.0;
+        let text_w = WIDTH - CONTENT_PAD - text_x - chip_w;
+        root.addSubview(&label(
+            mtm,
+            pane.title(),
+            &font(24.0, Weight::Semibold),
+            &text_primary(),
+            rect(text_x, 26.0, text_w, 30.0),
+        ));
+        root.addSubview(&label(
+            mtm,
+            pane.blurb(),
+            &font(13.0, Weight::Regular),
+            &text_secondary(),
+            rect(text_x, 57.0, text_w, 17.0),
+        ));
+        if let Some((chip, w)) = chip {
+            chip.setFrameOrigin(objc2_foundation::NSPoint::new(WIDTH - CONTENT_PAD - w, 35.0));
+            root.addSubview(&chip);
+        }
+        root.addSubview(&shape_view(mtm, rect(SIDEBAR, HEADER_H - 0.5, WIDTH - SIDEBAR, 0.5), &hairline(), 0.0));
+    }
+
     fn sidebar(&self, mtm: MainThreadMarker) -> Retained<NSView> {
-        let side = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), rect(0.0, 0.0, SIDEBAR, HEIGHT));
-        side.setMaterial(NSVisualEffectMaterial::Sidebar);
-        side.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-        let inner = FlippedView::new(mtm, rect(0.0, 0.0, SIDEBAR, HEIGHT));
-        inner.addSubview(&shape_view(mtm, rect(SIDEBAR - 0.5, 0.0, 0.5, HEIGHT), &hairline(), 0.0));
+        let side = shape_view(mtm, rect(0.0, 0.0, SIDEBAR, HEIGHT), &side_bg(), 0.0);
+        side.addSubview(&shape_view(mtm, rect(SIDEBAR - 0.5, 0.0, 0.5, HEIGHT), &hairline(), 0.0));
+
+        // Brand: the app icon (it carries its own transparent margin) and name.
+        let icon = NSImageView::new(mtm);
+        icon.setImage(objc2_app_kit::NSApplication::sharedApplication(mtm).applicationIconImage().as_deref());
+        icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
+        icon.setFrame(rect(12.0, 40.0, 44.0, 44.0));
+        side.addSubview(&icon);
+        side.addSubview(&label(
+            mtm,
+            "Notchisland",
+            &font(14.0, Weight::Semibold),
+            &text_primary(),
+            rect(62.0, 49.0, SIDEBAR - 74.0, 18.0),
+        ));
+        side.addSubview(&label(
+            mtm,
+            "Settings",
+            &font(11.5, Weight::Regular),
+            &text_secondary(),
+            rect(62.0, 67.0, SIDEBAR - 74.0, 15.0),
+        ));
 
         // Search filters the pane list in place.
-        let items: SidebarItems = Rc::default();
-        let search = NSSearchField::initWithFrame(NSSearchField::alloc(mtm), rect(12.0, 46.0, SIDEBAR - 24.0, 28.0));
-        search.setPlaceholderString(Some(&ns("Search")));
+        let search = NSSearchField::initWithFrame(NSSearchField::alloc(mtm), rect(14.0, 90.0, SIDEBAR - 28.0, 28.0));
+        search.setPlaceholderString(Some(&ns("Search settings")));
         crate::ui::set_accessibility_label(&search, "Search settings");
-        let it = items.clone();
-        let t = self.targets.add(mtm, move |sender: Option<&AnyObject>| {
-            let Some(f) = sender.and_then(|s| s.downcast_ref::<NSTextField>()) else { return };
-            let q = f.stringValue().to_string().to_lowercase();
-            let mut y = 86.0;
-            for (pane, v) in it.borrow().iter() {
-                let hit = q.is_empty() || pane.title().to_lowercase().contains(&q) || pane.keywords().contains(&q);
-                v.setHidden(!hit);
-                if hit {
-                    v.setFrameOrigin(objc2_foundation::NSPoint::new(10.0, y));
-                    y += 32.0;
-                }
-            }
-        });
-        // SAFETY: target kept alive by `targets`.
-        unsafe {
-            search.setTarget(Some(t.as_any()));
-            search.setAction(Some(ActionTarget::action()));
-        }
-        inner.addSubview(&search);
 
         let current = self.pane.get();
-        for (i, pane) in Pane::ALL.into_iter().enumerate() {
+        let mut rows = SideRows { items: Vec::new(), captions: Vec::new() };
+        for (cap, _) in Pane::SECTIONS {
+            let c = caption(mtm, cap, 10.5, rect(22.0, 0.0, SIDEBAR - 44.0, 14.0));
+            side.addSubview(&c);
+            rows.captions.push(c);
+        }
+        for pane in Pane::ALL {
             let selected = pane == current;
-            let bg = if selected { NSColor::controlAccentColor() } else { rgba(1.0, 1.0, 1.0, 0.0) };
-            let item = shape_view(mtm, rect(10.0, 86.0 + i as f64 * 32.0, SIDEBAR - 20.0, 30.0), &bg, 7.0);
-            let (sym, color) = pane.icon();
-            let tile = shape_view(mtm, rect(8.0, 5.0, 20.0, 20.0), &crate::ui::rgb8(color), 5.0);
+            let bg = if selected { rgba(0.298, 0.553, 1.0, 0.16) } else { rgba(1.0, 1.0, 1.0, 0.0) };
+            let item = shape_view(mtm, rect(12.0, 0.0, SIDEBAR - 24.0, NAV_ITEM_H), &bg, 9.0);
+            if selected {
+                if let Some(l) = item.layer() {
+                    l.setBorderWidth(0.5);
+                    l.setBorderColor(Some(&rgba(0.486, 0.667, 1.0, 0.38).CGColor()));
+                }
+            }
+            let tile = gradient_tile(mtm, rect(9.0, 5.0, 22.0, 22.0), pane.gradient(), 6.0);
             tile.addSubview(&crate::ui::symbol_view(
                 mtm,
-                sym,
-                10.0,
+                pane.icon().0,
+                11.0,
                 &NSColor::whiteColor(),
-                rect(3.0, 3.0, 14.0, 14.0),
+                rect(4.0, 4.0, 14.0, 14.0),
                 "",
             ));
             item.addSubview(&tile);
-            let fg = if selected { NSColor::whiteColor() } else { text_primary() };
+            let (fg, weight) =
+                if selected { (NSColor::whiteColor(), Weight::Semibold) } else { (text_primary(), Weight::Regular) };
             item.addSubview(&label(
                 mtm,
                 pane.title(),
-                &font(13.0, Weight::Regular),
+                &font(13.0, weight),
                 &fg,
-                rect(37.0, 6.0, SIDEBAR - 60.0, 17.0),
+                rect(41.0, 7.0, SIDEBAR - 24.0 - 52.0, 17.0),
             ));
             let pc = self.pane.clone();
             let t = self.targets.add(mtm, move |_| {
@@ -625,16 +889,56 @@ impl SettingsWindow {
                 // Deferred: rebuilding now would free this button's own target.
                 dispatch2::DispatchQueue::main().exec_async(app::show_settings);
             });
-            let b = crate::ui::click_overlay(mtm, &t, rect(0.0, 0.0, SIDEBAR - 20.0, 30.0), pane.title());
+            let b = crate::ui::click_overlay(mtm, &t, rect(0.0, 0.0, SIDEBAR - 24.0, NAV_ITEM_H), pane.title());
             item.addSubview(&b);
             if selected {
                 // SAFETY: accessibility setter on NSView.
                 let _: () = unsafe { objc2::msg_send![&*b, setAccessibilitySelected: true] };
             }
-            inner.addSubview(&item);
-            items.borrow_mut().push((pane, item));
+            side.addSubview(&item);
+            rows.items.push((pane, item));
         }
-        side.addSubview(&inner);
+        rows.place("");
+        let rows = Rc::new(rows);
+        let r = rows.clone();
+        let t = self.targets.add(mtm, move |sender: Option<&AnyObject>| {
+            let Some(f) = sender.and_then(|s| s.downcast_ref::<NSTextField>()) else { return };
+            r.place(&f.stringValue().to_string());
+        });
+        // SAFETY: target kept alive by `targets`.
+        unsafe {
+            search.setTarget(Some(t.as_any()));
+            search.setAction(Some(ActionTarget::action()));
+        }
+        side.addSubview(&search);
+
+        // Footer: provider health and the version.
+        side.addSubview(&shape_view(mtm, rect(14.0, HEIGHT - 46.0, SIDEBAR - 28.0, 0.5), &hairline(), 0.0));
+        let (down, total) = app::with_controller(|c| {
+            let snap = c.current_snapshot();
+            (snap.providers.values().filter(|s| !s.is_healthy()).count(), snap.providers.len())
+        })
+        .unwrap_or((0, 0));
+        let ok = down == 0 || total == 0;
+        let dot = if ok { rgba(0.188, 0.82, 0.345, 1.0) } else { rgba(1.0, 0.624, 0.039, 1.0) };
+        side.addSubview(&shape_view(mtm, rect(20.0, HEIGHT - 28.0, 7.0, 7.0), &dot, 3.5));
+        let status = if ok { "All providers running".to_owned() } else { format!("{down} need attention") };
+        side.addSubview(&label(
+            mtm,
+            &status,
+            &font(11.5, Weight::Regular),
+            &text_secondary(),
+            rect(34.0, HEIGHT - 32.0, SIDEBAR - 100.0, 15.0),
+        ));
+        let ver = label(
+            mtm,
+            concat!("v", env!("CARGO_PKG_VERSION")),
+            &font(11.5, Weight::Regular),
+            &text_tertiary(),
+            rect(SIDEBAR - 14.0 - 56.0, HEIGHT - 32.0, 56.0, 15.0),
+        );
+        ver.setAlignment(NSTextAlignment::Right);
+        side.addSubview(&ver);
         Retained::into_super(side)
     }
 }
@@ -798,20 +1102,24 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 None,
             );
             let port = c.agents.http_port;
-            form.action_row(
-                "Test the webhook",
-                Some("Copies a curl command that posts a sample event to the notch."),
-                None,
-                vec![(
-                    "Copy curl",
-                    false,
-                    Box::new(move || {
-                        crate::sharing::copy_text(&format!(
-                            "curl -s -X POST http://127.0.0.1:{port}/v1/notify -H 'Content-Type: application/json' -d '{{\"source\":\"agent\",\"kind\":\"task_finished\",\"title\":\"Hello from NotchForge\"}}'"
-                        ));
-                    }),
-                )],
-                None,
+            let cmd = format!(
+                "curl -s -X POST http://127.0.0.1:{port}/v1/notify -H 'Content-Type: application/json' -d '{{\"source\":\"claude\",\"kind\":\"task_finished\",\"title\":\"Tests passed\"}}'"
+            );
+            let (blue, green) = (rgba(0.498, 0.69, 1.0, 1.0), rgba(0.482, 0.878, 0.627, 1.0));
+            let l1 = format!(" -s -X POST http://127.0.0.1:{port}/v1/notify \\\n  -H ");
+            let json = "'{\"source\":\"claude\",\"kind\":\"task_finished\",\"title\":\"Tests passed\"}'";
+            form.code_block(
+                "Send a test event",
+                &[
+                    ("curl", blue),
+                    (&l1, text_primary()),
+                    ("'Content-Type: application/json'", green.clone()),
+                    (" \\\n  -d ", text_primary()),
+                    (json, green),
+                ],
+                Box::new(move || {
+                    crate::sharing::copy_text(&cmd);
+                }),
             );
             form.note(&format!(
                 "Agents POST JSON to http://127.0.0.1:{port}/v1/notify. The README has recipes for Claude Code, Codex, OpenCode, Zed and Cursor."
@@ -868,11 +1176,8 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             form.begin("Spotify playlists");
             let signed_in = app::spotify_signed_in();
             let has_id = !c.media.spotify_client_id.is_empty();
-            let (status, status_color) = if signed_in {
-                ("Connected", NSColor::systemGreenColor())
-            } else {
-                ("Not connected", text_secondary())
-            };
+            let (status, status_tone) =
+                if signed_in { ("Connected", Tone::Ok) } else { ("Not connected", Tone::Neutral) };
             let button: RowButton<'_> = if signed_in {
                 (
                     "Disconnect",
@@ -896,7 +1201,7 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 } else {
                     "Sign in to list your playlists."
                 }),
-                Some((status, status_color)),
+                Some((status, status_tone)),
                 vec![button],
                 Some(("waveform", (30, 215, 96))),
             );
