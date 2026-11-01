@@ -926,35 +926,36 @@ impl MediaPage {
                 break;
             }
             let chip = shape_view(self.mtm, rect(x, y, cw, 30.0), &rgba(1.0, 1.0, 1.0, 0.07), 15.0);
-            let icon = crate::views::app_icon_view(self.mtm, rect(7.0, 6.0, 18.0, 18.0));
-            match icons::source_icon(s.bundle_id.as_deref(), s.app_path.as_deref()) {
-                Some(img) => icon.setImage(Some(&img)),
-                None => {
-                    // Players without an installed icon get their brand tile (as on the board).
-                    let brand = match s.bundle_id.as_deref() {
-                        Some("com.spotify.client") => Some(MediaPlayer::Spotify.color()),
-                        Some("com.apple.Music") => Some(MediaPlayer::Music.color()),
-                        _ => None,
-                    };
-                    match brand {
-                        Some(c) => {
-                            icon.setImage(crate::ui::symbol_image("music.note", 10.0, &s.name).as_deref());
-                            icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleNone);
-                            icon.setContentTintColor(Some(&objc2_app_kit::NSColor::whiteColor()));
-                            icon.setWantsLayer(true);
-                            if let Some(l) = icon.layer() {
-                                l.setBackgroundColor(Some(&crate::ui::rgb8(c).CGColor()));
-                                l.setCornerRadius(5.0);
-                            }
-                        }
-                        None => {
-                            icon.setImage(crate::ui::symbol_image("app.fill", 12.0, &s.name).as_deref());
-                            icon.setContentTintColor(Some(&p.secondary));
+            let slot = rect(7.0, 6.0, 18.0, 18.0);
+            let boxed = icons::source_icon(s.bundle_id.as_deref(), s.app_path.as_deref())
+                .and_then(|img| crate::ui::image_box(self.mtm, slot, &img));
+            if let Some(b) = boxed {
+                chip.addSubview(&b);
+            } else if s.bundle_id.as_deref() == Some("com.spotify.client") {
+                // The board's Spotify tile: green, with the black mark.
+                let tile = shape_view(self.mtm, slot, &crate::ui::rgb8(MediaPlayer::Spotify.color()), 5.0);
+                tile.addSubview(&crate::ui::spotify_mark(self.mtm, rect(3.0, 3.0, 12.0, 12.0)));
+                chip.addSubview(&tile);
+            } else {
+                let icon = crate::views::app_icon_view(self.mtm, slot);
+                match s.bundle_id.as_deref() {
+                    Some("com.apple.Music") => {
+                        icon.setImage(crate::ui::symbol_image("music.note", 10.0, &s.name).as_deref());
+                        icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleNone);
+                        icon.setContentTintColor(Some(&objc2_app_kit::NSColor::whiteColor()));
+                        icon.setWantsLayer(true);
+                        if let Some(l) = icon.layer() {
+                            l.setBackgroundColor(Some(&crate::ui::rgb8(MediaPlayer::Music.color()).CGColor()));
+                            l.setCornerRadius(5.0);
                         }
                     }
+                    _ => {
+                        icon.setImage(crate::ui::symbol_image("app.fill", 12.0, &s.name).as_deref());
+                        icon.setContentTintColor(Some(&p.secondary));
+                    }
                 }
+                chip.addSubview(&icon);
             }
-            chip.addSubview(&icon);
             chip.addSubview(&rich_label(self.mtm, &text, rect(31.0, 7.0, cw - 38.0, 16.0)));
             if let Some(b) = s.bundle_id.clone() {
                 let t = self.source_targets.add(self.mtm, move |_| glue::activate_app(&b));

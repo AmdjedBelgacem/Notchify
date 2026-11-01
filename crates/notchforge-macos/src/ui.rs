@@ -496,6 +496,22 @@ pub fn set_notch_flare(layer: &objc2_quartz_core::CAShapeLayer, e: f64, left: bo
     layer.setPath(Some(&path));
 }
 
+/// A plain view that shows `img` through its layer's contents. Unlike an
+/// `NSImageView` nested in layer-backed views, this draws in every context
+/// (offscreen renders included).
+pub fn image_box(mtm: MainThreadMarker, frame: NSRect, img: &objc2_app_kit::NSImage) -> Option<Retained<FlippedView>> {
+    // SAFETY: null rect / context / hints are the documented defaults.
+    let cg = unsafe { img.CGImageForProposedRect_context_hints(std::ptr::null_mut(), None, None) }?;
+    let v = FlippedView::new(mtm, frame);
+    v.setWantsLayer(true);
+    let l = v.layer()?;
+    // SAFETY: a CGImage is a valid CALayer contents object.
+    let obj = unsafe { &*(&*cg as *const objc2_core_graphics::CGImage as *const AnyObject) };
+    unsafe { l.setContents(Some(obj)) };
+    l.setContentsGravity(&ns("resizeAspect"));
+    Some(v)
+}
+
 /// The board's Spotify mark: three black arcs, 14 pt square (drawn for the
 /// green disc behind it).
 pub fn spotify_mark(mtm: MainThreadMarker, frame: NSRect) -> Retained<FlippedView> {
