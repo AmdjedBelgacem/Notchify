@@ -1110,14 +1110,24 @@ impl SettingsWindow {
             &status,
             &font(11.5, Weight::Regular),
             &text_secondary(),
-            rect(34.0, HEIGHT - 32.0, SIDEBAR - 100.0, 15.0),
+            rect(34.0, HEIGHT - 32.0, SIDEBAR - 160.0, 15.0),
         ));
+        // Version plus the bundle's build number (the commit count bundle.sh
+        // stamps), so it is clear which build is running.
+        let build = objc2_foundation::NSBundle::mainBundle()
+            .objectForInfoDictionaryKey(&ns("CFBundleVersion"))
+            .and_then(|v| v.downcast::<objc2_foundation::NSString>().ok())
+            .map(|v| v.to_string());
+        let ver_text = match build {
+            Some(b) => format!("v{} · build {b}", env!("CARGO_PKG_VERSION")),
+            None => concat!("v", env!("CARGO_PKG_VERSION")).to_owned(),
+        };
         let ver = label(
             mtm,
-            concat!("v", env!("CARGO_PKG_VERSION")),
+            &ver_text,
             &font(11.5, Weight::Regular),
             &text_tertiary(),
-            rect(SIDEBAR - 14.0 - 56.0, HEIGHT - 32.0, 56.0, 15.0),
+            rect(SIDEBAR - 14.0 - 110.0, HEIGHT - 32.0, 110.0, 15.0),
         );
         ver.setAlignment(NSTextAlignment::Right);
         side.addSubview(&ver);
