@@ -1149,9 +1149,9 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             form.note("Forecasts come from Open-Meteo. “auto” uses your approximate location.");
         }
         Pane::Media => {
-            form.begin("Show");
+            form.begin("Beside the notch");
             form.switch(
-                "What's playing beside the notch",
+                "Now playing beside the notch",
                 Some("Cover on the left, an equaliser on the right"),
                 c.media.show_in_wings,
                 |cfg, on| cfg.media.show_in_wings = on,
@@ -1175,7 +1175,7 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 index_of(&polls, &c.media.poll_seconds),
                 move |cfg, i| cfg.media.poll_seconds = polls[i],
             );
-            form.begin("Spotify playlists");
+            form.begin("Spotify");
             let signed_in = app::spotify_signed_in();
             let has_id = !c.media.spotify_client_id.is_empty();
             let (status, status_tone) =
