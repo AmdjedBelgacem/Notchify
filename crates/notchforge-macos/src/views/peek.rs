@@ -144,7 +144,10 @@ impl PeekView {
             NotificationKind::NeedsInput => format!("{} needs your input", n.app.display_name),
             NotificationKind::TaskFinished => format!("{} finished", n.app.display_name),
             NotificationKind::Error => format!("{} hit an error", n.app.display_name),
-            NotificationKind::Authorization => format!("{} wants access", n.app.display_name),
+            NotificationKind::Authorization => match n.auth_target() {
+                Some(AuthTarget::Spotify) => format!("{} sign-in", n.app.display_name),
+                _ => format!("{} wants access", n.app.display_name),
+            },
             _ => n.app.display_name.clone(),
         };
         let color = if urgent { rgba(1.0, 0.70, 0.25, 1.0) } else { p.secondary.clone() };

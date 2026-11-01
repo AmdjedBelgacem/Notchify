@@ -665,6 +665,9 @@ impl Controller {
             content.setHidden(false);
             island.addSubview(content);
             window.setContentView(Some(&island));
+            // On screen (far outside every display, never key) so layer-backed
+            // views are drawn the way they are in the real panel.
+            window.orderFrontRegardless();
             window.displayIfNeeded();
             objc2_quartz_core::CATransaction::flush();
             render(name, &island, s.width, s.height);
