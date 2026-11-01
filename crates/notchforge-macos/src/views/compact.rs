@@ -146,7 +146,7 @@ impl CompactView {
         }
         let battery_glyph_host = FlippedView::new(mtm, rect(12.0, 14.0, 28.0, 13.0));
         let accessory_icon =
-            symbol_view(mtm, "airpodspro", 12.0, &white(0.6), rect(col - 12.0 - 16.0, 13.0, 16.0, 15.0), "Accessory");
+            symbol_view(mtm, "airpods", 12.0, &white(0.6), rect(col - 12.0 - 16.0, 13.0, 16.0, 15.0), "Accessory");
         let battery_pct =
             label(mtm, "--", &mono_digits(26.0, Weight::Semibold), &p.primary, rect(12.0, ch - 57.0, col - 18.0, 30.0));
         let battery_detail =

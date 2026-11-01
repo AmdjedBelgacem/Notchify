@@ -47,6 +47,20 @@ jobs:
           # CI images enable "Reduce motion"; force springs on so the test measures them.
           printf '[appearance]\nreduced_motion = "never"\n' > "$NOTCHFORGE_HOME/config.toml"
           dist/NotchForge.app/Contents/MacOS/notchforge --self-test "$PWD/selftest" -v
+      - name: Design boards rendered on macOS (SF Pro reference for the self-test renders)
+        if: always()
+        timeout-minutes: 5
+        run: |
+          CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+          if [ ! -x "$CHROME" ]; then echo "Chrome not installed on this image; skipping"; exit 0; fi
+          mkdir -p selftest/boards
+          for b in Main:1200,600 Overview:1200,600 Hover:1200,340 Peek:1200,240; do
+            n=${b%%:*}; size=${b#*:}
+            "$CHROME" --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=2 \
+              --window-size="$size" --screenshot="$PWD/selftest/boards/$n.png" "file://$PWD/design/boards/$n.html"
+            base64 -i "selftest/boards/$n.png" | tr -d '\n' | fold -w 12000 \
+              | awk -v n="$n" '{print "NFPNG board-" n " " NR-1 " " $0}'
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:

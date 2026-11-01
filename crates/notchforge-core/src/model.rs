@@ -211,7 +211,7 @@ pub enum DeviceKind {
 impl DeviceKind {
     pub fn symbol(self) -> &'static str {
         match self {
-            DeviceKind::AirPods => "airpodspro",
+            DeviceKind::AirPods => "airpods",
             DeviceKind::Headphones => "headphones",
             DeviceKind::Keyboard => "keyboard",
             DeviceKind::Mouse => "magicmouse",
@@ -535,7 +535,6 @@ impl AudioDevice {
         let n = self.name.to_ascii_lowercase();
         match self.transport {
             AudioTransport::Bluetooth if n.contains("airpods max") => "airpodsmax",
-            AudioTransport::Bluetooth if n.contains("airpods pro") => "airpodspro",
             AudioTransport::Bluetooth if n.contains("airpods") => "airpods",
             AudioTransport::Bluetooth if n.contains("homepod") => "homepod.fill",
             AudioTransport::Bluetooth => "headphones",
@@ -1000,7 +999,7 @@ mod tests {
         };
         assert_eq!(dev.transport, AudioTransport::Bluetooth);
         assert_eq!(dev.capabilities(), "Bluetooth · 48 kHz · 24-bit · Stereo");
-        assert_eq!(dev.symbol(), "airpodspro");
+        assert_eq!(dev.symbol(), "airpods");
         assert_eq!(format_khz(44_100.0), "44.1 kHz");
         let state = AudioState {
             devices: vec![dev],
