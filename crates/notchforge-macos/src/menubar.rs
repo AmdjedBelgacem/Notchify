@@ -61,6 +61,21 @@ fn menu_item(
 /// The status-bar glyph: a bar with a notch, plus an orange dot when unread.
 fn notch_glyph(unread: bool) -> Retained<NSImage> {
     use objc2_app_kit::NSBezierPath;
+    // The app's logo, with the orange dot when something is unread.
+    if let Some(logo) = crate::icons::app_logo() {
+        let size = objc2_foundation::NSSize::new(19.0, 19.0);
+        let block = block2::RcBlock::new(move |_r: objc2_foundation::NSRect| -> objc2::runtime::Bool {
+            logo.drawInRect(rect(0.0, 0.0, 19.0, 19.0));
+            if unread {
+                rgba(1.0, 0.62, 0.04, 1.0).setFill();
+                NSBezierPath::bezierPathWithOvalInRect(rect(12.0, 12.0, 7.0, 7.0)).fill();
+            }
+            objc2::runtime::Bool::YES
+        });
+        let img = NSImage::imageWithSize_flipped_drawingHandler(size, false, &block);
+        img.setTemplate(false);
+        return img;
+    }
     let size = objc2_foundation::NSSize::new(22.0, 15.0);
     let block = block2::RcBlock::new(move |_r: objc2_foundation::NSRect| -> objc2::runtime::Bool {
         NSColor::blackColor().setFill();

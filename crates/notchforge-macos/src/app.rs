@@ -194,6 +194,32 @@ pub fn alert(title: &str, message: &str) {
     alert.runModal();
 }
 
+/// Modal text prompt: `Some(text)` on OK with a non-empty answer.
+pub fn ask_text(title: &str, message: &str, placeholder: &str, ok: &str) -> Option<String> {
+    let mtm = MainThreadMarker::new()?;
+    let alert = NSAlert::new(mtm);
+    alert.setMessageText(&ns(title));
+    alert.setInformativeText(&ns(message));
+    alert.addButtonWithTitle(&ns(ok));
+    alert.addButtonWithTitle(&ns("Cancel"));
+    let field = objc2_app_kit::NSTextField::initWithFrame(
+        <objc2_app_kit::NSTextField as objc2::MainThreadOnly>::alloc(mtm),
+        objc2_foundation::NSRect::new(
+            objc2_foundation::NSPoint::new(0.0, 0.0),
+            objc2_foundation::NSSize::new(320.0, 24.0),
+        ),
+    );
+    field.setPlaceholderString(Some(&ns(placeholder)));
+    alert.setAccessoryView(Some(&field));
+    crate::app::activate(mtm);
+    let first = objc2_app_kit::NSAlertFirstButtonReturn;
+    if alert.runModal() != first {
+        return None;
+    }
+    let text = field.stringValue().to_string().trim().to_owned();
+    (!text.is_empty()).then_some(text)
+}
+
 /// Modal confirmation that resolves to "no" after `secs` seconds.
 pub fn confirm_with_timeout(title: &str, message: &str, yes: &str, no: &str, secs: u64) -> bool {
     let Some(mtm) = MainThreadMarker::new() else { return false };
@@ -269,6 +295,11 @@ pub fn run(boot: Boot) -> Result<(), String> {
     let app = NSApplication::sharedApplication(mtm);
     // Accessory: no Dock icon, no main menu, never steals focus by itself.
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    // The logo is the app icon even when running outside the .app bundle.
+    if let Some(logo) = crate::icons::app_logo() {
+        // SAFETY: a valid NSImage on the main thread.
+        unsafe { app.setApplicationIconImage(Some(&logo)) };
+    }
 
     let controller = Controller::new(mtm, boot.config.clone(), boot.engine.clone())?;
     controller.install();

@@ -152,3 +152,12 @@ pub fn lift(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     let k = MIN / max;
     ((r * k).min(1.0), (g * k).min(1.0), (b * k).min(1.0))
 }
+
+/// The app's logo (the same artwork as AppIcon.icns), for the menu bar, the
+/// Dock-less app icon and alerts, whether or not the app runs from a bundle.
+pub fn app_logo() -> Option<Retained<NSImage>> {
+    use objc2::AnyThread;
+    static LOGO: &[u8] = include_bytes!("../../../packaging/icon/AppIcon-1024.png");
+    let data = objc2_foundation::NSData::with_bytes(LOGO);
+    NSImage::initWithData(NSImage::alloc(), &data)
+}

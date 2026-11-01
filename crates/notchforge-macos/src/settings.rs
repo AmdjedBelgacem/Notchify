@@ -1390,11 +1390,39 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                     }),
                 )
             } else {
-                (
-                    "Connect…",
-                    true,
-                    Box::new(|| crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyConnect)),
-                )
+                {
+                    let draft = form.draft.clone();
+                    (
+                        "Sign in…",
+                        true,
+                        Box::new(move || {
+                            // Spotify needs a Client ID; ask for it right here instead of
+                            // leaving the button disabled.
+                            if draft.borrow().media.spotify_client_id.is_empty() {
+                                let redirect = draft.borrow().media.spotify_redirect_uri();
+                                let Some(id) = app::ask_text(
+                                    "Sign in to Spotify",
+                                    &format!(
+                                        "Create an app at developer.spotify.com/dashboard, add the redirect URI {redirect}, then paste its Client ID."
+                                    ),
+                                    "Client ID",
+                                    "Continue",
+                                ) else {
+                                    return;
+                                };
+                                draft.borrow_mut().media.spotify_client_id = id;
+                                Form::commit(&draft);
+                            }
+                            // Give the engine a moment to persist the Client ID first.
+                            std::thread::spawn(|| {
+                                std::thread::sleep(std::time::Duration::from_millis(400));
+                                dispatch2::DispatchQueue::main().exec_async(|| {
+                                    crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyConnect);
+                                });
+                            });
+                        }),
+                    )
+                }
             };
             form.sub_ok.set(preview());
             let made = form.action_row(
@@ -1410,11 +1438,7 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 vec![button],
                 Some(("spotify", (30, 215, 96))),
             );
-            if !signed_in && !has_id {
-                for b in &made {
-                    b.setEnabled(false);
-                }
-            }
+            let _ = (&made, has_id);
             form.sub_ok.set(false);
             let client_id = if preview() { "3f9c2e7b1a4d4c0e9b8f6a21" } else { c.media.spotify_client_id.as_str() };
             form.text("Client ID", client_id, "From developer.spotify.com", true, |cfg, v| {
