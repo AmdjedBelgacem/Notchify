@@ -813,7 +813,7 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
-    r.check("notched: four views rendered", sizes.len() == 4, format!("{sizes:?}"));
+    r.check("notched: five views rendered", sizes.len() == 5, format!("{sizes:?}"));
     r.metrics.insert("notched_sizes".into(), json!(sizes));
     // Island sizes on the design boards (Overview, Main, Hover, Peek).
     for (name, bw, bh) in [

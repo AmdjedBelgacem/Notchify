@@ -141,6 +141,9 @@ impl CollapsedView {
 
     pub fn update(&self, snap: &Snapshot, p: &Palette, opts: WingOptions) {
         let playing = snap.media.primary().filter(|n| opts.media && n.is_playing());
+        // Audio from anything else (a browser tab, a video, a call) gets the
+        // same treatment: the app's icon on the left, the equaliser on the right.
+        let browser = snap.audio.playing_app().filter(|_| opts.media && playing.is_none());
         let low = snap.battery.as_ref().is_some_and(|b| b.is_low());
 
         // Left wing: low battery, else the playing track's cover, else power / tray.
@@ -165,10 +168,30 @@ impl CollapsedView {
                 self.left_icon.setHidden(true);
                 self.left_text.setHidden(true);
             }
-            None => self.art.setHidden(true),
+            None => match browser.filter(|_| !low) {
+                Some(src) => {
+                    let icon = crate::icons::source_icon(src.bundle_id.as_deref(), src.app_path.as_deref());
+                    match &icon {
+                        Some(img) => {
+                            self.art.setImage(Some(img));
+                            self.art.setContentTintColor(None);
+                        }
+                        None => {
+                            self.art.setImage(crate::ui::symbol_image("waveform", 12.0, &src.name).as_deref());
+                            self.art.setContentTintColor(Some(&p.success));
+                        }
+                    }
+                    set_accessibility_label(&self.art, &format!("{} is playing audio", src.name));
+                    self.art.setHidden(false);
+                    self.left_icon.setHidden(true);
+                    self.left_text.setHidden(true);
+                }
+                None => self.art.setHidden(true),
+            },
         }
+        let browser_wing = cover.is_none() && browser.is_some() && !low;
         let left = match &snap.battery {
-            _ if cover.is_some() => None,
+            _ if cover.is_some() || browser_wing => None,
             Some(b) if b.present && b.charging => {
                 Some(("bolt.fill", format!("{}%", b.percent), &p.success, "Charging"))
             }
@@ -195,7 +218,7 @@ impl CollapsedView {
 
         // Right wing: unread notifications (latest app icon + count), else the
         // equaliser while music plays, else Focus.
-        let eq = snap.unread == 0 && playing.is_some();
+        let eq = snap.unread == 0 && (playing.is_some() || browser.is_some());
         let eq_color = playing.map(|n| crate::ui::rgb8(n.player.color())).unwrap_or_else(|| p.success.clone());
         self.set_equalizer(eq, &eq_color, opts.animate);
         if eq {

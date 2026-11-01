@@ -82,7 +82,7 @@ impl Snapshot {
     pub fn wants_wings_with(&self, media: bool) -> bool {
         self.unread > 0
             || !self.tray.is_empty()
-            || (media && self.media.is_playing())
+            || (media && (self.media.is_playing() || self.audio.is_playing()))
             || self.battery.as_ref().is_some_and(|b| b.charging || b.is_low())
     }
 }

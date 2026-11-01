@@ -680,6 +680,22 @@ impl Controller {
         show("07c-notched-hover", LayoutKind::Compact, &views.compact.root);
         views.peek.show(peek, &palette);
         show("07d-notched-peek", LayoutKind::Peek, &views.peek.root);
+        // Collapsed with wings while a browser tab plays audio (no Spotify / Music).
+        let mut browser = music.clone();
+        browser.media.players.clear();
+        browser.audio.sources = vec![notchforge_core::model::AudioSource {
+            pid: 200,
+            name: "Google Chrome".into(),
+            bundle_id: Some("com.google.Chrome".into()),
+            app_path: None,
+            device_uids: vec![],
+        }];
+        views.collapsed.update(
+            &browser,
+            &palette,
+            crate::views::collapsed::WingOptions { media: true, animate: false },
+        );
+        show("07e-notched-wings-browser", LayoutKind::CollapsedWithWings, &views.collapsed.root);
         views.expanded.media.set_active(false);
     }
 

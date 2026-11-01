@@ -604,6 +604,16 @@ impl AudioState {
         self.devices.iter().find(|d| d.is_default)
     }
 
+    /// Is any app producing audio right now (a browser tab, a video, a call)?
+    pub fn is_playing(&self) -> bool {
+        !self.sources.is_empty()
+    }
+
+    /// The app to feature when nothing from Spotify / Music is playing.
+    pub fn playing_app(&self) -> Option<&AudioSource> {
+        self.sources.first()
+    }
+
     pub fn device(&self, uid: &str) -> Option<&AudioDevice> {
         self.devices.iter().find(|d| d.uid == uid)
     }
@@ -1021,5 +1031,20 @@ mod tests {
         let m =
             DisplayMode { id: 1, width: 1512, height: 982, pixel_width: 3024, pixel_height: 1964, refresh_hz: 120.0 };
         assert_eq!(m.label(), "1512 × 982 (HiDPI) @ 120 Hz");
+    }
+
+    #[test]
+    fn any_app_producing_audio_counts_as_playing() {
+        let mut a = AudioState::default();
+        assert!(!a.is_playing() && a.playing_app().is_none());
+        a.sources.push(AudioSource {
+            pid: 1,
+            name: "Google Chrome".into(),
+            bundle_id: Some("com.google.Chrome".into()),
+            app_path: None,
+            device_uids: vec![],
+        });
+        assert!(a.is_playing());
+        assert_eq!(a.playing_app().map(|s| s.name.as_str()), Some("Google Chrome"));
     }
 }
