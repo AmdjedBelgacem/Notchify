@@ -965,7 +965,32 @@ impl ExpandedView {
                     v
                 }
             };
-            tile.addSubview(&icon);
+            let is_pdf = item.path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
+            if item.is_dir {
+                // The board's folder: a back tab and body in blue with a lighter front.
+                let x0 = (cw - 54.0) / 2.0;
+                for (r, color, rad) in [
+                    (rect(x0 + 4.0, 4.0 + 10.0, 21.0, 9.0), (0.227, 0.608, 0.937), 3.0),
+                    (rect(x0 + 4.0, 4.0 + 14.0, 46.0, 32.0), (0.227, 0.608, 0.937), 4.0),
+                    (rect(x0 + 4.0, 4.0 + 21.0, 46.0, 25.0), (0.361, 0.722, 1.0), 4.0),
+                ] {
+                    tile.addSubview(&shape_view(mtm, r, &rgba(color.0, color.1, color.2, 1.0), rad));
+                }
+            } else if is_pdf {
+                // The board's PDF tile: a white page with a red badge.
+                let x0 = (cw - 44.0) / 2.0;
+                let page = shape_view(mtm, rect(x0, 4.0, 44.0, 54.0), &rgba(0.949, 0.949, 0.969, 1.0), 5.0);
+                let badge = shape_view(mtm, rect(6.0, 34.0, 32.0, 13.0), &rgba(0.898, 0.216, 0.169, 1.0), 3.0);
+                let f = font(8.0, Weight::Semibold);
+                let txt = label(mtm, "PDF", &f, &rgba(1.0, 1.0, 1.0, 1.0), rect(0.0, 0.0, 32.0, 13.0));
+                txt.setAlignment(NSTextAlignment::Center);
+                badge.addSubview(&txt);
+                page.addSubview(&badge);
+                tile.addSubview(&page);
+            } else {
+                tile.addSubview(&icon);
+            }
+
             let name =
                 label(mtm, &item.name, &font(11.0, Weight::Regular), &p.primary, rect(-4.0, 64.0, cw + 8.0, 14.0));
             name.setAlignment(NSTextAlignment::Center);
