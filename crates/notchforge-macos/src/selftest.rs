@@ -576,6 +576,28 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 format!("{st:?}"),
             );
         }
+        // ── opening Settings (a window away from the notch) closes the notch ──
+        20 => {
+            with_controller(|c| c.toggle());
+        }
+        21 => {
+            let st = state();
+            ctx.report.borrow_mut().check(
+                "settings: notch open before",
+                st == Some(State::Expanded),
+                format!("{st:?}"),
+            );
+            app::show_settings();
+        }
+        22 => {
+            let st = state();
+            ctx.report.borrow_mut().check(
+                "settings: opening it closes the notch",
+                st == Some(State::Collapsed),
+                format!("{st:?}"),
+            );
+            app::close_settings();
+        }
         _ => finish(ctx),
     }
 }
@@ -1208,7 +1230,7 @@ fn finish(ctx: &Rc<Ctx>) {
 /// Schedule the self-test; steps run 800 ms apart (long enough for every
 /// spring to settle at default speed).
 /// Index of the step that calls `finish` (one past the last explicit step).
-const LAST_STEP: usize = 20;
+const LAST_STEP: usize = 23;
 
 pub fn start(mtm: MainThreadMarker, dir: PathBuf) {
     let _ = std::fs::create_dir_all(&dir);

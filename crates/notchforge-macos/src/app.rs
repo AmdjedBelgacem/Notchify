@@ -131,6 +131,9 @@ pub fn show_settings() {
         let mtm = MainThreadMarker::from(&*a.controller.panel);
         s.get_or_insert_with(|| SettingsWindow::new(mtm)).show(&cfg);
     });
+    // Settings is a separate window away from the notch: opening it closes
+    // the island (a pinned or hovering panel would otherwise stay behind it).
+    with_controller(|c| c.collapse());
 }
 
 /// Update the menu bar extra from a snapshot and return its mini player view
