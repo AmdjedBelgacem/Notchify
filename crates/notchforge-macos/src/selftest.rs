@@ -711,6 +711,7 @@ fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core
 /// NSTextField (the app's path), and straight into a bitmap with smoothing
 /// on and off.
 fn text_probe(ctx: &Rc<Ctx>, mtm: MainThreadMarker) {
+    use objc2::MainThreadOnly;
     use objc2_app_kit::{NSAttributedStringNSStringDrawing, NSGraphicsContext};
     use objc2_core_graphics::{
         CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImageAlphaInfo,
