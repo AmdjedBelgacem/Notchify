@@ -308,6 +308,16 @@ fn screenshot(ctx: &Ctx, _mtm: MainThreadMarker, name: &str, _region: Option<Rec
     }
 }
 
+/// The whole window (island plus the notch flares), as on screen.
+fn screenshot_window(ctx: &Ctx, name: &str) {
+    with_controller(|c| c.panel.displayIfNeeded());
+    objc2_quartz_core::CATransaction::flush();
+    let Some((layer, w, h)) = with_controller(|c| c.window_layer()).flatten() else { return };
+    if let Some(png) = png_from_layer(&layer, w, h, 4.0) {
+        emit_png(ctx, name, png);
+    }
+}
+
 fn anim_json(a: AnimStats) -> Value {
     json!({
         "frames": a.frames,
@@ -340,8 +350,9 @@ fn check_settled(ctx: &Ctx, stage: &str, expect: &[LayoutKind]) {
         rect_str(&island),
     );
     r.check(
-        &format!("{stage}: window shrunk to island"),
-        close(panel.width, island.width) && close(panel.height, island.height),
+        &format!("{stage}: window shrunk to island (plus the notch flares)"),
+        close(panel.width, island.width + 2.0 * notchforge_core::geometry::NOTCH_EAR_MAX)
+            && close(panel.height, island.height),
         format!("panel {}", rect_str(&panel)),
     );
 }
@@ -369,6 +380,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             }
             check_settled(ctx, "collapsed", &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings]);
             screenshot(ctx, mtm, "01-collapsed", Some(notch.outset(300.0, 300.0, 120.0, 0.0)));
+            screenshot_window(ctx, "09-window-collapsed");
         }
         // ── hover: move the pointer onto the notch ──
         1 => {
@@ -463,6 +475,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             check_pixels(ctx, "expanded", true, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "03-expanded", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
+            screenshot_window(ctx, "09-window-expanded");
             music_page(ctx, mtm, &snap);
         }
         // ── Escape collapses ──

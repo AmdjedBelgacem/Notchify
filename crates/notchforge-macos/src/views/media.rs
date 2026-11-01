@@ -227,6 +227,8 @@ impl MediaPage {
         wash.setStartPoint(NSPoint::new(0.08, 0.0));
         wash.setEndPoint(NSPoint::new(0.55, 0.85));
         wash.setOpacity(0.0);
+        // The notch band stays pure black so the island blends with the notch.
+        crate::ui::fade_in_below(&wash, nh, 24.0);
         if let Some(layer) = root.layer() {
             layer.addSublayer(&wash);
         }

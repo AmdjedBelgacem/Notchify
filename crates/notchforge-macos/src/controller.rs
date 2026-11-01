@@ -61,6 +61,9 @@ pub struct Controller {
     pub panel: Retained<NotchPanel>,
     root: Retained<RootView>,
     island: Retained<NSView>,
+    /// Concave flares either side of the island's top edge (left, right).
+    ears: [Retained<objc2_quartz_core::CAShapeLayer>; 2],
+    ear_radius: Cell<f64>,
     views: RefCell<Views>,
     palette: RefCell<Palette>,
     machine: RefCell<NotchMachine>,
@@ -117,6 +120,18 @@ impl Controller {
             // top corners and the island merges squarely with the bezel.
         }
         root.addSubview(&island);
+        // Flares: black, outside the island, so the notch widens into the
+        // menu bar the way the hardware notch does.
+        root.setWantsLayer(true);
+        let ears = [true, false].map(|left| {
+            let l = objc2_quartz_core::CAShapeLayer::layer();
+            l.setFillColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
+            if let Some(root_layer) = root.layer() {
+                root_layer.addSublayer(&l);
+            }
+            crate::ui::set_notch_flare(&l, notchforge_core::geometry::NOTCH_EAR_MAX, left);
+            l
+        });
 
         let views = Views::new(mtm, &layout, &config, &engine);
         for v in views.all() {
@@ -132,6 +147,8 @@ impl Controller {
             panel,
             root,
             island,
+            ears,
+            ear_radius: Cell::new(0.0),
             views: RefCell::new(views),
             palette: RefCell::new(palette),
             machine: RefCell::new(NotchMachine::new(timings(&config))),
@@ -367,6 +384,7 @@ impl Controller {
         if let Some(layer) = self.island.layer() {
             layer.setCornerRadius(radius);
         }
+        self.place_ears(g.x - win.origin.x, w, win.size.height, radius);
         let views = self.views.borrow();
         let c = views.container(self.kind.get());
         let cs = c.frame().size;
@@ -374,12 +392,31 @@ impl Controller {
         c.setAlphaValue(s.content_alpha.value.clamp(0.0, 1.0));
     }
 
-    /// Shrink the window to the island so nothing outside it intercepts clicks.
+    /// Put the flares against the island's left and right edges at the top of
+    /// the window. `x`/`w` are the island's window-local extent.
+    fn place_ears(&self, x: f64, w: f64, window_h: f64, corner_radius: f64) {
+        let e = notchforge_core::geometry::notch_ear_radius(corner_radius);
+        let changed = (self.ear_radius.get() - e).abs() > 0.01;
+        crate::ui::without_animation(|| {
+            self.ears[0].setFrame(rect(x - e, window_h - e, e, e));
+            self.ears[1].setFrame(rect(x + w, window_h - e, e, e));
+            if changed {
+                crate::ui::set_notch_flare(&self.ears[0], e, true);
+                crate::ui::set_notch_flare(&self.ears[1], e, false);
+            }
+        });
+        self.ear_radius.set(e);
+    }
+
+    /// Shrink the window to the island (plus room for the flares) so little
+    /// outside it intercepts clicks.
     fn settle_window(&self) {
         let s = *self.spring.borrow();
         let g = self.layout.borrow().island_global(s.width.value, s.height.value);
-        self.panel.setFrame_display(screen::to_nsrect(g), true);
-        self.root.setFrame(rect(0.0, 0.0, g.width, g.height));
+        let ear = notchforge_core::geometry::NOTCH_EAR_MAX;
+        let win = notchforge_core::geometry::Rect::new(g.x - ear, g.y, g.width + 2.0 * ear, g.height);
+        self.panel.setFrame_display(screen::to_nsrect(win), true);
+        self.root.setFrame(rect(0.0, 0.0, win.width, win.height));
         self.apply_frame();
     }
 
@@ -885,6 +922,12 @@ impl Controller {
 
     pub fn panel_global(&self) -> notchforge_core::geometry::Rect {
         screen::to_rect(self.panel.frame())
+    }
+
+    /// The window's whole layer tree (island and flares) with its size.
+    pub fn window_layer(&self) -> Option<(Retained<objc2_quartz_core::CALayer>, f64, f64)> {
+        let size = self.root.frame().size;
+        self.root.layer().map(|l| (l, size.width, size.height))
     }
 
     pub fn island_layer(&self) -> Option<Retained<objc2_quartz_core::CALayer>> {

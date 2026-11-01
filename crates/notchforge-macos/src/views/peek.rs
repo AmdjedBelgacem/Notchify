@@ -64,6 +64,7 @@ impl PeekView {
         glow.setStartPoint(NSPoint::new(0.0, 1.0));
         glow.setEndPoint(NSPoint::new(0.42, 1.0 - 0.84));
         set_gradient(&glow, &[(1.0, 0.62, 0.04, 0.22), (1.0, 0.62, 0.04, 0.0)]);
+        crate::ui::fade_in_below(&glow, nh, 18.0);
         if let Some(l) = root.layer() {
             l.addSublayer(&glow);
         }

@@ -179,6 +179,18 @@ pub const WING_WIDTH: f64 = 64.0;
 /// Space around the largest island inside the window, for the shadow.
 pub const WINDOW_MARGIN: f64 = 24.0;
 
+/// Largest radius of the concave flares where the island meets the top edge
+/// (the real notch widens slightly where it joins the menu bar). The settled
+/// window is this much wider than the island on each side so they fit.
+pub const NOTCH_EAR_MAX: f64 = 14.0;
+
+/// Flare radius for an island whose lower corners have `corner_radius`:
+/// about half of it, so the collapsed notch gets a subtle flare and the open
+/// panel a larger one.
+pub fn notch_ear_radius(corner_radius: f64) -> f64 {
+    (corner_radius * 0.5).clamp(6.0, NOTCH_EAR_MAX)
+}
+
 /// Computes every rectangle the UI needs for one screen.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NotchLayout {
@@ -385,5 +397,14 @@ mod tests {
         let layout = NotchLayout::new(s, AppearanceConfig::default());
         let win = layout.window_frame();
         assert!(win.x >= 0.0);
+    }
+
+    #[test]
+    fn notch_flare_scales_with_the_corner_radius() {
+        assert_eq!(notch_ear_radius(12.0), 6.0);
+        assert_eq!(notch_ear_radius(24.0), 12.0);
+        assert_eq!(notch_ear_radius(28.0), NOTCH_EAR_MAX);
+        assert_eq!(notch_ear_radius(80.0), NOTCH_EAR_MAX);
+        assert_eq!(notch_ear_radius(2.0), 6.0);
     }
 }

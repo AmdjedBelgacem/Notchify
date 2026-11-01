@@ -451,6 +451,51 @@ pub fn style_pill(
     set_accessibility_label(b, title);
 }
 
+/// Keep a wash/glow layer fully transparent across the top `solid_h` pt (the
+/// notch band, which must stay pure black to blend with the hardware notch)
+/// and fade it in over the next `ramp` pt. The layer's geometry is y-down
+/// (it lives in a flipped view) and its frame must already be set.
+pub fn fade_in_below(layer: &objc2_quartz_core::CALayer, solid_h: f64, ramp: f64) {
+    let h = layer.bounds().size.height.max(1.0);
+    let mask = objc2_quartz_core::CAGradientLayer::layer();
+    mask.setFrame(layer.bounds());
+    mask.setStartPoint(NSPoint::new(0.5, 0.0));
+    mask.setEndPoint(NSPoint::new(0.5, 1.0));
+    set_gradient(&mask, &[(0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0)]);
+    let at = |v: f64| objc2_foundation::NSNumber::new_f64((v / h).clamp(0.0, 1.0));
+    let locations = [at(0.0), at(solid_h), at(solid_h + ramp)];
+    mask.setLocations(Some(&objc2_foundation::NSArray::from_retained_slice(&locations)));
+    // SAFETY: a plain gradient layer used as a mask.
+    unsafe { layer.setMask(Some(&mask)) };
+}
+
+/// One concave flare, in a layer of `e` × `e` pt (y-up). `left` is the flare
+/// on the island's left; its mirror is the right one. The shape is the
+/// square minus a quarter disc centred on its outer-bottom corner: full width
+/// along the top edge, narrowing to nothing `e` pt lower, like the real notch
+/// where it joins the menu bar.
+pub fn set_notch_flare(layer: &objc2_quartz_core::CAShapeLayer, e: f64, left: bool) {
+    use objc2_core_graphics::CGMutablePath as P;
+    let path = P::new();
+    let half_pi = std::f64::consts::FRAC_PI_2;
+    // SAFETY: null transforms are allowed; the path is owned by us.
+    unsafe {
+        if left {
+            P::move_to_point(Some(&path), std::ptr::null(), 0.0, e);
+            P::add_line_to_point(Some(&path), std::ptr::null(), e, e);
+            P::add_line_to_point(Some(&path), std::ptr::null(), e, 0.0);
+            P::add_arc(Some(&path), std::ptr::null(), 0.0, 0.0, e, 0.0, half_pi, false);
+        } else {
+            P::move_to_point(Some(&path), std::ptr::null(), e, e);
+            P::add_line_to_point(Some(&path), std::ptr::null(), 0.0, e);
+            P::add_line_to_point(Some(&path), std::ptr::null(), 0.0, 0.0);
+            P::add_arc(Some(&path), std::ptr::null(), e, 0.0, e, std::f64::consts::PI, half_pi, true);
+        }
+        P::close_subpath(Some(&path));
+    }
+    layer.setPath(Some(&path));
+}
+
 /// Run `f` without Core Animation's implicit 0.25 s animations.
 pub fn without_animation(f: impl FnOnce()) {
     objc2_quartz_core::CATransaction::begin();
