@@ -404,7 +404,7 @@ impl Config {
             std::fs::create_dir_all(parent).map_err(|e| CoreError::io(parent, e))?;
         }
         let text = format!(
-            "# NotchForge configuration. See config/notchforge.example.toml for documentation.\n{}",
+            "# Notchisland configuration. See config/notchforge.example.toml for documentation.\n{}",
             self.to_toml()?
         );
         let tmp = path.with_extension("toml.tmp");

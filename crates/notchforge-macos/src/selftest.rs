@@ -854,7 +854,7 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
         prompt(
             902,
             spotify,
-            "Approve NotchForge in your browser",
+            "Approve Notchisland in your browser",
             "Spotify's sign-in is open. Allow access there, then come back.",
             notchforge_core::model::AUTH_THREAD_SPOTIFY.into(),
         ),

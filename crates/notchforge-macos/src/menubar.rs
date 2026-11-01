@@ -85,7 +85,7 @@ impl MenuBar {
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
         if let Some(button) = item.button(mtm) {
             button.setImage(Some(&notch_glyph(false)));
-            button.setToolTip(Some(&ns("NotchForge")));
+            button.setToolTip(Some(&ns("Notchisland")));
         }
         let targets = Targets::default();
         let menu = NSMenu::new(mtm);
@@ -177,7 +177,7 @@ impl MenuBar {
         menu.addItem(&menu_item(mtm, &targets, "Settings…", ",", app::show_settings));
         menu.addItem(&menu_item(mtm, &targets, "Open Config File", "", app::open_config_file));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
-        menu.addItem(&menu_item(mtm, &targets, "Quit NotchForge", "q", app::quit));
+        menu.addItem(&menu_item(mtm, &targets, "Quit Notchisland", "q", app::quit));
         item.setMenu(Some(&menu));
         player_item.setHidden(true);
         player_sep.setHidden(true);
@@ -216,7 +216,7 @@ impl MenuBar {
             if self.unread.replace(unread) != unread {
                 button.setImage(Some(&notch_glyph(unread)));
             }
-            let tip = if unread { format!("NotchForge — {} unread", snap.unread) } else { "NotchForge".into() };
+            let tip = if unread { format!("Notchisland — {} unread", snap.unread) } else { "Notchisland".into() };
             button.setToolTip(Some(&ns(&tip)));
         }
 

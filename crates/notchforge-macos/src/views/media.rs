@@ -996,7 +996,7 @@ impl MediaPage {
             || status == PlaylistStatus::NeedsAutomation
         {
             (
-                Some(format!("Allow NotchForge to control {} to see your playlists.", player.display_name())),
+                Some(format!("Allow Notchisland to control {} to see your playlists.", player.display_name())),
                 ListAction::AllowAutomation,
                 "Allow…",
             )
@@ -1005,7 +1005,7 @@ impl MediaPage {
         } else {
             match (player, &status) {
                 (MediaPlayer::Spotify, PlaylistStatus::SigningIn) => (
-                    Some("Waiting for you to approve NotchForge in your browser…".into()),
+                    Some("Waiting for you to approve Notchisland in your browser…".into()),
                     ListAction::CancelSpotify,
                     "Cancel",
                 ),

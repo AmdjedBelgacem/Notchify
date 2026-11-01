@@ -896,16 +896,16 @@ impl Permission {
     pub fn rationale(self) -> &'static str {
         match self {
             Permission::Accessibility => {
-                "Lets NotchForge read notification banners as a fallback and optionally dismiss \
+                "Lets Notchisland read notification banners as a fallback and optionally dismiss \
                  the native banner when the notch already shows it."
             }
             Permission::FullDiskAccess => {
-                "Lets NotchForge read the Notification Center database so WhatsApp, Discord, \
+                "Lets Notchisland read the Notification Center database so WhatsApp, Discord, \
                  Messages, Slack and others appear in the notch, and read the Focus state."
             }
             Permission::Location => "Used only to fetch local weather. You can type a city in Settings instead.",
             Permission::Notifications => {
-                "Lets NotchForge post its own alerts (e.g. low device battery) when the notch \
+                "Lets Notchisland post its own alerts (e.g. low device battery) when the notch \
                  is hidden."
             }
             Permission::Bluetooth => {
@@ -913,7 +913,7 @@ impl Permission {
                  for transparency."
             }
             Permission::Automation => {
-                "Lets NotchForge ask Spotify and Apple Music what is playing, control playback \
+                "Lets Notchisland ask Spotify and Apple Music what is playing, control playback \
                  and list your playlists. macOS asks once per app."
             }
         }

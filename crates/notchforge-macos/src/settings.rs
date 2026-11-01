@@ -482,7 +482,7 @@ impl SettingsWindow {
                 false,
             )
         };
-        window.setTitle(&ns("NotchForge Settings"));
+        window.setTitle(&ns("Notchisland Settings"));
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
         window.setBackgroundColor(Some(&rgba(0.118, 0.118, 0.125, 1.0)));
@@ -938,7 +938,7 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 cfg.controls.focus_off_shortcut = v
             });
             form.note(
-                "Create these in the Shortcuts app with the “Set Focus” action. NotchForge runs them to toggle Focus.",
+                "Create these in the Shortcuts app with the “Set Focus” action. Notchisland runs them to toggle Focus.",
             );
         }
         Pane::Permissions => {

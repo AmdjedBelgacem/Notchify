@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>NotchForge</string>
+    <string>Notchisland</string>
     <key>CFBundleExecutable</key>
     <string>notchforge</string>
     <key>CFBundleIconFile</key>
@@ -15,7 +15,7 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>NotchForge</string>
+    <string>Notchisland</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -35,12 +35,12 @@
     <true/>
     <!-- Permission explanations shown by macOS. -->
     <key>NSLocationUsageDescription</key>
-    <string>NotchForge uses your approximate location only to show local weather in the notch.</string>
+    <string>Notchisland uses your approximate location only to show local weather in the notch.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>NotchForge uses your approximate location only to show local weather in the notch.</string>
+    <string>Notchisland uses your approximate location only to show local weather in the notch.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>NotchForge shows the battery level of your connected accessories. It reads them from the system and does not connect to devices.</string>
+    <string>Notchisland shows the battery level of your connected accessories. It reads them from the system and does not connect to devices.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>NotchForge asks Spotify and Apple Music what is playing so it can show the track, artwork and playlists in the notch, and sends them play, pause, skip and playlist commands you choose.</string>
+    <string>Notchisland asks Spotify and Apple Music what is playing so it can show the track, artwork and playlists in the notch, and sends them play, pause, skip and playlist commands you choose.</string>
 </dict>
 </plist>

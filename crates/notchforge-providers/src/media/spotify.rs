@@ -204,12 +204,12 @@ pub async fn login(
             let line = req.lines().next().unwrap_or("");
             let result = parse_callback(line, &state);
             let (status, msg) = match &result {
-                Ok(_) => ("200 OK", "NotchForge is connected to Spotify. You can close this tab."),
+                Ok(_) => ("200 OK", "Notchisland is connected to Spotify. You can close this tab."),
                 Err(_) if !line.contains("/callback") => ("404 Not Found", "Not found."),
-                Err(_) => ("400 Bad Request", "Spotify sign-in failed. Close this tab and try again from NotchForge."),
+                Err(_) => ("400 Bad Request", "Spotify sign-in failed. Close this tab and try again from Notchisland."),
             };
             let body = format!(
-                "<!doctype html><meta charset=utf-8><title>NotchForge</title>\
+                "<!doctype html><meta charset=utf-8><title>Notchisland</title>\
                  <body style=\"font:16px -apple-system;margin:4em;text-align:center\">{msg}</body>"
             );
             let resp = format!(

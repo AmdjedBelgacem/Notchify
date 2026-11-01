@@ -1,15 +1,28 @@
-# NotchForge
+# Notchisland
 
-**The MacBook notch, forged into a smart, always-available control and notification surface.**
+## Why I built this
 
-NotchForge is a native macOS app written in pure Rust. It turns the camera
-housing into a Dynamic-Island-style surface. When idle it hugs the notch, when
-you hover it opens a glanceable panel, and when you click it pins a full
-control panel. It surfaces:
+I saw the new MacBook announcement and loved how they implemented the Dynamic
+Island. Not to mention, I have it on my iPhone as well. So I said to myself:
+why not build my own Dynamic Island and use it?
+
+And this is how Notchisland came to be.
+
+---
+
+**The MacBook notch, turned into a smart, always-available control and notification surface.**
+
+Notchisland is a native macOS app written in pure Rust. It turns the camera
+housing into a Dynamic-Island-style surface. When idle it hugs the notch and
+blends into it (pure black, with the same small curves where the real notch
+meets the menu bar). When you hover it opens a glanceable panel, and when you
+click it pins a full control panel; click anywhere else and it closes again.
+It surfaces:
 
 - **Coding-agent events, as first-class notifications.** Covers Claude (Code and
   desktop), ChatGPT and the Codex CLI, Cursor, Zed, OpenCode and Qoder, plus a
-  generic webhook, socket and file inbox for any other tool.
+  generic webhook, socket and file inbox for any other tool. The first time an
+  agent sends something, the notch asks **Allow / Deny** and remembers your answer.
 - **Messaging notifications** from WhatsApp, Discord, Instagram, Facebook
   and Messenger, Messages, Slack, Telegram and Signal, read from Notification
   Center.
@@ -26,8 +39,16 @@ control panel. It surfaces:
   which apps are playing sound and through which device. Spotify and Apple
   Music get a full player: cover art, a seekable progress bar, play/pause,
   skip, shuffle and repeat, plus your playlists, which you can start with one
-  click. Other apps (browsers, podcasts…) get play/pause and skip through the
-  system media keys.
+  click. Spotify's sign-in happens in the island too ("approve in your
+  browser", with Cancel). When a browser tab, a video or a call is playing
+  sound, the collapsed notch shows that app's icon and a live equaliser. Other
+  apps (browsers, podcasts…) get play/pause and skip through the system media
+  keys.
+
+> **A note on names.** The crates, binaries (`notchforge`, `notchforge-notify`),
+> the `NotchForge.app` bundle and the `NotchForge` data folder keep the project's
+> working name, so existing settings, permissions and shortcuts keep working.
+> Notchisland is the name of the product.
 
 It runs as an accessory app with no Dock icon, and adds a menu bar extra as a
 secondary entry point.
@@ -95,7 +116,7 @@ secondary entry point.
 
 Press <kbd>Esc</kbd> or click anywhere outside to collapse.
 <kbd>⌘</kbd><kbd>,</kbd> opens Settings while the panel is pinned.
-On displays without a notch, NotchForge draws a slim pill of the same height
+On displays without a notch, Notchisland draws a slim pill of the same height
 as the menu bar in the same spot.
 
 Transitions use a spring with a slight bounce when opening and critical
@@ -241,7 +262,7 @@ Files live in:
 
 ## Permissions
 
-Every permission is **optional**. NotchForge explains each one in
+Every permission is **optional**. Notchisland explains each one in
 **Settings › Permissions**, which shows its live status with *Request Access*
 and *Open Settings* buttons.
 
@@ -250,7 +271,7 @@ and *Open Settings* buttons.
 | **Full Disk Access** | Read the Notification Center database (messaging apps and desktop agents) and the Focus state | Agent webhooks still work. Turn on the Accessibility fallback for messaging. |
 | **Accessibility** | Fallback banner reader; optional dismissal of the native banner | Not needed if Full Disk Access is granted |
 | **Location** | "auto" weather location | Type a city in Settings, or set `latitude` and `longitude` |
-| **Notifications** | NotchForge's own fallback alerts | Not needed |
+| **Notifications** | Notchisland's own fallback alerts | Not needed |
 | **Bluetooth** | *Not required.* Accessory batteries come from the IORegistry and `system_profiler`. | — |
 | **Automation** (Spotify, Music) | Ask the players what's playing, control them and list Music playlists. macOS asks once per player. | The music page shows an *Allow…* button; other apps still work through media keys |
 
@@ -259,7 +280,7 @@ keyboard events, which uses **Accessibility**.
 
 To grant Full Disk Access manually: **System Settings › Privacy & Security ›
 Full Disk Access**, then **+**, then choose `NotchForge.app` (or your
-terminal, when using `cargo run`). Restart NotchForge afterwards.
+terminal, when using `cargo run`). Restart Notchisland afterwards.
 
 > macOS ties permissions to the code signature. Ad-hoc-signed rebuilds look
 > like a new app, so sign with a stable identity
@@ -295,10 +316,24 @@ and `error` are **high** and peek immediately. Batches are accepted as JSON arra
 | HTTP (loopback only) | `POST http://127.0.0.1:47815/v1/notify[?source=…&kind=…]`; `GET /v1/health` |
 | Unix socket (mode 0600) | `~/Library/Application Support/NotchForge/agent.sock`, one JSON object per line, replies `ok` |
 | Inbox file | append JSON lines to `~/Library/Application Support/NotchForge/inbox.jsonl` |
-| CLI | `notchforge-notify` tries HTTP, then the socket, then the inbox, so nothing is lost while NotchForge restarts |
+| CLI | `notchforge-notify` tries HTTP, then the socket, then the inbox, so nothing is lost while Notchisland restarts |
 
 Set `agents.token` to require `Authorization: Bearer <token>`. The CLI reads
 `NOTCHFORGE_TOKEN`.
+
+### First-time approval
+
+By default the notch asks before a new agent can show notifications. The first
+event from, say, Claude Code is held, and a card appears in the island ("Allow
+Claude Code in the notch?") with **Allow** and **Deny**. Allow releases what was
+waiting and every later event shows straight away; Deny drops it and keeps that
+agent quiet. Decisions are remembered in `trust.json` next to the config, and
+Settings › Coding Agents can switch the question off
+(`agents.require_approval = false`) or forget every answer.
+
+This is consent, not authentication: an agent is recognised by the source name
+it sends. Set a bearer token (above) if you need to keep other local processes
+from posting.
 
 ### Recipes
 
@@ -365,7 +400,7 @@ while the audio setup is unchanged.
 art, title, artist and album, a seekable progress bar, play/pause, previous
 and next, shuffle and repeat. The backdrop is tinted with the cover's colour.
 Players are queried through their AppleScript dictionaries, but only while
-they're running, so NotchForge never launches a player by asking about it. Both
+they're running, so Notchisland never launches a player by asking about it. Both
 players announce track changes, and the notch updates instantly.
 
 **Playlists**: click a playlist to start it.
@@ -552,7 +587,7 @@ one.
 The other APIs used are public: IOKit power sources, CoreGraphics display
 modes, CoreAudio (devices and, on 14.2+, process objects), CoreLocation,
 `SMAppService`, `NSSharingService`, the Spotify Web API and AppKit.
-NotchForge deliberately doesn't use the private MediaRemote framework. Since
+Notchisland deliberately doesn't use the private MediaRemote framework. Since
 macOS 15.4 it no longer serves third-party apps.
 
 ---

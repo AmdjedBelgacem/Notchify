@@ -463,7 +463,7 @@ impl Engine {
             self.ingest_now(note(
                 NotificationKind::Authorization,
                 Priority::High,
-                "Approve NotchForge in your browser",
+                "Approve Notchisland in your browser",
                 "Spotify's sign-in is open. Allow access there, then come back.".into(),
                 Some(AUTH_THREAD_SPOTIFY.into()),
             ));
@@ -534,7 +534,7 @@ impl Engine {
 
     fn internal(&mut self, title: String, body: String, priority: Priority) {
         let n = NewNotification {
-            app: AppRef { known: None, bundle_id: None, display_name: "NotchForge".into() },
+            app: AppRef { known: None, bundle_id: None, display_name: "Notchisland".into() },
             origin: Origin::Internal,
             kind: NotificationKind::Info,
             priority: Some(priority),
