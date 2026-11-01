@@ -234,7 +234,7 @@ impl ExpandedView {
             rect(c2x + 2.0, body_y + 2.0, c2w - 4.0, 18.0),
         );
         overview.addSubview(&tray_header);
-        let box_h = body_h - 30.0 - 38.0;
+        let box_h = body_h - 30.0 - 42.0;
         let tray_box = shape_view(mtm, rect(c2x, body_y + 30.0, c2w, box_h), &white(0.06), 16.0);
         if let Some(l) = tray_box.layer() {
             l.setBorderWidth(0.5);
@@ -265,7 +265,7 @@ impl ExpandedView {
         tray_box.addSubview(&tray_empty);
         overview.addSubview(&tray_box);
 
-        let by = body_y + 30.0 + box_h + 8.0;
+        let by = body_y + 30.0 + box_h + 10.0;
         let actions: [(&str, &str, TrayAction); 4] = [
             (
                 "dot.radiowaves.left.and.right",
@@ -297,7 +297,7 @@ impl ExpandedView {
         }
 
         // ── status & controls ──
-        let weather_card = FlippedView::new(mtm, rect(c3x, body_y, c3w, 104.0));
+        let weather_card = FlippedView::new(mtm, rect(c3x, body_y, c3w, 100.0));
         weather_card.setWantsLayer(true);
         if let Some(l) = weather_card.layer() {
             l.setCornerRadius(16.0);
@@ -309,12 +309,12 @@ impl ExpandedView {
                 NSPoint::new(0.0, 0.0),
                 NSPoint::new(1.0, 1.0),
             );
-            g.setFrame(rect(0.0, 0.0, c3w, 104.0));
+            g.setFrame(rect(0.0, 0.0, c3w, 100.0));
             l.addSublayer(&g);
         }
         overview.addSubview(&weather_card);
 
-        let devices = FlippedView::new(mtm, rect(c3x, body_y + 112.0, c3w, 48.0));
+        let devices = FlippedView::new(mtm, rect(c3x, body_y + 109.0, c3w, 48.0));
         overview.addSubview(&devices);
 
         let slider_row = |sym: &str, tip: &str, y: f64, set: fn(f64)| {
@@ -328,10 +328,10 @@ impl ExpandedView {
             (row, s)
         };
         let (brightness_row, brightness_slider) =
-            slider_row("sun.max.fill", "Display brightness", body_y + 166.0, |v| {
+            slider_row("sun.max.fill", "Display brightness", body_y + 161.0, |v| {
                 brightness::set(v as f32);
             });
-        let (volume_row, volume_slider) = slider_row("speaker.wave.1.fill", "Output volume", body_y + 190.0, |v| {
+        let (volume_row, volume_slider) = slider_row("speaker.wave.1.fill", "Output volume", body_y + 186.0, |v| {
             volume::set(v as f32);
         });
 
@@ -350,7 +350,7 @@ impl ExpandedView {
             &white(0.08),
             8.0,
             &t,
-            rect(c3x, body_y + 220.0, c3w, 26.0),
+            rect(c3x, body_y + 213.0, c3w, 26.0),
         );
         resolution.setAlignment(NSTextAlignment::Left);
         resolution.addSubview(&symbol_view(
@@ -399,7 +399,7 @@ impl ExpandedView {
                 tip,
                 &white(0.8),
                 &t,
-                rect(c3x + i as f64 * (bw + 6.0), body_y + 256.0, bw, 30.0),
+                rect(c3x + i as f64 * (bw + 6.0), body_y + 249.0, bw, 30.0),
             );
             make_card(&b, &white(0.08), 9.0);
             overview.addSubview(&b);
@@ -623,7 +623,7 @@ impl ExpandedView {
             w.condition.symbol(w.is_day),
             20.0,
             &p.primary,
-            rect(12.0, 12.0, 26.0, 22.0),
+            rect(12.0, 13.0, 26.0, 22.0),
             w.condition.label(),
         );
         crate::views::multicolor(&icon);
@@ -633,7 +633,7 @@ impl ExpandedView {
             &temperature(w.temperature),
             &mono_digits(26.0, Weight::Semibold),
             &p.primary,
-            rect(43.0, 8.0, 70.0, 30.0),
+            rect(43.0, 9.0, 70.0, 30.0),
         );
         self.weather_card.addSubview(&temp);
         let detail = wrapping_label(
@@ -641,13 +641,13 @@ impl ExpandedView {
             &format!("{}\nH {} · L {}", w.condition.label(), temperature(w.high), temperature(w.low)),
             &font(11.0, Weight::Regular),
             &white(0.7),
-            rect(wc - 112.0, 10.0, 100.0, 30.0),
+            rect(wc - 112.0, 11.0, 100.0, 30.0),
             2,
         );
         detail.setAlignment(NSTextAlignment::Right);
         self.weather_card.addSubview(&detail);
         let n = 5usize.min(w.hourly.len() + 1);
-        let cw = (wc - 16.0) / 5.0;
+        let cw = (wc - 28.0) / 5.0;
         for i in 0..n {
             let (hour, cond, t) = if i == 0 {
                 ("Now".to_owned(), w.condition.symbol(w.is_day), w.temperature)
@@ -657,13 +657,13 @@ impl ExpandedView {
                 let night = hf.hour.parse::<u32>().is_ok_and(|h| !(6..20).contains(&h));
                 (hf.hour.clone(), hf.condition.symbol(!night), hf.temperature)
             };
-            let x = 8.0 + i as f64 * cw;
+            let x = 14.0 + i as f64 * cw;
             let hl = label(mtm, &hour, &font(10.5, Weight::Regular), &white(0.65), rect(x, 48.0, cw, 13.0));
             hl.setAlignment(NSTextAlignment::Center);
             let ic = symbol_view(mtm, cond, 11.0, &p.primary, rect(x + (cw - 16.0) / 2.0, 63.0, 16.0, 14.0), "");
             crate::views::multicolor(&ic);
             let tl =
-                label(mtm, &temperature(t), &mono_digits(10.5, Weight::Semibold), &p.primary, rect(x, 80.0, cw, 14.0));
+                label(mtm, &temperature(t), &mono_digits(10.5, Weight::Semibold), &p.primary, rect(x, 78.0, cw, 14.0));
             tl.setAlignment(NSTextAlignment::Center);
             self.weather_card.addSubview(&hl);
             self.weather_card.addSubview(&ic);

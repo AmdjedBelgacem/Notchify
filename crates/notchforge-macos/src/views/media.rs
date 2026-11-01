@@ -290,7 +290,7 @@ impl MediaPage {
         }
 
         // ── progress ──
-        let progress = ThinSlider::new(mtm, rect(tx, nh + 94.0, tw, 16.0), false, &white(0.92));
+        let progress = ThinSlider::new(mtm, rect(tx, nh + 92.5, tw, 16.0), false, &white(0.92));
         set_accessibility_label(&progress, "Playback position");
         let st = state.clone();
         progress.set_on_commit(move |v| {
@@ -492,7 +492,7 @@ impl MediaPage {
         root.addSubview(&out_card);
 
         // ── apps playing audio ──
-        let sy = nh + 266.0;
+        let sy = nh + 268.5;
         let sources_header =
             label(mtm, "Playing audio", &font(11.5, Weight::Semibold), &p.secondary, rect(X0 + 2.0, sy, lw, 15.0));
         let sources = FlippedView::new(mtm, rect(X0, sy + 20.0, lw, (h - sy - 20.0 - 12.0).max(30.0)));
@@ -513,9 +513,9 @@ impl MediaPage {
             "Playlists",
             &font(13.0, Weight::Semibold),
             &p.primary,
-            rect(14.0, 13.0, 100.0, 17.0),
+            rect(14.0, 15.5, 100.0, 17.0),
         ));
-        let seg_track = shape_view(mtm, rect(rw - 12.0 - 112.0, 10.0, 112.0, 24.0), &white(0.08), 8.0);
+        let seg_track = shape_view(mtm, rect(rw - 12.0 - 112.0, 12.5, 112.0, 24.0), &white(0.08), 8.0);
         let pick = |player: MediaPlayer| {
             let st = state.clone();
             move |_: Option<&AnyObject>| {
@@ -555,9 +555,9 @@ impl MediaPage {
         seg_track.addSubview(&seg_music);
         card.addSubview(&seg_track);
 
-        let lh = ch - 40.0;
+        let lh = ch - 44.0;
         let list_doc = FlippedView::new(mtm, rect(0.0, 0.0, rw - 12.0, lh));
-        let list_scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), rect(6.0, 40.0, rw - 12.0, lh));
+        let list_scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), rect(6.0, 44.0, rw - 12.0, lh));
         list_scroll.setDrawsBackground(false);
         list_scroll.setHasVerticalScroller(true);
         list_scroll.setAutohidesScrollers(true);
@@ -1093,7 +1093,7 @@ impl MediaPage {
                 &pl.name,
                 &font(13.0, Weight::Medium),
                 &p.primary,
-                rect(54.0, 7.0, w - 84.0, 17.0),
+                rect(54.0, 9.0, w - 84.0, 17.0),
             ));
             let mut detail = Vec::new();
             if let Some(c) = pl.track_count {
@@ -1107,7 +1107,7 @@ impl MediaPage {
                 &detail.join(" · "),
                 &font(11.0, Weight::Regular),
                 &p.tertiary,
-                rect(54.0, 25.0, w - 84.0, 14.0),
+                rect(54.0, 27.0, w - 84.0, 14.0),
             ));
             if is_active {
                 row.addSubview(&equalizer_view(self.mtm, rect(w - 26.0, 18.0, 12.0, 12.0), &brand));
