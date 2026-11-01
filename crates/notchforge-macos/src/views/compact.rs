@@ -92,15 +92,15 @@ impl CompactView {
         art_box.addSubview(&art);
         let tx = 12.0 + art_side + 12.0;
         let tw = lw - tx - 12.0;
-        let lead_kicker = label(mtm, "", &font(11.0, Weight::Semibold), &p.secondary, rect(tx, 16.0, tw - 20.0, 14.0));
-        let lead_title = label(mtm, "", &font(15.0, Weight::Semibold), &p.primary, rect(tx, 33.0, tw, 19.0));
-        let lead_sub = label(mtm, "", &font(12.0, Weight::Regular), &p.secondary, rect(tx, 53.0, tw, 16.0));
+        let lead_kicker = label(mtm, "", &font(11.0, Weight::Semibold), &p.secondary, rect(tx, 27.0, tw - 20.0, 14.0));
+        let lead_title = label(mtm, "", &font(15.0, Weight::Semibold), &p.primary, rect(tx, 44.0, tw, 19.0));
+        let lead_sub = label(mtm, "", &font(12.0, Weight::Regular), &p.secondary, rect(tx, 64.0, tw, 16.0));
         let lead_body =
-            wrapping_label(mtm, "", &font(11.5, Weight::Regular), &p.secondary, rect(tx, 53.0, tw, 30.0), 2);
-        let progress_track = shape_view(mtm, rect(tx, 76.0, tw, 3.0), &white(0.16), 1.5);
+            wrapping_label(mtm, "", &font(11.5, Weight::Regular), &p.secondary, rect(tx, 64.0, tw, 30.0), 2);
+        let progress_track = shape_view(mtm, rect(tx, 87.0, tw, 3.0), &white(0.16), 1.5);
         let progress_fill = shape_view(mtm, rect(0.0, 0.0, 0.0, 3.0), &white(0.9), 1.5);
         progress_track.addSubview(&progress_fill);
-        let eq_host = FlippedView::new(mtm, rect(lw - 12.0 - 12.0, 17.0, 12.0, 11.0));
+        let eq_host = FlippedView::new(mtm, rect(lw - 12.0 - 12.0, 28.0, 12.0, 11.0));
         for v in [&*art_box as &NSView, &lead_kicker, &lead_title, &lead_sub, &lead_body, &progress_track, &eq_host] {
             lead.addSubview(v);
         }
@@ -129,10 +129,10 @@ impl CompactView {
             "--°",
             &mono_digits(26.0, Weight::Semibold),
             &p.primary,
-            rect(12.0, ch - 57.0, col - 18.0, 30.0),
+            rect(12.0, ch - 54.5, col - 18.0, 30.0),
         );
         let weather_place =
-            label(mtm, "", &font(11.0, Weight::Regular), &white(0.7), rect(12.0, ch - 26.0, col - 18.0, 14.0));
+            label(mtm, "", &font(11.0, Weight::Regular), &white(0.7), rect(12.0, ch - 25.5, col - 18.0, 14.0));
         for v in [&*weather_icon as &NSView, &weather_temp, &weather_place] {
             weather_card.addSubview(v);
         }
@@ -148,9 +148,9 @@ impl CompactView {
         let accessory_icon =
             symbol_view(mtm, "airpods", 12.0, &white(0.6), rect(col - 12.0 - 16.0, 13.0, 16.0, 15.0), "Accessory");
         let battery_pct =
-            label(mtm, "--", &mono_digits(26.0, Weight::Semibold), &p.primary, rect(12.0, ch - 57.0, col - 18.0, 30.0));
+            label(mtm, "--", &mono_digits(26.0, Weight::Semibold), &p.primary, rect(12.0, ch - 54.5, col - 18.0, 30.0));
         let battery_detail =
-            label(mtm, "", &font(11.0, Weight::Regular), &white(0.7), rect(12.0, ch - 26.0, col - 18.0, 14.0));
+            label(mtm, "", &font(11.0, Weight::Regular), &white(0.7), rect(12.0, ch - 25.5, col - 18.0, 14.0));
         for v in [&*battery_glyph_host as &NSView, &accessory_icon, &battery_pct, &battery_detail] {
             battery_card.addSubview(v);
         }

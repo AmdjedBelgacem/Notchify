@@ -930,13 +930,13 @@ impl ExpandedView {
         self.tray_scroll.setHidden(snap.tray.is_empty());
         let rows = snap.tray.len().div_ceil(2);
         let visible_h = self.tray_scroll.frame().size.height;
-        self.tray_doc.setFrame(rect(0.0, 0.0, self.tray_width, (rows as f64 * (TILE_H + 8.0) + 16.0).max(visible_h)));
+        self.tray_doc.setFrame(rect(0.0, 0.0, self.tray_width, (rows as f64 * (TILE_H + 12.0) + 12.0).max(visible_h)));
         let cw = (self.tray_width - 24.0 - 8.0) / 2.0;
         for (i, item) in snap.tray.iter().enumerate() {
             let (c, r) = (i % 2, i / 2);
             let tile = TrayItemView::create(
                 mtm,
-                rect(12.0 + c as f64 * (cw + 8.0), 12.0 + r as f64 * (TILE_H + 8.0), cw, TILE_H),
+                rect(12.0 + c as f64 * (cw + 8.0), 8.0 + r as f64 * (TILE_H + 12.0), cw, TILE_H),
                 item.path.clone(),
             );
             let is_image = item.path.extension().and_then(|e| e.to_str()).is_some_and(|e| {

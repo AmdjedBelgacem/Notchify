@@ -82,9 +82,9 @@ impl PeekView {
         let ow = (crate::ui::text_width(&attributed("Open", &open_font, &p.primary)) + 24.0).ceil();
         let tx = 64.0;
         let tw = w - tx - ow - 28.0;
-        let dot = shape_view(mtm, rect(tx, cy - 13.0, 6.0, 6.0), &p.warning, 3.0);
+        let dot = shape_view(mtm, rect(tx, cy - 11.0, 6.0, 6.0), &p.warning, 3.0);
         let summary =
-            label(mtm, "", &font(11.5, Weight::Semibold), &p.secondary, rect(tx + 12.0, cy - 18.0, tw - 12.0, 15.0));
+            label(mtm, "", &font(11.5, Weight::Semibold), &p.secondary, rect(tx + 12.0, cy - 16.0, tw - 12.0, 15.0));
         let title = label(mtm, "", &font(14.0, Weight::Semibold), &p.primary, rect(tx, cy - 1.0, tw, 18.0));
         let target = crate::ui::ActionTarget::new(mtm, |_| {});
         let open = pill_button(
