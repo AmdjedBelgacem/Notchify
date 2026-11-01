@@ -30,7 +30,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 const WIDTH: f64 = 960.0;
-const HEIGHT: f64 = 680.0;
+const HEIGHT: f64 = 700.0;
 const SIDEBAR: f64 = 248.0;
 const CONTENT_PAD: f64 = 36.0;
 const HEADER_H: f64 = 96.0;
@@ -70,6 +70,46 @@ fn style_toggle(b: &NSButton, on: bool) {
             k.setPosition(objc2_foundation::NSPoint::new(x, TOGGLE_H / 2.0));
         }
     }
+}
+
+/// The board's button: a dark rounded pill (or blue when primary) with the
+/// label centred.
+fn pill_button(
+    mtm: MainThreadMarker,
+    title: &str,
+    target: &crate::ui::ActionTarget,
+    frame: objc2_foundation::NSRect,
+    primary: bool,
+) -> Retained<NSButton> {
+    // SAFETY: valid target/selector; the target is kept alive by the caller.
+    let b = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &ns(title),
+            Some(target.as_any()),
+            Some(crate::ui::ActionTarget::action()),
+            mtm,
+        )
+    };
+    b.setBordered(false);
+    b.setFrame(frame);
+    b.setAlignment(NSTextAlignment::Center);
+    b.setAttributedTitle(&attributed(
+        title,
+        &font(13.0, Weight::Medium),
+        &rgba(1.0, 1.0, 1.0, if primary { 1.0 } else { 0.92 }),
+    ));
+    b.setWantsLayer(true);
+    if let Some(l) = b.layer() {
+        l.setCornerRadius(8.0);
+        if primary {
+            l.setBackgroundColor(Some(&rgba(0.2, 0.5, 0.98, 1.0).CGColor()));
+        } else {
+            l.setBackgroundColor(Some(&rgba(0.11, 0.11, 0.125, 1.0).CGColor()));
+            l.setBorderWidth(1.0);
+            l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.10).CGColor()));
+        }
+    }
+    b
 }
 
 /// Settings panes, in sidebar order.
@@ -240,9 +280,6 @@ fn side_bg() -> Retained<NSColor> {
 }
 fn card_bg() -> Retained<NSColor> {
     rgba(0.082, 0.082, 0.094, 1.0)
-}
-fn accent() -> Retained<NSColor> {
-    rgba(0.298, 0.553, 1.0, 1.0)
 }
 
 /// Meaning of a status capsule.
@@ -657,12 +694,7 @@ impl Form<'_> {
         for ((t, primary, f), width) in buttons.into_iter().zip(bw).rev() {
             x -= width;
             let target = self.targets.add(self.mtm, move |_| f());
-            let b = crate::ui::text_button(self.mtm, t, &target, rect(x, (h - 24.0) / 2.0, width, 24.0));
-            b.setControlSize(NSControlSize::Regular);
-            if primary {
-                b.setBezelColor(Some(&accent()));
-                b.setKeyEquivalent(&ns(""));
-            }
+            let b = pill_button(self.mtm, t, &target, rect(x, (h - 28.0) / 2.0, width, 28.0), primary);
             row.addSubview(&b);
             made.push(b);
             x -= 8.0;
@@ -694,7 +726,7 @@ impl Form<'_> {
             rect(14.0, 9.0, GROUP_W - 120.0, 16.0),
         ));
         let target = self.targets.add(self.mtm, move |_| copy());
-        let b = crate::ui::text_button(self.mtm, "Copy", &target, rect(GROUP_W - 8.0 - 64.0, 5.0, 64.0, 24.0));
+        let b = pill_button(self.mtm, "Copy", &target, rect(GROUP_W - 8.0 - 64.0, 4.0, 64.0, 26.0), false);
         b.setControlSize(NSControlSize::Regular);
         card.addSubview(&b);
         card.addSubview(&shape_view(self.mtm, rect(0.0, 34.0, GROUP_W, 0.5), &hairline(), 0.0));
