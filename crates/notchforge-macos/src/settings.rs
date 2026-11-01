@@ -1162,6 +1162,13 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 c.providers.bluetooth,
                 |cfg, on| cfg.providers.bluetooth = on,
             );
+            form.begin("Media players");
+            form.switch(
+                "Spotify and Apple Music",
+                Some("Now playing, controls and playlists. Needs Automation."),
+                c.providers.media,
+                |cfg, on| cfg.providers.media = on,
+            );
             form.begin("Advanced");
             form.action_row(
                 "Configuration",
@@ -1356,12 +1363,6 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 Some("Reads CoreAudio. No permission needed."),
                 c.providers.audio,
                 |cfg, on| cfg.providers.audio = on,
-            );
-            form.switch(
-                "Spotify and Apple Music",
-                Some("Now playing, controls and playlists. Needs Automation."),
-                c.providers.media,
-                |cfg, on| cfg.providers.media = on,
             );
             let polls = [5u64, 10, 30, 60];
             form.popup(
