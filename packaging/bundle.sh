@@ -48,6 +48,7 @@ for bin in "${BINS[@]}"; do
 done
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" packaging/Info.plist > "$APP/Contents/Info.plist"
 cp config/notchforge.example.toml "$APP/Contents/Resources/"
+packaging/make_icns.sh packaging/icon/AppIcon-1024.png "$APP/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 IDENTITY="${CODESIGN_IDENTITY:--}"
