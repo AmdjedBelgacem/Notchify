@@ -496,6 +496,48 @@ pub fn set_notch_flare(layer: &objc2_quartz_core::CAShapeLayer, e: f64, left: bo
     layer.setPath(Some(&path));
 }
 
+/// The board's Spotify mark: three black arcs, 14 pt square (drawn for the
+/// green disc behind it).
+pub fn spotify_mark(mtm: MainThreadMarker, frame: NSRect) -> Retained<FlippedView> {
+    use objc2_core_graphics::CGMutablePath as P;
+    let v = FlippedView::new(mtm, frame);
+    v.setWantsLayer(true);
+    let k = frame.size.width / 24.0;
+    let path = P::new();
+    let arcs = [
+        ((5.0, 9.0), (9.5, 7.5), (14.5, 8.0), (19.0, 10.5)),
+        ((6.0, 13.0), (9.5, 12.0), (13.5, 12.3), (17.0, 14.2)),
+        ((7.0, 17.0), (10.0, 16.3), (12.5, 16.6), (15.0, 17.9)),
+    ];
+    // SAFETY: null transforms are allowed; the path is owned by us.
+    unsafe {
+        for (a, c1, c2, e) in arcs {
+            P::move_to_point(Some(&path), std::ptr::null(), a.0 * k, a.1 * k);
+            P::add_curve_to_point(
+                Some(&path),
+                std::ptr::null(),
+                c1.0 * k,
+                c1.1 * k,
+                c2.0 * k,
+                c2.1 * k,
+                e.0 * k,
+                e.1 * k,
+            );
+        }
+    }
+    let shape = objc2_quartz_core::CAShapeLayer::new();
+    shape.setFrame(NSRect::new(NSPoint::new(0.0, 0.0), frame.size));
+    shape.setPath(Some(&path));
+    shape.setFillColor(None);
+    shape.setStrokeColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
+    shape.setLineWidth(2.6 * k);
+    shape.setLineCap(&ns("round"));
+    if let Some(l) = v.layer() {
+        l.addSublayer(&shape);
+    }
+    v
+}
+
 /// Like [`attributed`], with `kern` pt of extra space after every character
 /// (letter-spaced captions).
 pub fn attributed_tracked(

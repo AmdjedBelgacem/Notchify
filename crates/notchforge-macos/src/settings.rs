@@ -713,14 +713,18 @@ impl Form<'_> {
                 l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.14).CGColor()));
             }
             let disc = shape_view(self.mtm, rect(6.0, 6.0, 22.0, 22.0), &crate::ui::rgb8(color), 11.0);
-            disc.addSubview(&crate::ui::symbol_view(
-                self.mtm,
-                sym,
-                12.0,
-                &NSColor::blackColor(),
-                rect(4.0, 4.0, 14.0, 14.0),
-                title,
-            ));
+            if sym == "spotify" {
+                disc.addSubview(&crate::ui::spotify_mark(self.mtm, rect(4.0, 4.0, 14.0, 14.0)));
+            } else {
+                disc.addSubview(&crate::ui::symbol_view(
+                    self.mtm,
+                    sym,
+                    12.0,
+                    &NSColor::blackColor(),
+                    rect(4.0, 4.0, 14.0, 14.0),
+                    title,
+                ));
+            }
             tile.addSubview(&disc);
             row.addSubview(&tile);
             let inner = FlippedView::new(self.mtm, rect(icon_w, 0.0, w - icon_w, h));
@@ -1404,7 +1408,7 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 }),
                 if preview() { None } else { Some((status, status_tone)) },
                 vec![button],
-                Some(("waveform", (30, 215, 96))),
+                Some(("spotify", (30, 215, 96))),
             );
             if !signed_in && !has_id {
                 for b in &made {
