@@ -5,6 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="dist/NotchForge.app"
 export NOTCHFORGE_HOME="$(mktemp -d)"
+# These checks send agent notifications straight at the app; skip the in-notch approval step.
+printf '[agents]\nrequire_approval = false\n' > "$NOTCHFORGE_HOME/config.toml"
 LOG="$NOTCHFORGE_HOME/stderr.log"
 
 "$APP/Contents/MacOS/notchforge" -v >"$LOG" 2>&1 &

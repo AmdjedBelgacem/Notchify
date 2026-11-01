@@ -17,7 +17,7 @@
 
 use crate::apps::AppCategory;
 use crate::config::NotificationsConfig;
-use crate::model::{NewNotification, Notification, NotificationId, Priority};
+use crate::model::{NewNotification, Notification, NotificationId, NotificationKind, Priority};
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -140,7 +140,9 @@ impl Pipeline {
         let window_ms = (cfg.dedupe_window_secs * 1000) as i64;
         self.seen.retain(|_, t| now_ms - *t <= window_ms);
         let dk = dedupe_key(&n);
-        if self.seen.contains_key(&dk) {
+        // Authorization prompts reflect state (asking again after a dismissal
+        // is right), not noise, so they are never collapsed as duplicates.
+        if n.kind != NotificationKind::Authorization && self.seen.contains_key(&dk) {
             return Outcome::Duplicate;
         }
         self.seen.insert(dk, now_ms);

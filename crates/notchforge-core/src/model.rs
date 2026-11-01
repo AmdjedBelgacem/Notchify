@@ -44,6 +44,10 @@ pub enum NotificationKind {
     NeedsInput,
     Error,
     ToolCall,
+    /// An authorization request raised by NotchForge itself (an agent asking
+    /// to show notifications, a sign-in waiting on the browser). Only
+    /// [`Origin::Internal`] may produce it; no external payload parses to it.
+    Authorization,
     #[default]
     Info,
 }
@@ -72,7 +76,7 @@ impl NotificationKind {
     /// Default priority for agent events of this kind.
     pub fn default_priority(self) -> Priority {
         match self {
-            NotificationKind::NeedsInput | NotificationKind::Error => Priority::High,
+            NotificationKind::NeedsInput | NotificationKind::Error | NotificationKind::Authorization => Priority::High,
             NotificationKind::TaskFinished | NotificationKind::Message => Priority::Normal,
             NotificationKind::ToolCall | NotificationKind::Info => Priority::Low,
         }
@@ -84,6 +88,7 @@ impl NotificationKind {
             NotificationKind::TaskFinished => "checkmark.circle.fill",
             NotificationKind::NeedsInput => "questionmark.bubble.fill",
             NotificationKind::Error => "exclamationmark.triangle.fill",
+            NotificationKind::Authorization => "lock.shield.fill",
             NotificationKind::ToolCall => "wrench.and.screwdriver.fill",
             NotificationKind::Info => "info.circle.fill",
         }
@@ -101,6 +106,20 @@ pub enum Origin {
     NotificationCenterDb,
     AccessibilityBanner,
     Internal,
+}
+
+/// Thread-key prefix of an agent-access prompt; the rest is the app's rule key.
+pub const AUTH_THREAD_AGENT: &str = "auth:agent:";
+/// Thread key of the Spotify sign-in prompt.
+pub const AUTH_THREAD_SPOTIFY: &str = "auth:spotify";
+
+/// What an [`NotificationKind::Authorization`] notification asks about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthTarget {
+    /// A coding agent (by rule key) wants its notifications shown: Allow / Deny.
+    Agent(String),
+    /// Spotify's sign-in is waiting on the browser: Cancel.
+    Spotify,
 }
 
 /// A notification as produced by a provider, before the pipeline assigns an id.
@@ -142,6 +161,17 @@ pub struct Notification {
 }
 
 impl Notification {
+    /// What this authorization prompt is about, if it is one.
+    pub fn auth_target(&self) -> Option<AuthTarget> {
+        if self.kind != NotificationKind::Authorization {
+            return None;
+        }
+        match self.thread.as_deref()? {
+            AUTH_THREAD_SPOTIFY => Some(AuthTarget::Spotify),
+            t => t.strip_prefix(AUTH_THREAD_AGENT).map(|k| AuthTarget::Agent(k.to_owned())),
+        }
+    }
+
     pub fn category(&self) -> AppCategory {
         self.app.category()
     }
@@ -759,6 +789,8 @@ pub enum PlaylistStatus {
     Loaded,
     /// Spotify needs a Web API client ID / sign-in to list playlists.
     NeedsSpotifyLogin,
+    /// The browser sign-in is open and waiting for the user to approve.
+    SigningIn,
     /// macOS Automation permission was denied for this player.
     NeedsAutomation,
     Failed(String),

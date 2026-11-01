@@ -38,6 +38,17 @@ define_class!(
             true
         }
 
+        /// A pinned panel closes as soon as it stops being the key window:
+        /// the user clicked into another app or window. (Clicks in other apps
+        /// also arrive through the global event monitor; this covers the
+        /// cases where that one does not fire.)
+        #[unsafe(method(resignKeyWindow))]
+        fn resign_key_window(&self) {
+            // SAFETY: forwarding to NSWindow's implementation.
+            let _: () = unsafe { msg_send![super(self), resignKeyWindow] };
+            with_controller(|c| c.panel_resigned_key());
+        }
+
         #[unsafe(method(canBecomeMainWindow))]
         fn can_become_main(&self) -> bool {
             false

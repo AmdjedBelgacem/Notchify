@@ -66,6 +66,9 @@ socket_enabled = true
 # socket_path = "/custom/agent.sock"   # default: <data dir>/agent.sock
 inbox_enabled = true
 # inbox_path = "/custom/inbox.jsonl"   # default: <data dir>/inbox.jsonl
+# Ask in the notch before a coding agent's notifications are shown the first
+# time (Allow / Deny, remembered per agent in trust.json).
+require_approval = true
 
 [notifications]
 max_items = 100

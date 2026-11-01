@@ -98,6 +98,8 @@ pub enum ProviderCommand {
     SetOutputDevice(String),
     /// Start the Spotify Web API sign-in flow (opens the browser).
     SpotifyConnect,
+    /// Give up a sign-in that is waiting on the browser.
+    SpotifyCancel,
     /// Forget the stored Spotify token.
     SpotifyDisconnect,
 }

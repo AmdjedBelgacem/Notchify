@@ -368,13 +368,18 @@ impl Provider for MediaProvider {
                     Wake::Tick => {}
                     Wake::Playlists(result) => {
                         s.loading.remove(&result.0);
-                        apply_playlists(&mut s.state, result);
+                        // A reload racing the browser sign-in must not erase
+                        // the "waiting for approval" state.
+                        if !(result.0 == MediaPlayer::Spotify && login.is_some()) {
+                            apply_playlists(&mut s.state, result);
+                        }
                     }
                     Wake::Login(r) => {
                         login = None;
                         match r {
                             Ok(Ok(())) => {
                                 tracing::info!("signed in to Spotify");
+                                apply_playlists(&mut s.state, (MediaPlayer::Spotify, PlaylistStatus::Unknown, vec![]));
                                 s.reload_playlists(MediaPlayer::Spotify, &ctx, true);
                             }
                             Ok(Err(e)) => {
@@ -382,7 +387,11 @@ impl Provider for MediaProvider {
                                 let failed = PlaylistStatus::Failed(e.to_string());
                                 apply_playlists(&mut s.state, (MediaPlayer::Spotify, failed, vec![]));
                             }
-                            Err(e) => tracing::warn!(error = %e, "Spotify sign-in task failed"),
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Spotify sign-in task failed");
+                                let back = PlaylistStatus::NeedsSpotifyLogin;
+                                apply_playlists(&mut s.state, (MediaPlayer::Spotify, back, vec![]));
+                            }
                         }
                     }
                     Wake::Command(ProviderCommand::Media { player, action }) => {
@@ -404,6 +413,16 @@ impl Provider for MediaProvider {
                             login = Some(tokio::spawn(async move {
                                 spotify::login(&http, &path, &id, port, notchforge_core::time::now_ms).await
                             }));
+                            // Tell the UI the browser sign-in is open and waiting.
+                            let waiting = PlaylistStatus::SigningIn;
+                            apply_playlists(&mut s.state, (MediaPlayer::Spotify, waiting, vec![]));
+                        }
+                    }
+                    Wake::Command(ProviderCommand::SpotifyCancel) => {
+                        if let Some(h) = login.take() {
+                            h.abort();
+                            let back = PlaylistStatus::NeedsSpotifyLogin;
+                            apply_playlists(&mut s.state, (MediaPlayer::Spotify, back, vec![]));
                         }
                     }
                     Wake::Command(ProviderCommand::SpotifyDisconnect) => {

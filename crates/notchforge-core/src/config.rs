@@ -194,6 +194,9 @@ pub struct AgentsConfig {
     pub inbox_enabled: bool,
     /// Overrides the default `<data dir>/inbox.jsonl`.
     pub inbox_path: Option<PathBuf>,
+    /// Ask in the notch before a coding agent's notifications are shown for
+    /// the first time. Allow / Deny is remembered per agent.
+    pub require_approval: bool,
 }
 
 impl Default for AgentsConfig {
@@ -206,6 +209,7 @@ impl Default for AgentsConfig {
             socket_path: None,
             inbox_enabled: true,
             inbox_path: None,
+            require_approval: true,
         }
     }
 }
@@ -494,6 +498,11 @@ impl Paths {
 
     pub fn inbox_path(&self, cfg: &AgentsConfig) -> PathBuf {
         cfg.inbox_path.clone().unwrap_or_else(|| self.data_dir.join("inbox.jsonl"))
+    }
+
+    /// Remembered agent Allow / Deny decisions.
+    pub fn trust_file(&self) -> PathBuf {
+        self.data_dir.join("trust.json")
     }
 
     pub fn tray_state(&self) -> PathBuf {

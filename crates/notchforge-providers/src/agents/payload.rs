@@ -112,7 +112,7 @@ impl AgentPayload {
                 NotificationKind::Error => "Error",
                 NotificationKind::ToolCall => "Running a tool",
                 NotificationKind::Message => "New message",
-                NotificationKind::Info => "Update",
+                NotificationKind::Info | NotificationKind::Authorization => "Update",
             };
             match &project {
                 Some(p) => format!("{what} · {p}"),

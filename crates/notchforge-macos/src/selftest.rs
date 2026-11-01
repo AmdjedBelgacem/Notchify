@@ -551,6 +551,31 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             let alive = with_controller(|c| c.panel.isVisible()).unwrap_or(false);
             ctx.report.borrow_mut().check("relayout: panel still on screen", alive, "");
         }
+        // ── click the notch, then click away: it closes again ──
+        16 => {
+            with_controller(|c| c.collapse());
+        }
+        17 => {
+            with_controller(|c| c.toggle());
+        }
+        18 => {
+            let st = state();
+            ctx.report.borrow_mut().check(
+                "pinned: opened by a click on the notch",
+                st == Some(State::Expanded),
+                format!("{st:?}"),
+            );
+            // The panel stops being key when the user clicks into another app.
+            with_controller(|c| c.panel_resigned_key());
+        }
+        19 => {
+            let st = state();
+            ctx.report.borrow_mut().check(
+                "pinned: closes when the user clicks away",
+                st == Some(State::Collapsed),
+                format!("{st:?}"),
+            );
+        }
         _ => finish(ctx),
     }
 }

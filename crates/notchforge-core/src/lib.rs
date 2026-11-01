@@ -28,5 +28,6 @@ pub mod provider;
 pub mod spring;
 pub mod time;
 pub mod tray;
+pub mod trust;
 
 pub use error::{CoreError, Result};

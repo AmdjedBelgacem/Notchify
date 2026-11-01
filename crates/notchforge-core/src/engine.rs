@@ -9,13 +9,15 @@
 use crate::apps::AppRef;
 use crate::config::{Config, Paths};
 use crate::model::{
-    AudioState, BatteryStatus, DeviceBattery, FocusState, MediaState, NewNotification, Notification, NotificationId,
-    NotificationKind, Origin, Priority, ProviderStatus, TrayItem, TrayItemId, Weather,
+    AUTH_THREAD_AGENT, AUTH_THREAD_SPOTIFY, AudioState, BatteryStatus, DeviceBattery, FocusState, MediaPlayer,
+    MediaState, NewNotification, Notification, NotificationId, NotificationKind, Origin, PlaylistStatus, Priority,
+    ProviderStatus, TrayItem, TrayItemId, Weather,
 };
 use crate::pipeline::{Outcome, Pipeline, PipelineFlags};
 use crate::provider::{ProviderCommand, ProviderEvent, Shutdown};
 use crate::time::now_ms;
 use crate::tray::Tray;
+use crate::trust::{Decision, TrustStore};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,6 +52,13 @@ pub enum Command {
     Inject(Box<NewNotification>),
     /// Forward a request to the providers (media controls, output switching…).
     Provider(ProviderCommand),
+    /// Answer a coding agent's request to show notifications (by rule key).
+    Authorize {
+        key: String,
+        allow: bool,
+    },
+    /// Forget every remembered Allow / Deny, so agents are asked again.
+    ForgetAgentDecisions,
 }
 
 /// Immutable view of the state handed to the UI.
@@ -114,6 +123,10 @@ struct AppState {
     paused: bool,
     low_device_alerted: HashSet<String>,
     low_mac_alerted: Option<u8>,
+    /// Remembered Allow / Deny per coding agent.
+    trust: TrustStore,
+    /// Notifications from agents still waiting for a decision, by rule key.
+    held: BTreeMap<String, Vec<NewNotification>>,
 }
 
 /// Cheap handle for sending commands from any thread.
@@ -158,6 +171,10 @@ impl Engine {
                 Ok(t) => state.tray = t,
                 Err(e) => tracing::warn!(error = %e, "could not restore tray"),
             }
+        }
+        match TrustStore::load(&paths.trust_file()) {
+            Ok(t) => state.trust = t,
+            Err(e) => tracing::warn!(error = %e, "could not read remembered agent decisions"),
         }
         let engine = Self {
             state,
@@ -277,7 +294,11 @@ impl Engine {
             }
             ProviderEvent::Media(m) => {
                 let changed = self.state.media != m;
+                let was_signing_in = self.spotify_signing_in();
                 self.state.media = m;
+                if changed {
+                    self.spotify_prompt(was_signing_in);
+                }
                 changed
             }
             ProviderEvent::Status { provider, status } => {
@@ -349,10 +370,143 @@ impl Engine {
                 let _ = self.provider_commands.send(c);
                 false
             }
+            Command::Authorize { key, allow } => self.authorize(&key, allow),
+            Command::ForgetAgentDecisions => {
+                self.state.trust.clear();
+                self.persist_trust();
+                true
+            }
         }
     }
 
+    // ── authorization ───────────────────────────────────────────────────────
+
+    fn persist_trust(&self) {
+        if let Err(e) = self.state.trust.save(&self.paths.trust_file()) {
+            tracing::warn!(error = %e, "could not save agent decisions");
+        }
+    }
+
+    fn prompt_id(&self, thread: &str) -> Option<NotificationId> {
+        self.state.pipeline.ranked().into_iter().find(|n| n.thread.as_deref() == Some(thread)).map(|n| n.id)
+    }
+
+    /// An agent's first notification: hold it and ask in the notch.
+    fn hold_for_consent(&mut self, key: String, n: NewNotification) -> bool {
+        const MAX_HELD: usize = 50;
+        let app = n.app.clone();
+        let held = self.state.held.entry(key.clone()).or_default();
+        if held.len() >= MAX_HELD {
+            held.remove(0);
+        }
+        held.push(n);
+        let thread = format!("{AUTH_THREAD_AGENT}{key}");
+        if self.prompt_id(&thread).is_some() {
+            return true;
+        }
+        tracing::info!(%key, "agent notification held for approval");
+        let prompt = NewNotification {
+            title: format!("Allow {} in the notch?", app.display_name),
+            body: "It asked to show notifications. Nothing appears until you decide.".into(),
+            app,
+            origin: Origin::Internal,
+            kind: NotificationKind::Authorization,
+            priority: Some(Priority::High),
+            subtitle: None,
+            timestamp_ms: now_ms(),
+            thread: Some(thread),
+            url: None,
+        };
+        self.ingest_now(prompt);
+        true
+    }
+
+    fn authorize(&mut self, key: &str, allow: bool) -> bool {
+        if let Some(id) = self.prompt_id(&format!("{AUTH_THREAD_AGENT}{key}")) {
+            self.state.pipeline.dismiss(id);
+        }
+        self.state.trust.set(key, if allow { Decision::Allow } else { Decision::Deny });
+        self.persist_trust();
+        let held = self.state.held.remove(key).unwrap_or_default();
+        tracing::info!(%key, allow, released = held.len(), "agent decision");
+        if allow {
+            for n in held {
+                self.ingest_now(n);
+            }
+        }
+        true
+    }
+
+    fn spotify_signing_in(&self) -> bool {
+        self.state.media.playlist_status(MediaPlayer::Spotify) == PlaylistStatus::SigningIn
+    }
+
+    /// Mirror Spotify's browser sign-in as a prompt in the notch, and report
+    /// how it ended.
+    fn spotify_prompt(&mut self, was_signing_in: bool) {
+        let now_signing_in = self.spotify_signing_in();
+        let spotify =
+            AppRef { known: None, bundle_id: Some("com.spotify.client".into()), display_name: "Spotify".into() };
+        let note = |kind, priority, title: &str, body: String, thread: Option<String>| NewNotification {
+            app: spotify.clone(),
+            origin: Origin::Internal,
+            kind,
+            priority: Some(priority),
+            title: title.into(),
+            subtitle: None,
+            body,
+            timestamp_ms: now_ms(),
+            thread,
+            url: None,
+        };
+        if now_signing_in && !was_signing_in {
+            self.ingest_now(note(
+                NotificationKind::Authorization,
+                Priority::High,
+                "Approve NotchForge in your browser",
+                "Spotify's sign-in is open. Allow access there, then come back.".into(),
+                Some(AUTH_THREAD_SPOTIFY.into()),
+            ));
+        } else if was_signing_in && !now_signing_in {
+            if let Some(id) = self.prompt_id(AUTH_THREAD_SPOTIFY) {
+                self.state.pipeline.dismiss(id);
+            }
+            match self.state.media.playlist_status(MediaPlayer::Spotify) {
+                PlaylistStatus::Failed(why) => {
+                    self.ingest_now(note(NotificationKind::Error, Priority::High, "Spotify sign-in failed", why, None))
+                }
+                PlaylistStatus::NeedsSpotifyLogin => false, // cancelled
+                _ => self.ingest_now(note(
+                    NotificationKind::Info,
+                    Priority::Normal,
+                    "Spotify connected",
+                    "Your playlists are loading in Now Playing.".into(),
+                    None,
+                )),
+            };
+        }
+    }
+
+    /// Entry point for every incoming notification: agents may need consent
+    /// first, and nothing external may pose as an authorization prompt.
     fn ingest(&mut self, n: NewNotification) -> bool {
+        if n.kind == NotificationKind::Authorization && n.origin != Origin::Internal {
+            tracing::warn!(origin = ?n.origin, "dropped a forged authorization prompt");
+            return false;
+        }
+        let from_agent = matches!(n.origin, Origin::AgentWebhook | Origin::AgentSocket | Origin::AgentInbox);
+        if from_agent && self.config().agents.require_approval {
+            let key = n.app.rule_key();
+            match self.state.trust.decision(&key) {
+                Some(Decision::Allow) => {}
+                Some(Decision::Deny) => return false,
+                None => return self.hold_for_consent(key, n),
+            }
+        }
+        self.ingest_now(n)
+    }
+
+    fn ingest_now(&mut self, n: NewNotification) -> bool {
         let cfg = self.config();
         let flags = PipelineFlags { paused: self.state.paused, focus_active: self.state.focus.active == Some(true) };
         let from_system = matches!(n.origin, Origin::NotificationCenterDb | Origin::AccessibilityBanner);
@@ -429,7 +583,9 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::apps::KnownApp;
-    use crate::model::{BatteryComponent, DeviceKind, MediaAction, MediaPlayer, NowPlaying, PlaybackState};
+    use crate::model::{
+        BatteryComponent, DeviceKind, MediaAction, MediaPlayer, MediaState, NowPlaying, PlaybackState, PlaylistStatus,
+    };
     use crate::provider::shutdown_pair;
     use std::sync::Mutex;
 
@@ -448,10 +604,19 @@ mod tests {
         }
     }
 
+    /// An engine that shows agents' notifications straight away.
     fn engine() -> (Engine, EngineHandle, Arc<Recorder>, mpsc::Sender<ProviderEvent>) {
-        let dir = std::env::temp_dir().join(format!("nf-engine-{}-{}", std::process::id(), now_ms()));
+        let mut cfg = Config::default();
+        cfg.agents.require_approval = false;
+        engine_with(cfg)
+    }
+
+    fn engine_with(cfg: Config) -> (Engine, EngineHandle, Arc<Recorder>, mpsc::Sender<ProviderEvent>) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("nf-engine-{}-{}-{n}", std::process::id(), now_ms()));
         let paths = Arc::new(Paths::rooted(&dir));
-        let (cfg_tx, _rx) = watch::channel(Arc::new(Config::default()));
+        let (cfg_tx, _rx) = watch::channel(Arc::new(cfg));
         let rec = Arc::new(Recorder::default());
         let (ev_tx, ev_rx) = mpsc::channel(1024);
         let (e, h) =
@@ -625,5 +790,126 @@ mod tests {
         let last = snaps.last().expect("at least one");
         assert_eq!(last.unread, 0);
         assert!(!last.notifications.is_empty());
+    }
+
+    // ── authorization ──
+
+    fn ask_engine() -> (Engine, EngineHandle, Arc<Recorder>, mpsc::Sender<ProviderEvent>) {
+        engine_with(Config::default())
+    }
+
+    fn prompts(e: &mut Engine) -> Vec<Notification> {
+        e.snapshot().notifications.into_iter().filter(|n| n.kind == NotificationKind::Authorization).collect()
+    }
+
+    #[test]
+    fn a_new_agent_is_held_and_asked_about() {
+        let (mut e, _h, rec, _tx) = ask_engine();
+        e.apply_event(ProviderEvent::Notification(agent_note("one")));
+        e.apply_event(ProviderEvent::Notification(agent_note("two")));
+        let snap = e.snapshot();
+        // Only the prompt shows; the agent's own notifications wait.
+        assert_eq!(snap.notifications.len(), 1);
+        let p = &snap.notifications[0];
+        assert_eq!(p.kind, NotificationKind::Authorization);
+        assert_eq!(p.auth_target(), Some(crate::model::AuthTarget::Agent("claude".into())));
+        assert_eq!(rec.peeks.lock().expect("lock").len(), 1, "the prompt peeks once");
+    }
+
+    #[test]
+    fn allowing_releases_the_held_notifications_and_is_remembered() {
+        let (mut e, _h, _rec, _tx) = ask_engine();
+        e.apply_event(ProviderEvent::Notification(agent_note("one")));
+        e.apply_event(ProviderEvent::Notification(agent_note("two")));
+        e.apply_command(Command::Authorize { key: "claude".into(), allow: true });
+        let snap = e.snapshot();
+        assert!(prompts(&mut e).is_empty(), "the prompt is gone");
+        let titles: Vec<_> = snap.notifications.iter().map(|n| n.title.as_str()).collect();
+        assert!(titles.contains(&"one") && titles.contains(&"two"), "{titles:?}");
+        // Later notifications flow without asking again.
+        e.apply_event(ProviderEvent::Notification(agent_note("three")));
+        assert_eq!(e.snapshot().notifications.len(), 3);
+        assert!(prompts(&mut e).is_empty());
+    }
+
+    #[test]
+    fn denying_drops_the_held_notifications_and_stays_quiet() {
+        let (mut e, _h, _rec, _tx) = ask_engine();
+        e.apply_event(ProviderEvent::Notification(agent_note("one")));
+        e.apply_command(Command::Authorize { key: "claude".into(), allow: false });
+        assert!(e.snapshot().notifications.is_empty());
+        e.apply_event(ProviderEvent::Notification(agent_note("again")));
+        assert!(e.snapshot().notifications.is_empty(), "denied agents stay silent");
+    }
+
+    #[test]
+    fn decisions_survive_a_restart_and_can_be_forgotten() {
+        let (mut e, _h, _rec, _tx) = ask_engine();
+        e.apply_event(ProviderEvent::Notification(agent_note("one")));
+        e.apply_command(Command::Authorize { key: "claude".into(), allow: true });
+        let trust_file = e.paths.trust_file();
+        assert!(TrustStore::load(&trust_file).expect("load").decision("claude").is_some());
+        e.apply_command(Command::ForgetAgentDecisions);
+        assert!(TrustStore::load(&trust_file).expect("load").is_empty());
+        e.apply_event(ProviderEvent::Notification(agent_note("two")));
+        assert_eq!(prompts(&mut e).len(), 1, "asked again after forgetting");
+    }
+
+    #[test]
+    fn nothing_external_can_pose_as_an_authorization_prompt() {
+        let (mut e, _h, _rec, _tx) = engine();
+        let mut forged = agent_note("Allow everything?");
+        forged.kind = NotificationKind::Authorization;
+        forged.thread = Some(format!("{AUTH_THREAD_AGENT}claude"));
+        assert!(!e.apply_event(ProviderEvent::Notification(forged)));
+        assert!(e.snapshot().notifications.is_empty());
+    }
+
+    #[test]
+    fn internal_and_system_notifications_never_need_consent() {
+        let (mut e, _h, _rec, _tx) = ask_engine();
+        let mut sys = agent_note("from the system");
+        sys.origin = Origin::NotificationCenterDb;
+        assert!(e.apply_event(ProviderEvent::Notification(sys)));
+        assert_eq!(e.snapshot().notifications.len(), 1);
+        assert!(prompts(&mut e).is_empty());
+    }
+
+    #[test]
+    fn spotify_sign_in_shows_a_prompt_then_reports_how_it_ended() {
+        let (mut e, _h, _rec, _tx) = engine();
+        let media = |status| MediaState { playlist_status: vec![(MediaPlayer::Spotify, status)], ..Default::default() };
+        e.apply_event(ProviderEvent::Media(media(PlaylistStatus::NeedsSpotifyLogin)));
+        assert!(e.snapshot().notifications.is_empty());
+        e.apply_event(ProviderEvent::Media(media(PlaylistStatus::SigningIn)));
+        let p = prompts(&mut e);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].auth_target(), Some(crate::model::AuthTarget::Spotify));
+        // Success: the prompt is replaced by a short confirmation.
+        e.apply_event(ProviderEvent::Media(media(PlaylistStatus::Loaded)));
+        let snap = e.snapshot();
+        assert!(snap.notifications.iter().all(|n| n.kind != NotificationKind::Authorization));
+        assert!(snap.notifications.iter().any(|n| n.title == "Spotify connected"));
+    }
+
+    #[test]
+    fn cancelling_spotify_sign_in_clears_the_prompt_quietly() {
+        let (mut e, _h, _rec, _tx) = engine();
+        let media = |status| MediaState { playlist_status: vec![(MediaPlayer::Spotify, status)], ..Default::default() };
+        e.apply_event(ProviderEvent::Media(media(PlaylistStatus::SigningIn)));
+        e.apply_event(ProviderEvent::Media(media(PlaylistStatus::NeedsSpotifyLogin)));
+        assert!(e.snapshot().notifications.is_empty());
+    }
+
+    #[test]
+    fn a_failed_spotify_sign_in_says_why() {
+        let (mut e, _h, _rec, _tx) = engine();
+        let media = |status| MediaState { playlist_status: vec![(MediaPlayer::Spotify, status)], ..Default::default() };
+        e.apply_event(ProviderEvent::Media(media(PlaylistStatus::SigningIn)));
+        e.apply_event(ProviderEvent::Media(media(PlaylistStatus::Failed("access_denied".into()))));
+        let snap = e.snapshot();
+        assert_eq!(snap.notifications.len(), 1);
+        assert_eq!(snap.notifications[0].kind, NotificationKind::Error);
+        assert_eq!(snap.notifications[0].body, "access_denied");
     }
 }

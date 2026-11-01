@@ -766,6 +766,16 @@ impl Controller {
         self.handle(Event::Escape);
     }
 
+    /// The panel lost key status: if it was pinned open, close it. (A modal
+    /// the island itself raised, such as the resolution confirmation, also
+    /// takes key; closing then is fine, the answer still applies.)
+    pub fn panel_resigned_key(&self) {
+        let pinned = self.machine.try_borrow().map(|m| matches!(m.state(), State::Expanded)).unwrap_or(false);
+        if pinned {
+            self.handle(Event::ClickOutside);
+        }
+    }
+
     pub fn toggle_pause(&self) {
         let paused = self.snapshot.borrow().paused;
         self.engine.send(Command::SetPaused(!paused));
