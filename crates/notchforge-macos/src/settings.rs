@@ -113,6 +113,43 @@ fn pill_button(
     b
 }
 
+thread_local! {
+    /// Self-test only: paint an opaque stand-in behind the glass, since an
+    /// offscreen render has no desktop to blur.
+    static SOLID_GROUND: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Self-test renders: give the glass a stand-in desktop to sit on.
+pub fn set_solid_ground(on: bool) {
+    SOLID_GROUND.with(|p| p.set(on));
+}
+
+/// The Settings window's glass ground: the system blur behind the window, a
+/// dark tint so text keeps its contrast, and a faint top light.
+fn glass_ground(mtm: MainThreadMarker, root: &FlippedView) {
+    use objc2_app_kit::{NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView};
+    let full = rect(0.0, 0.0, WIDTH, HEIGHT);
+    if SOLID_GROUND.with(Cell::get) {
+        let base = shape_view(mtm, full, &rgba(0.16, 0.14, 0.30, 1.0), 0.0);
+        if let Some(l) = base.layer() {
+            let g = crate::ui::gradient_layer(
+                &[(0.94, 0.54, 0.24, 0.55), (0.43, 0.29, 0.76, 0.35), (0.85, 0.25, 0.44, 0.45)],
+                objc2_foundation::NSPoint::new(0.0, 1.0),
+                objc2_foundation::NSPoint::new(1.0, 0.0),
+            );
+            g.setFrame(full);
+            l.addSublayer(&g);
+        }
+        root.addSubview(&base);
+    }
+    let effect = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), full);
+    effect.setMaterial(NSVisualEffectMaterial::HUDWindow);
+    effect.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+    effect.setState(NSVisualEffectState::Active);
+    root.addSubview(&effect);
+    root.addSubview(&shape_view(mtm, full, &rgba(0.0, 0.0, 0.0, 0.34), 0.0));
+}
+
 /// Settings panes, in sidebar order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
@@ -271,16 +308,14 @@ fn text_tertiary() -> Retained<NSColor> {
     rgba(1.0, 1.0, 1.0, 0.5)
 }
 fn hairline() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.07)
-}
-fn ink() -> Retained<NSColor> {
-    rgba(0.043, 0.043, 0.051, 1.0)
+    rgba(1.0, 1.0, 1.0, 0.11)
 }
 fn side_bg() -> Retained<NSColor> {
-    rgba(0.063, 0.063, 0.075, 1.0)
+    rgba(0.0, 0.0, 0.0, 0.20)
 }
 fn card_bg() -> Retained<NSColor> {
-    rgba(0.082, 0.082, 0.094, 1.0)
+    // Glass tiles: ink at 44 %, as on the Glass board.
+    rgba(0.07, 0.07, 0.09, 0.44)
 }
 
 /// Meaning of a status capsule.
@@ -382,7 +417,7 @@ impl Form<'_> {
             self.doc.addSubview(&caption(self.mtm, title, 11.0, rect(CONTENT_PAD + 6.0, self.y.get(), GROUP_W, 14.0)));
             self.y.set(self.y.get() + 22.0);
         }
-        let g = shape_view(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, 0.0), &card_bg(), 13.0);
+        let g = shape_view(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, 0.0), &card_bg(), 18.0);
         if let Some(l) = g.layer() {
             l.setBorderWidth(0.5);
             l.setBorderColor(Some(&hairline().CGColor()));
@@ -891,7 +926,10 @@ impl SettingsWindow {
         window.setTitle(&ns("Notchisland Settings"));
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
-        window.setBackgroundColor(Some(&ink()));
+        // Glass: the window itself is clear; the content draws a blurred,
+        // tinted ground (`glass_ground`).
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
         // SAFETY: AppKit's appearance-name constant.
         if let Some(dark) = NSAppearance::appearanceNamed(unsafe { objc2_app_kit::NSAppearanceNameDarkAqua }) {
             window.setAppearance(Some(&dark));
@@ -922,7 +960,8 @@ impl SettingsWindow {
         self.targets.clear();
         // The content draws its own ground (it must not depend on the window
         // background, which offscreen renders and some transitions skip).
-        let root = shape_view(mtm, rect(0.0, 0.0, WIDTH, HEIGHT), &ink(), 0.0);
+        let root = shape_view(mtm, rect(0.0, 0.0, WIDTH, HEIGHT), &rgba(0.0, 0.0, 0.0, 0.0), 0.0);
+        glass_ground(mtm, &root);
         root.addSubview(&self.sidebar(mtm));
 
         let pane = self.pane.get();

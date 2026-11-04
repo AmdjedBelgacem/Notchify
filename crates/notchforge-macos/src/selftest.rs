@@ -528,6 +528,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
         }
         // ── settings window ──
         13 => {
+            crate::settings::set_solid_ground(true);
             crate::settings::set_preview(true);
             app::show_settings_pane(crate::settings::Pane::Media)
         }
