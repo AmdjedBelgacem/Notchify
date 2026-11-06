@@ -858,7 +858,8 @@ fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engi
     {
         let mut r = ctx.report.borrow_mut();
         r.check("music page: renders track", title == "Self-test track", title);
-        r.check("music page: lists playlists", rows == 3, format!("{rows} rows"));
+        // Three playlist rows plus the queue section (heading + one track).
+        r.check("music page: lists playlists", rows == 3 + 2, format!("{rows} rows"));
     }
     check_pixels(ctx, "music page", 0.004, true);
     if let Some(png) = app::menubar_preview(&fake).as_deref().and_then(png_from_view) {
@@ -1428,8 +1429,18 @@ fn board_snapshots(
         is_dir,
         bytes: None,
         added_at_ms: now,
+        text: None,
     };
-    overview.tray = vec![item(1, report, false), item(2, mockup, false), item(3, dir.join("Assets"), true)];
+    let link = TrayItem {
+        id: TrayItemId(4),
+        name: "github.com/notchforge".into(),
+        path: std::path::PathBuf::new(),
+        is_dir: false,
+        bytes: Some(51),
+        added_at_ms: now,
+        text: Some("https://github.com/notchforge/notchforge".into()),
+    };
+    overview.tray = vec![link, item(1, report, false), item(2, mockup, false), item(3, dir.join("Assets"), true)];
     overview.focus = FocusState { active: Some(true), mode_name: Some("Do Not Disturb".into()) };
 
     // Now Playing: Afterglow on AirPods Pro, Spotify and Safari playing, five playlists.
@@ -1526,6 +1537,10 @@ fn board_snapshots(
         playlist_status: vec![(MediaPlayer::Spotify, PlaylistStatus::Loaded)],
         automation_denied: vec![],
         browser_denied: None,
+        spotify_queue: vec![
+            notchforge_core::model::QueueTrack { title: "Slow Light".into(), artist: "Neon Harbor".into() },
+            notchforge_core::model::QueueTrack { title: "Meridian".into(), artist: "Kite Machine".into() },
+        ],
         up_next: vec![
             notchforge_core::model::UpNextVideo {
                 title: "Daft Punk - One More Time".into(),
@@ -1623,6 +1638,7 @@ fn sample_media() -> notchforge_core::model::MediaState {
         running: vec![MediaPlayer::Spotify],
         browser_denied: None,
         up_next: Vec::new(),
+        spotify_queue: vec![notchforge_core::model::QueueTrack { title: "Next track".into(), artist: "NotchForge".into() }],
         playlists: (1..=3)
             .map(|i| Playlist {
                 player: MediaPlayer::Spotify,

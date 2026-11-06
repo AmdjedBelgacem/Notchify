@@ -53,12 +53,53 @@ impl Tray {
                     is_dir,
                     bytes,
                     added_at_ms: now_ms,
+                    text: None,
                 },
             );
             added += 1;
         }
         self.items.truncate(max_items);
         added
+    }
+
+    /// Shelve a clipboard entry (text or a link). Duplicate text moves to the
+    /// front. Returns whether anything changed.
+    pub fn add_text(&mut self, text: String, max_items: usize, now_ms: i64) -> bool {
+        let trimmed = text.trim().to_owned();
+        if trimmed.is_empty() {
+            return false;
+        }
+        if let Some(pos) = self.items.iter().position(|i| i.text.as_deref() == Some(trimmed.as_str())) {
+            let mut item = self.items.remove(pos);
+            item.added_at_ms = now_ms;
+            self.items.insert(0, item);
+            return true;
+        }
+        // The first line stands in for the name; a bare URL names itself.
+        let name = single_line(&trimmed, 48);
+        self.next_id += 1;
+        self.items.insert(
+            0,
+            TrayItem {
+                id: TrayItemId(self.next_id),
+                path: PathBuf::new(),
+                name,
+                is_dir: false,
+                bytes: Some(trimmed.len() as u64),
+                added_at_ms: now_ms,
+                text: Some(trimmed),
+            },
+        );
+        self.items.truncate(max_items);
+        true
+    }
+
+    /// Is this a shelved link (a bare http(s) URL)?
+    pub fn is_link(item: &TrayItem) -> bool {
+        let Some(t) = &item.text else { return false };
+        t.len() <= 2048
+            && (t.starts_with("http://") || t.starts_with("https://"))
+            && t[8..].chars().all(|c| !c.is_whitespace())
     }
 
     pub fn remove(&mut self, id: TrayItemId) -> Option<TrayItem> {
@@ -74,10 +115,11 @@ impl Tray {
         self.items.iter().find(|i| i.id == id)
     }
 
-    /// Remove items whose file no longer exists. Returns `true` if anything changed.
+    /// Remove items whose file no longer exists. Text items stay. Returns
+    /// `true` if anything changed.
     pub fn prune_missing(&mut self) -> bool {
         let before = self.items.len();
-        self.items.retain(|i| i.path.exists());
+        self.items.retain(|i| i.text.is_some() || i.path.exists());
         before != self.items.len()
     }
 
@@ -117,6 +159,19 @@ pub fn format_bytes(bytes: u64) -> String {
         unit += 1;
     }
     if unit == 0 { format!("{bytes} B") } else { format!("{value:.1} {}", UNITS[unit]) }
+}
+
+/// The text's first line, flattened to one line and capped with an ellipsis.
+fn single_line(text: &str, cap: usize) -> String {
+    let flat: String = text.chars().map(|c| if c == '\n' || c == '\r' { ' ' } else { c }).collect();
+    let flat = flat.trim().to_owned();
+    if flat.chars().count() <= cap {
+        flat
+    } else {
+        let mut s: String = flat.chars().take(cap).collect();
+        s.push('…');
+        s
+    }
 }
 
 #[cfg(test)]
@@ -177,6 +232,54 @@ mod tests {
         let loaded = Tray::load(&state).expect("load");
         assert_eq!(loaded.paths(), vec![f.clone()]);
         assert!(Tray::load(&d.join("missing.json")).expect("empty").items().is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn shelves_text_and_dedupes() {
+        let mut t = Tray::new();
+        assert!(t.add_text("  hello\nworld  ".into(), 5, 1));
+        assert_eq!(t.items()[0].name, "hello world");
+        assert_eq!(t.items()[0].text.as_deref(), Some("hello\nworld"));
+        assert_eq!(t.items()[0].bytes, Some(11));
+        // Whitespace-only is skipped.
+        assert!(!t.add_text("   \n ".into(), 5, 2));
+        // Same text moves to the front instead of duplicating.
+        t.add_text("second".into(), 5, 3);
+        assert_eq!(t.items()[0].name, "second");
+        assert_eq!(t.items().len(), 2);
+        assert!(t.add_text("hello\nworld".into(), 5, 4));
+        assert_eq!(t.items().len(), 2);
+        assert_eq!(t.items()[0].text.as_deref(), Some("hello\nworld"));
+        // Links are recognized.
+        assert!(Tray::is_link(t.items().first().filter(|_| false).unwrap_or(&TrayItem {
+            id: TrayItemId(0),
+            path: PathBuf::new(),
+            name: "x".into(),
+            is_dir: false,
+            bytes: None,
+            added_at_ms: 0,
+            text: Some("https://example.com".into()),
+        })));
+        // Text items survive pruning (their "path" is empty).
+        assert!(!t.prune_missing());
+        assert_eq!(t.items().len(), 2);
+    }
+
+    #[test]
+    fn text_names_are_capped() {
+        let mut t = Tray::new();
+        let long = "x".repeat(80);
+        t.add_text(long.clone(), 3, 0);
+        let name = &t.items()[0].name;
+        assert!(name.chars().count() <= 49, "{name}");
+        assert!(name.ends_with('…'));
+        // Persisted round trip keeps text items.
+        let d = tmpdir("text");
+        let state = d.join("tray.json");
+        t.save(&state).expect("save");
+        let loaded = Tray::load(&state).expect("load");
+        assert_eq!(loaded.items()[0].text.as_deref(), Some(long.as_str()));
         let _ = std::fs::remove_dir_all(&d);
     }
 

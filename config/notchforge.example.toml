@@ -28,6 +28,8 @@ island_on_all_screens = false
 # Or mirror on specific screens only, by display id (from the log line
 # "mirror islands synced"). Leave empty to keep the island on one screen only.
 # mirror_screens = [1]
+# Clicking a mirror moves the island to that screen (until the screen goes
+# away, or you pick a screen in the settings again).
 
 [appearance]
 # "system" follows Accessibility › Reduce motion; "always" | "never"

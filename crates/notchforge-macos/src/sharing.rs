@@ -49,6 +49,13 @@ pub fn copy_text(text: &str) {
     pb.setString_forType(&ns(text), unsafe { NSPasteboardTypeString });
 }
 
+/// The pasteboard's current text, if any.
+pub fn pasteboard_string() -> Option<String> {
+    let pb = NSPasteboard::generalPasteboard();
+    // SAFETY: reading an AppKit constant.
+    pb.stringForType(unsafe { NSPasteboardTypeString }).map(|s| s.to_string())
+}
+
 pub fn copy_paths(paths: &[PathBuf]) {
     let text = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
     copy_text(&text);

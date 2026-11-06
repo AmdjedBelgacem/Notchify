@@ -11,6 +11,8 @@ use std::ffi::c_void;
 
 pub type AudioObjectID = u32;
 pub type OSStatus = i32;
+/// `kAudioHardwareUnpublishedError` — reused here for "no such control".
+pub const kAudioHardwareNoError: OSStatus = 0;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -74,11 +76,13 @@ pub const fn fourcc(s: &[u8; 4]) -> u32 {
 
 pub const kAudioObjectSystemObject: AudioObjectID = 1;
 pub const kAudioObjectPropertyScopeGlobal: u32 = fourcc(b"glob");
+pub const kAudioDevicePropertyScopeInput: u32 = fourcc(b"inpt");
 pub const kAudioDevicePropertyScopeOutput: u32 = fourcc(b"outp");
 pub const kAudioObjectPropertyElementMain: u32 = 0;
 
 pub const kAudioHardwarePropertyDevices: u32 = fourcc(b"dev#");
 pub const kAudioHardwarePropertyDefaultOutputDevice: u32 = fourcc(b"dOut");
+pub const kAudioHardwarePropertyDefaultInputDevice: u32 = fourcc(b"dIn ");
 pub const kAudioHardwarePropertyDefaultSystemOutputDevice: u32 = fourcc(b"sOut");
 /// macOS 14.2+.
 pub const kAudioHardwarePropertyProcessObjectList: u32 = fourcc(b"prs#");
@@ -114,6 +118,10 @@ pub const fn global(selector: u32) -> AudioObjectPropertyAddress {
 
 pub const fn output(selector: u32) -> AudioObjectPropertyAddress {
     addr(selector, kAudioDevicePropertyScopeOutput)
+}
+
+pub const fn input(selector: u32) -> AudioObjectPropertyAddress {
+    addr(selector, kAudioDevicePropertyScopeInput)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -278,6 +286,29 @@ pub fn set_default_output(dev: AudioObjectID) -> Result<(), OSStatus> {
         let _ = set::<u32>(kAudioObjectSystemObject, global(kAudioHardwarePropertyDefaultSystemOutputDevice), dev);
     }
     Ok(())
+}
+
+pub fn default_input() -> Option<AudioObjectID> {
+    get::<u32>(kAudioObjectSystemObject, global(kAudioHardwarePropertyDefaultInputDevice)).filter(|id| *id != 0)
+}
+
+/// Is the default input device muted? Devices without a mute control
+/// (e.g. some USB interfaces) read as unmuted.
+pub fn microphone_muted() -> bool {
+    let Some(dev) = default_input() else { return false };
+    get::<u32>(dev, input(kAudioDevicePropertyMute)).unwrap_or(0) != 0
+}
+
+/// Mute or unmute the default input device. Fails when the device has no
+/// mute control.
+pub fn set_microphone_muted(muted: bool) -> Result<(), OSStatus> {
+    const NO_CONTROL: OSStatus = kAudioHardwareNoError - 1;
+    let Some(dev) = default_input() else { return Err(NO_CONTROL) };
+    if !has(dev, input(kAudioDevicePropertyMute)) {
+        return Err(NO_CONTROL); // no mute control on this device
+    }
+    let status = set::<u32>(dev, input(kAudioDevicePropertyMute), u32::from(muted));
+    if status != 0 { Err(status) } else { Ok(()) }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

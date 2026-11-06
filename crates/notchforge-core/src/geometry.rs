@@ -159,18 +159,27 @@ pub fn detect_notch(screen: &ScreenInfo) -> Notch {
     }
 }
 
-/// Pick the screen that hosts the UI.
-pub fn choose_screen(screens: &[ScreenInfo], choice: ScreenChoice, mouse: Option<Point>) -> Option<usize> {
+/// Pick the screen that hosts the UI. `focus` pins it to a screen by id
+/// (a clicked mirror): it wins over `choice` while that screen exists.
+pub fn choose_screen(
+    screens: &[ScreenInfo],
+    choice: ScreenChoice,
+    mouse: Option<Point>,
+    focus: Option<u32>,
+) -> Option<usize> {
     if screens.is_empty() {
         return None;
     }
     let main = screens.iter().position(|s| s.is_main).unwrap_or(0);
-    let picked = match choice {
-        ScreenChoice::Notch => {
-            screens.iter().position(ScreenInfo::has_notch).or_else(|| screens.iter().position(|s| s.is_builtin))
-        }
-        ScreenChoice::Main => Some(main),
-        ScreenChoice::Mouse => mouse.and_then(|p| screens.iter().position(|s| s.frame.contains_inclusive(p))),
+    let picked = match focus {
+        Some(id) => screens.iter().position(|s| s.id == id),
+        None => match choice {
+            ScreenChoice::Notch => {
+                screens.iter().position(ScreenInfo::has_notch).or_else(|| screens.iter().position(|s| s.is_builtin))
+            }
+            ScreenChoice::Main => Some(main),
+            ScreenChoice::Mouse => mouse.and_then(|p| screens.iter().position(|s| s.frame.contains_inclusive(p))),
+        },
     };
     Some(picked.unwrap_or(main))
 }
@@ -501,19 +510,24 @@ mod tests {
         let mut builtin = mbp14();
         builtin.is_main = false;
         let screens = vec![ext, builtin];
-        assert_eq!(choose_screen(&screens, ScreenChoice::Notch, None), Some(1));
-        assert_eq!(choose_screen(&screens, ScreenChoice::Main, None), Some(0));
-        assert_eq!(choose_screen(&screens, ScreenChoice::Mouse, Some(Point { x: 100.0, y: 100.0 })), Some(1));
+        assert_eq!(choose_screen(&screens, ScreenChoice::Notch, None, None), Some(1));
+        assert_eq!(choose_screen(&screens, ScreenChoice::Main, None, None), Some(0));
+        assert_eq!(choose_screen(&screens, ScreenChoice::Mouse, Some(Point { x: 100.0, y: 100.0 }), None), Some(1));
         // Mouse outside every screen falls back to main.
-        assert_eq!(choose_screen(&screens, ScreenChoice::Mouse, Some(Point { x: -5.0, y: 0.0 })), Some(0));
-        assert_eq!(choose_screen(&[], ScreenChoice::Main, None), None);
+        assert_eq!(choose_screen(&screens, ScreenChoice::Mouse, Some(Point { x: -5.0, y: 0.0 }), None), Some(0));
+        assert_eq!(choose_screen(&[], ScreenChoice::Main, None, None), None);
+        // A pinned screen id wins over the configured choice while it exists
+        // (builtin id 1 is index 1, external id 2 is index 0).
+        assert_eq!(choose_screen(&screens, ScreenChoice::Main, None, Some(1)), Some(1));
+        assert_eq!(choose_screen(&screens, ScreenChoice::Main, None, Some(2)), Some(0));
+        assert_eq!(choose_screen(&screens, ScreenChoice::Main, None, Some(99)), Some(0));
     }
 
     #[test]
     fn notch_screen_choice_without_notch_uses_main() {
         let mut ext = external();
         ext.is_main = true;
-        assert_eq!(choose_screen(&[ext], ScreenChoice::Notch, None), Some(0));
+        assert_eq!(choose_screen(&[ext], ScreenChoice::Notch, None, None), Some(0));
     }
 
     #[test]

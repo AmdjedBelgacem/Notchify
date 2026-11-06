@@ -235,6 +235,37 @@ impl CollapsedView {
         let paused = current.filter(|n| !n.is_playing()).filter(|_| browser.is_none());
         let low = snap.battery.as_ref().is_some_and(|b| b.is_low());
 
+        // A running countdown timer: mm:ss, above everything else.
+        if let Some(timer) = snap.timer.as_ref() {
+            let now = notchforge_core::time::now_ms();
+            let remaining = (timer.ends_at_ms - now).max(0);
+            let (m, s) = (remaining / 60_000, remaining % 60_000 / 1000);
+            let text = if timer.expired {
+                "done".to_owned()
+            } else {
+                format!("{m:02}:{s:02}")
+            };
+            self.art.setHidden(true);
+            self.art_box.setHidden(true);
+            self.set_equalizer(false, &p.success, false);
+            set_symbol(&self.left_icon, "timer", 12.0, "Timer");
+            self.left_icon.setContentTintColor(Some(&p.warning));
+            self.left_icon.setHidden(false);
+            self.left_text.setHidden(true);
+            self.right_icon.setHidden(true);
+            set_text(&self.right_text, &text);
+            set_accessibility_label(
+                &self.right_text,
+                &if timer.expired {
+                    "Timer finished".to_owned()
+                } else {
+                    format!("Timer, {} remaining", text)
+                },
+            );
+            self.right_text.setHidden(false);
+            return;
+        }
+
         // A call in progress: a phone and how long it's been.
         if let Some(call) = snap.active_call.as_ref().filter(|_| snap.calls.is_empty()) {
             self.art.setHidden(true);

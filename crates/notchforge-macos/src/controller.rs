@@ -151,6 +151,9 @@ pub struct Controller {
     config: RefCell<Arc<Config>>,
     engine: EngineHandle,
     pointer_inside: Cell<bool>,
+    /// A screen pinned by clicking its mirror (mirror click-to-focus); wins
+    /// over the configured screen choice until it disappears.
+    focus_override: Cell<Option<u32>>,
     drag_count_at_down: Cell<isize>,
     /// AppKit confirmed the drag is over our window (draggingEntered:).
     native_drag: Cell<bool>,
@@ -169,9 +172,14 @@ fn timings(cfg: &Config) -> Timings {
 }
 
 fn current_layout(mtm: MainThreadMarker, cfg: &Config) -> Option<NotchLayout> {
+    current_layout_pinned(mtm, cfg, None)
+}
+
+/// Like [`current_layout`], with an optional pinned screen id (mirror click).
+fn current_layout_pinned(mtm: MainThreadMarker, cfg: &Config, pinned: Option<u32>) -> Option<NotchLayout> {
     let screens = screen::screens(mtm);
     let mouse = NSEvent::mouseLocation();
-    let idx = choose_screen(&screens, cfg.general.screen, Some(Point { x: mouse.x, y: mouse.y }))?;
+    let idx = choose_screen(&screens, cfg.general.screen, Some(Point { x: mouse.x, y: mouse.y }), pinned)?;
     Some(NotchLayout::new(screens[idx].clone(), cfg.appearance.clone()))
 }
 
@@ -261,6 +269,7 @@ impl Controller {
             config: RefCell::new(config),
             engine,
             pointer_inside: Cell::new(false),
+            focus_override: Cell::new(None),
             drag_count_at_down: Cell::new(0),
             native_drag: Cell::new(false),
             expanded_dirty: Cell::new(true),
@@ -872,7 +881,7 @@ impl Controller {
     /// Screen configuration changed: recompute geometry and rebuild views.
     pub fn relayout(&self) {
         let cfg = self.config.borrow().clone();
-        let Some(layout) = current_layout(self.mtm, &cfg) else { return };
+        let Some(layout) = current_layout_pinned(self.mtm, &cfg, self.focus_override.get()) else { return };
         // The animated pill offset rides on the layout; it must not count as
         // a screen change (it would rebuild the views mid-glide).
         let same = {
@@ -1178,6 +1187,13 @@ impl Controller {
     // ── media page ───────────────────────────────────────────────────────
 
     /// The resolution pill was clicked: offer the display's modes.
+    /// Flip the microphone mute from the expanded panel's toggle.
+    pub fn toggle_mic(&self) {
+        if let Some(muted) = crate::controls::mic::toggle() {
+            self.views.borrow().expanded.set_mic_muted(Some(muted));
+        }
+    }
+
     pub fn show_resolution_menu(&self, anchor: &objc2_app_kit::NSButton) {
         self.views.borrow().expanded.resolution_menu(anchor);
     }
@@ -1482,6 +1498,33 @@ impl Controller {
         self.engine.send(Command::TrayAdd(paths));
         self.views.borrow().expanded.set_drop_highlight(false);
         self.handle(Event::Dropped);
+    }
+
+    /// ⌃⌥C (or the menu item): shelve the clipboard's text or link into the
+    /// tray, with a small confirmation peek.
+    pub fn capture_clipboard(&self) {
+        use notchforge_core::apps::AppRef;
+        use notchforge_core::model::{NewNotification, NotificationKind, Origin, Priority};
+        let Some(text) = crate::sharing::pasteboard_string().filter(|t| !t.trim().is_empty()) else {
+            tracing::debug!("⌃⌥C with an empty clipboard");
+            return;
+        };
+        let preview = text.lines().next().unwrap_or("").chars().take(64).collect::<String>();
+        self.engine.send(Command::TrayAddText(Box::new(text)));
+        let n = NewNotification {
+            app: AppRef { known: None, bundle_id: None, display_name: "Tray".into(), platform: None },
+            origin: Origin::Internal,
+            kind: NotificationKind::Info,
+            priority: Some(Priority::Normal),
+            title: "Shelved".into(),
+            subtitle: None,
+            body: preview,
+            timestamp_ms: now_ms(),
+            thread: Some("shelved".into()),
+            url: None,
+            tokens: None,
+        };
+        self.engine.send(Command::Inject(Box::new(n)));
     }
 
     // ── public actions (menu bar, buttons) ───────────────────────────────
@@ -1869,8 +1912,10 @@ impl Controller {
         self.machine.borrow_mut().set_timings(timings(&cfg));
         self.views.borrow().expanded.set_config(cfg.clone());
         if old.appearance != cfg.appearance || old.general.screen != cfg.general.screen {
+            // The user's own screen choice wins again.
+            self.focus_override.set(None);
             // Force a geometry + view rebuild.
-            if let Some(layout) = current_layout(self.mtm, &cfg) {
+            if let Some(layout) = current_layout_pinned(self.mtm, &cfg, self.focus_override.get()) {
                 *self.layout.borrow_mut() = layout;
             }
             self.rebuild_views();
@@ -1960,6 +2005,18 @@ impl Controller {
 
     pub fn screen_id(&self) -> u32 {
         self.layout.borrow().screen.id
+    }
+
+    /// A mirror was clicked: move the primary island to that screen. The pin
+    /// lasts until the screen disappears (or the user changes the screen
+    /// choice, which resets it).
+    pub fn focus_screen(&self, id: u32) {
+        if self.screen_id() == id {
+            return; // already the primary
+        }
+        tracing::info!(screen = id, "mirror clicked: moving the island to that screen");
+        self.focus_override.set(Some(id));
+        self.relayout();
     }
 
     /// Send a wing mask directly, bypassing occupancy detection (self-test).

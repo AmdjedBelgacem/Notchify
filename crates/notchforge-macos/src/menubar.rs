@@ -178,6 +178,29 @@ impl MenuBar {
             with_controller(|c| c.toggle_focus());
         });
         menu.addItem(&focus);
+        // ── timers ──
+        let timer_root = NSMenuItem::new(mtm);
+        timer_root.setTitle(&ns("Start Timer"));
+        let timer_menu = NSMenu::new(mtm);
+        for (mins, label) in [(1, "1 min"), (5, "5 min"), (10, "10 min"), (25, "25 min"), (45, "45 min")] {
+            timer_menu.addItem(&menu_item(mtm, &targets, label, "", move || {
+                crate::app::send(notchforge_core::engine::Command::StartTimer {
+                    duration_ms: mins * 60_000,
+                    label: label.to_owned(),
+                });
+            }));
+        }
+        timer_root.setSubmenu(Some(&timer_menu));
+        menu.addItem(&timer_root);
+        let cancel_timer = menu_item(mtm, &targets, "Cancel Timer", "", || {
+            crate::app::send(notchforge_core::engine::Command::CancelTimer);
+        });
+        menu.addItem(&cancel_timer);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        let shelve = menu_item(mtm, &targets, "Shelve Clipboard", "⌃⌥C", || {
+            with_controller(|c| c.capture_clipboard());
+        });
+        menu.addItem(&shelve);
         menu.addItem(&NSMenuItem::separatorItem(mtm));
 
         // ── Sound Output ▸ ──

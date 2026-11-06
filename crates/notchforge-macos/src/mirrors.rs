@@ -13,8 +13,9 @@ use notchforge_core::config::Config;
 use notchforge_core::engine::Snapshot;
 use notchforge_core::geometry::{LayoutKind, NotchLayout, ScreenInfo, WING_LEFT};
 use objc2::rc::Retained;
-use objc2::{MainThreadMarker, MainThreadOnly};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{NSPanel, NSView, NSWindowCollectionBehavior, NSWindowStyleMask};
+use objc2_foundation::{NSPoint, NSRect};
 use std::sync::Arc;
 
 struct MirrorIsland {
@@ -196,7 +197,7 @@ impl MirrorIsland {
         // bottom-anchored and its overhang sticks out the window's top, where
         // the window clips the rounded top corners away (square bezel merge).
         // A flipped root here would render the whole notch upside down.
-        let root = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, notch.width, notch.height));
+        let root = MirrorRootView::create(mtm, rect(0.0, 0.0, notch.width, notch.height), layout.screen.id);
         root.setWantsLayer(true);
         let island = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, notch.width, notch.height));
         island.setWantsLayer(true);
@@ -222,7 +223,8 @@ impl MirrorIsland {
         }
 
         let win_frame = layout.window_frame();
-        // SAFETY: a plain borderless panel; display-only and never key.
+        // SAFETY: a plain borderless panel; never key, and clicks land only on
+        // the island itself (see [`MirrorRootView`]).
         let panel = unsafe {
             let p = NSPanel::initWithContentRect_styleMask_backing_defer(
                 NSPanel::alloc(mtm),
@@ -241,7 +243,7 @@ impl MirrorIsland {
             p.setOpaque(false);
             p.setBackgroundColor(Some(&objc2_app_kit::NSColor::clearColor()));
             p.setHasShadow(false);
-            p.setIgnoresMouseEvents(true);
+            p.setIgnoresMouseEvents(false);
             p.setHidesOnDeactivate(false);
             p.setReleasedWhenClosed(false);
             p.setContentView(Some(&root));
@@ -255,5 +257,42 @@ impl MirrorIsland {
 impl Drop for MirrorIsland {
     fn drop(&mut self) {
         self.panel.orderOut(None);
+    }
+}
+
+define_class!(
+    // SAFETY: NSView subclass whose ivar is the mirror's screen id.
+    #[unsafe(super(NSView))]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = u32]
+    pub struct MirrorRootView;
+
+    impl MirrorRootView {
+        /// Only the island itself is clickable: the transparent padding and
+        /// ears answer `nil`, so clicks there reach the app underneath.
+        #[unsafe(method_id(hitTest:))]
+        fn hit_test(&self, point: NSPoint) -> Option<Retained<NSView>> {
+            // SAFETY: forwarding to NSView's implementation.
+            let hit: Option<Retained<NSView>> = unsafe { msg_send![super(self), hitTest: point] };
+            let hit_root = hit.as_deref().is_some_and(|v| {
+                std::ptr::eq(v as *const NSView as *const u8, self as *const Self as *const NSView as *const u8)
+            });
+            if hit_root { None } else { hit }
+        }
+
+        /// Click the mirror: the primary island moves to this screen.
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, _event: &objc2_app_kit::NSEvent) {
+            let screen_id = *self.ivars();
+            crate::app::with_controller(|c| c.focus_screen(screen_id));
+        }
+    }
+);
+
+impl MirrorRootView {
+    pub fn create(mtm: MainThreadMarker, frame: NSRect, screen_id: u32) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(screen_id);
+        // SAFETY: standard init with the ivars set first.
+        unsafe { msg_send![super(this), initWithFrame: frame] }
     }
 }

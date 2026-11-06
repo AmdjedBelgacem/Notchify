@@ -13,7 +13,7 @@ use crate::calls::{
 };
 use crate::config::{Config, Paths};
 use crate::model::{
-    AUTH_THREAD_AGENT, AUTH_THREAD_SPOTIFY, AgentLimits, AgentUsage, AudioState, BatteryStatus, CalendarState,
+    AUTH_THREAD_AGENT, AUTH_THREAD_SPOTIFY, AgentLimits, AgentUsage, AudioState, BatteryStatus, CalendarState, TimerState,
     DeviceBattery, FocusState, MediaPlayer, MediaState, NewNotification, Notification, NotificationId, NotificationKind, Origin,
     PlaylistStatus, Priority, ProviderStatus, TrayItem, TrayItemId, UsageAgent, Weather,
 };
@@ -45,6 +45,8 @@ pub enum Command {
     ClearNotifications,
     MarkAllRead,
     TrayAdd(Vec<PathBuf>),
+    /// Shelve the clipboard's text (or link) into the tray.
+    TrayAddText(Box<String>),
     TrayRemove(TrayItemId),
     TrayClear,
     SetPaused(bool),
@@ -94,6 +96,10 @@ pub enum Command {
         caller: String,
         kind: CallKind,
     },
+    /// Start a user countdown timer.
+    StartTimer { duration_ms: i64, label: String },
+    /// Cancel the running timer.
+    CancelTimer,
 }
 
 /// Immutable view of the state handed to the UI.
@@ -105,6 +111,7 @@ pub struct Snapshot {
     pub devices: Vec<DeviceBattery>,
     pub weather: Option<Weather>,
     pub calendar: CalendarState,
+    pub timer: Option<TimerState>,
     pub focus: FocusState,
     pub audio: AudioState,
     pub media: MediaState,
@@ -181,6 +188,8 @@ struct AppState {
     antigravity_limits: Option<AgentLimits>,
     /// Calendar accounts and upcoming events, owned by the calendar provider.
     calendar: CalendarState,
+    /// A user-started countdown timer.
+    timer: Option<TimerState>,
 }
 
 /// Temporary, while call detection is being tuned against real apps: note that
@@ -272,6 +281,10 @@ impl Engine {
         let mut dirty = false;
         loop {
             let deadline = last_publish + COALESCE;
+            // A running timer wakes the engine when it ends.
+            let timer_end = self.state.timer.as_ref().filter(|t| !t.expired).map(|t| {
+                std::time::Duration::from_millis((t.ends_at_ms - now_ms()).max(50) as u64)
+            });
             tokio::select! {
                 biased;
                 _ = shutdown.wait() => break,
@@ -282,6 +295,38 @@ impl Engine {
                     dirty |= self.apply_event(ev);
                 }
                 _ = tokio::time::sleep_until(deadline), if dirty => {}
+                _ = async {
+                    match timer_end {
+                        Some(d) => tokio::time::sleep(d).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if let Some(t) = self.state.timer.as_mut().filter(|t| !t.expired) {
+                        t.expired = true;
+                        dirty = true;
+                        let label = t.label.clone();
+                        let mins = t.duration_ms / 60_000;
+                        let summary = if mins >= 1 { format!("{mins} min") } else { "timer".into() };
+                        self.ingest(NewNotification {
+                            app: crate::apps::AppRef {
+                                known: None,
+                                bundle_id: None,
+                                display_name: "Timer".into(),
+                                platform: None,
+                            },
+                            origin: Origin::Internal,
+                            kind: NotificationKind::TaskFinished,
+                            priority: Some(Priority::High),
+                            title: format!("Timer done — {summary}"),
+                            subtitle: Some(label),
+                            body: String::new(),
+                            timestamp_ms: now_ms(),
+                            thread: None,
+                            url: None,
+                            tokens: None,
+                        });
+                    }
+                }
                 else => break,
             }
             if dirty && Instant::now() >= last_publish + COALESCE {
@@ -316,6 +361,7 @@ impl Engine {
             devices: s.devices.clone(),
             weather: s.weather.clone(),
             calendar: s.calendar.clone(),
+            timer: s.timer.clone(),
             focus: s.focus.clone(),
             audio: s.audio.clone(),
             media: s.media.clone(),
@@ -425,6 +471,11 @@ impl Engine {
                 self.persist_tray();
                 added > 0 || !self.state.tray.items().is_empty()
             }
+            Command::TrayAddText(text) => {
+                let changed = self.state.tray.add_text(*text, cfg.tray.max_items, now_ms());
+                self.persist_tray();
+                changed
+            }
             Command::TrayRemove(id) => {
                 let removed = self.state.tray.remove(id).is_some();
                 self.persist_tray();
@@ -465,6 +516,12 @@ impl Engine {
                 pruned
             }
             Command::Inject(n) => self.ingest(*n),
+            Command::StartTimer { duration_ms, label } => {
+                let ends_at_ms = now_ms() + duration_ms;
+                self.state.timer = Some(TimerState { label, ends_at_ms, duration_ms, expired: false });
+                true
+            }
+            Command::CancelTimer => self.state.timer.take().is_some(),
             Command::Provider(c) => {
                 // No receivers just means the relevant provider is disabled.
                 let _ = self.provider_commands.send(c);

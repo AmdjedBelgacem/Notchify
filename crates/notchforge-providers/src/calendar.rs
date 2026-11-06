@@ -7,7 +7,9 @@
 //! nothing in the notch ever writes to a calendar.
 
 use notchforge_core::model::Permission::Calendar as CalendarPermission;
-use notchforge_core::model::{CalendarEvent, CalendarState, PermissionState, ProviderStatus};
+use notchforge_core::model::{
+    CalendarEvent, CalendarState, PermissionState, ProviderStatus, ReminderItem,
+};
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
 };
@@ -15,11 +17,17 @@ use notchforge_core::provider::{
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
-pub use mac::authorization_state;
-#[cfg(target_os = "macos")]
-pub use mac::on_main as on_main_thread;
-#[cfg(target_os = "macos")]
-pub use mac::request_access;
+pub use mac::{authorization_state, request_access};
+
+/// Complete a reminder by id, on the main thread (UI-facing helper).
+pub fn complete_reminder_by_id(id: &str) -> bool {
+    let id = id.to_owned();
+    on_main(move |mtm| {
+        let store = mac::store_ref(mtm);
+        mac::complete_reminder(&store, &id)
+    })
+    .unwrap_or(false)
+}
 
 pub struct CalendarProvider;
 
@@ -36,7 +44,7 @@ mod mac {
     use objc2::rc::Retained;
     use objc2::MainThreadMarker;
     use objc2_event_kit::{EKAuthorizationStatus, EKEntityType, EKEventStore, EKSourceType};
-    use objc2_foundation::{NSDate, NSError};
+    use objc2_foundation::{NSDate, NSError, NSString};
     use std::cell::RefCell;
 
     use super::*;
@@ -131,6 +139,78 @@ mod mac {
         }
     }
 
+    /// The video-call link inside an event's text, if any: scans for URLs
+    /// hosted by the big meeting services.
+    fn meeting_url_in(text: &str) -> Option<String> {
+        const HOSTS: &[&str] = &[
+            "zoom.us", "zoom.com", "meet.google.com", "teams.microsoft.com", "teams.live.com",
+            "webex.com", "whereby.com", "jitsi", "around.co", "pop.com",
+        ];
+        for candidate in text.split([' ', '\n', '\r', '\t', '"', '<', '>']) {
+            if let Some(rest) = candidate.strip_prefix("http://").or_else(|| candidate.strip_prefix("https://")) {
+                let host = rest.split('/').next().unwrap_or("").to_lowercase();
+                if HOSTS.iter().any(|h| host == *h || host.ends_with(&format!(".{h}"))) {
+                    return Some(candidate.trim_end_matches(&['.', ',', ';'][..]).to_owned());
+                }
+            }
+        }
+        None
+    }
+
+    /// Reminders due soon, from the last fetch (the fetch completion runs on a
+    /// background queue, so plain data crosses over through this cache).
+    static REMINDER_CACHE: std::sync::Mutex<Vec<ReminderItem>> = std::sync::Mutex::new(Vec::new());
+
+    /// Kick an async reminders fetch (incomplete, due from two days ago onward).
+    /// Results land in [`REMINDER_CACHE`] and surface on the next read.
+    pub fn fetch_reminders(store: &EKEventStore, now_ms: i64) {
+        // SAFETY: read-only EventKit query; the completion is retained by
+        // EventKit until it fires.
+        unsafe {
+            let start = NSDate::dateWithTimeIntervalSince1970(now_ms as f64 / 1000.0 - 2.0 * 86400.0);
+            let predicate = store.predicateForIncompleteRemindersWithDueDateStarting_ending_calendars(
+                Some(&start), None, None,
+            );
+            let block = RcBlock::new(move |list: *mut objc2_foundation::NSArray<objc2_event_kit::EKReminder>| {
+                let mut items: Vec<ReminderItem> = Vec::new();
+                if !list.is_null() {
+                    let arr = &*list;
+                    for r in arr.iter() {
+                        if r.isCompleted() {
+                            continue;
+                        }
+                        let id = r.calendarItemExternalIdentifier().map(|s| s.to_string()).unwrap_or_default();
+                        let title = r.title().to_string();
+                        let mut due = String::new();
+                        if let Some(dc) = r.dueDateComponents() {
+                            let (h, m) = (dc.hour(), dc.minute());
+                            if h >= 0 && m >= 0 {
+                                due = format!("{h:02}:{m:02}");
+                            }
+                        }
+                        let title = if due.is_empty() { title } else { format!("{title} ({due})") };
+                        items.push(ReminderItem { id, title, due_at_ms: None });
+                    }
+                }
+                items.truncate(4);
+                *REMINDER_CACHE.lock().unwrap() = items;
+            });
+            store.fetchRemindersMatchingPredicate_completion(&predicate, &block);
+        }
+    }
+
+    /// Mark a reminder complete and save it, looked up fresh by its id.
+    pub fn complete_reminder(store: &EKEventStore, id: &str) -> bool {
+        // SAFETY: fetch + complete + save, all on the main thread.
+        unsafe {
+            let id_str = NSString::from_str(id);
+            let Some(item) = store.calendarItemWithIdentifier(&id_str) else { return false };
+            let Ok(reminder) = item.downcast::<objc2_event_kit::EKReminder>() else { return false };
+            reminder.setCompleted(true);
+            store.saveReminder_commit_error(&reminder, true).is_ok()
+        }
+    }
+
     /// Upcoming events within the horizon, soonest first.
     pub fn events(store: &EKEventStore, now_ms: i64) -> Vec<CalendarEvent> {
         let now = now_ms as f64 / 1000.0;
@@ -148,6 +228,10 @@ mod mac {
                 let title = e.title().to_string();
                 let starts_at_ms = (e.startDate().timeIntervalSince1970() * 1000.0).round() as i64;
                 let ends_at_ms = (e.endDate().timeIntervalSince1970() * 1000.0).round() as i64;
+                let location = e.location().map(|l| l.to_string());
+                let notes = e.notes().map(|n| n.to_string()).unwrap_or_default();
+                let meeting_url = meeting_url_in(&location.clone().unwrap_or_default())
+                    .or_else(|| meeting_url_in(&notes));
                 let (calendar, color) = match e.calendar() {
                     Some(c) => (c.title().to_string(), color(&c)),
                     None => (String::new(), None),
@@ -159,7 +243,8 @@ mod mac {
                     all_day: e.isAllDay(),
                     calendar,
                     color,
-                    location: e.location().map(|l| l.to_string()),
+                    location,
+                    meeting_url,
                     url: None,
                 }
             })
@@ -171,7 +256,18 @@ mod mac {
         }
     }
 
-    /// Accounts + events in one main-thread hop.
+    /// The live store, creating it if needed.
+    pub fn store_ref(mtm: MainThreadMarker) -> Retained<EKEventStore> {
+        ensure_store(mtm);
+        STORE.with_borrow(|slot| {
+            slot.clone().unwrap_or_else(|| {
+                // SAFETY: on the main thread.
+                unsafe { EKEventStore::init(mtm.alloc()) }
+            })
+        })
+    }
+
+    /// Accounts + events + reminders in one main-thread hop.
     pub fn read_state(mtm: MainThreadMarker, now_ms: i64) -> CalendarState {
         ensure_store(mtm);
         STORE.with(|cell| {
@@ -179,7 +275,14 @@ mod mac {
             let Some(store) = slot.as_ref() else {
                 return CalendarState::default();
             };
-            CalendarState { accounts: accounts(store), events: events(store, now_ms), granted: true }
+            fetch_reminders(store, now_ms);
+            let reminders = REMINDER_CACHE.lock().unwrap().clone();
+            CalendarState {
+                accounts: accounts(store),
+                events: events(store, now_ms),
+                reminders,
+                granted: true,
+            }
         })
     }
 
@@ -195,8 +298,7 @@ mod mac {
 }
 
 /// Run `f` on the main thread, or nowhere when off-macOS.
-#[cfg(target_os = "macos")]
-fn on_main<T: Send + 'static>(f: impl FnOnce(objc2::MainThreadMarker) -> T + Send + 'static) -> Option<T> {
+pub fn on_main<T: Send + 'static>(f: impl FnOnce(objc2::MainThreadMarker) -> T + Send + 'static) -> Option<T> {
     mac::on_main(f)
 }
 

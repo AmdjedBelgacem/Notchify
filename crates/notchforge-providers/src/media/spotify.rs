@@ -8,7 +8,7 @@
 //! refresh token (file mode 0600).
 
 use base64::Engine as _;
-use notchforge_core::model::{MediaPlayer, Playlist};
+use notchforge_core::model::{MediaPlayer, Playlist, QueueTrack};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -373,9 +373,65 @@ pub async fn playlists(http: &reqwest::Client, token: &Token, max: usize) -> Res
     Ok(out)
 }
 
+/// What's waiting in the play queue (Web API). Best effort.
+pub async fn queue(http: &reqwest::Client, token: &Token) -> Result<Vec<QueueTrack>, SpotifyError> {
+    let url = format!("{API_BASE}/me/player/queue");
+    let resp = http.get(&url).bearer_auth(&token.access_token).send().await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(SpotifyError::Refused(rejection_reason(status.as_u16(), &body)));
+    }
+    let text = resp.text().await?;
+    Ok(parse_queue(&text))
+}
+
+/// Parse a `/me/player/queue` response: the queued tracks after the current
+/// one, capped at four. Pure and tested.
+pub fn parse_queue(json: &str) -> Vec<QueueTrack> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
+    let Some(items) = v.get("queue").and_then(|q| q.as_array()) else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|t| {
+            let title = t.get("name")?.as_str()?.to_owned();
+            let artist = t
+                .get("artists")
+                .and_then(|a| a.as_array())
+                .and_then(|a| a.first())
+                .and_then(|a| a.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_owned();
+            Some(QueueTrack { title, artist })
+        })
+        .take(4)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_parses_and_caps() {
+        let json = r#"{"currently_playing": {"name": "Now", "artists": [{"name": "A"}]},
+          "queue": [
+            {"name": "Next up", "artists": [{"name": "B"}, {"name": "C"}]},
+            {"name": "Then"},
+            {"name": "Third", "artists": []},
+            {"name": "Fourth", "artists": [{"name": "D"}]},
+            {"name": "Fifth", "artists": [{"name": "E"}]}
+          ]}"#;
+        let q = parse_queue(json);
+        assert_eq!(q.len(), 4, "capped at four: {q:?}");
+        assert_eq!(q[0].title, "Next up");
+        assert_eq!(q[0].artist, "B");
+        assert_eq!(q[1].artist, "");
+        // Broken JSON: empty, never a panic.
+        assert!(parse_queue("{oops").is_empty());
+        assert!(parse_queue(r#"{"queue": null}"#).is_empty());
+    }
 
     #[test]
     fn pkce_matches_rfc7636_example() {

@@ -137,7 +137,9 @@ pub fn request(p: Permission) {
         Permission::Location => crate::location::request_authorization(),
         Permission::Automation => crate::media::request_automation(),
         Permission::Calendar => {
-            let _ = notchforge_providers::calendar::on_main_thread(notchforge_providers::calendar::request_access);
+            let _ = notchforge_providers::calendar::on_main(|mtm| {
+                notchforge_providers::calendar::request_access(mtm)
+            });
         }
         Permission::Notifications if is_bundled() => {
             let block = RcBlock::new(|granted: Bool, _err: *mut NSError| {

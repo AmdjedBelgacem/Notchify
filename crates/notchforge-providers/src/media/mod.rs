@@ -187,6 +187,8 @@ struct Session {
     browser_ax_logged: bool,
     /// The YouTube video whose recommendations are in `state.up_next`.
     up_next_for: Option<String>,
+    /// Last time the Spotify play queue was refreshed (throttled).
+    queue_at: Option<std::time::Instant>,
 }
 
 /// How long a silent browser tab stays on the notch as a paused track.
@@ -257,9 +259,33 @@ impl Session {
         download(&self.http, &url, &dir.join(format!("site-{key}.jpg"))).await
     }
 
+    /// Refresh Spotify's play queue, at most every 30 s and only while
+    /// Spotify runs with a stored sign-in.
+    async fn refresh_queue(&mut self) {
+        const QUEUE_TTL: Duration = Duration::from_secs(30);
+        if self.queue_at.is_some_and(|t| t.elapsed() < QUEUE_TTL) {
+            return;
+        }
+        self.queue_at = Some(std::time::Instant::now());
+        if !self.state.running.contains(&MediaPlayer::Spotify) {
+            if !self.state.spotify_queue.is_empty() {
+                self.state.spotify_queue.clear();
+            }
+            return;
+        }
+        let now = notchforge_core::time::now_ms();
+        let Ok(token) = spotify::access_token(&self.http, &self.paths.spotify_token(), now).await else {
+            self.state.spotify_queue.clear(); // not signed in
+            return;
+        };
+        match spotify::queue(&self.http, &token).await {
+            Ok(q) => self.state.spotify_queue = q,
+            Err(e) => tracing::debug!(error = %e, "could not read the Spotify queue"),
+        }
+    }
+
     /// Read every running player. Returns players that just started running.
-    async fn read_players(&mut self, browser_audio: bool) -> Vec<MediaPlayer> {
-        let mut players = Vec::new();
+    async fn read_players(&mut self, browser_audio: bool) -> Vec<MediaPlayer> {        let mut players = Vec::new();
         let mut running = Vec::new();
         let mut denied = Vec::new();
         for player in MediaPlayer::ALL {
@@ -451,6 +477,7 @@ impl Provider for MediaProvider {
                 browser_fail_logged: false,
                 browser_ax_logged: false,
                 up_next_for: None,
+                queue_at: None,
             };
             let mut login: Option<tokio::task::JoinHandle<Result<(), spotify::SpotifyError>>> = None;
             let mut last_emitted: Option<MediaState> = None;
@@ -458,6 +485,7 @@ impl Provider for MediaProvider {
             ctx.set_status(ProviderStatus::Running).await;
 
             loop {
+                s.refresh_queue().await;
                 let started = s.read_players(ctx.config().media.browser_audio).await;
                 for p in started {
                     s.reload_playlists(p, &ctx, true);

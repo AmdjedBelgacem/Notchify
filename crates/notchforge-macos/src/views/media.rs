@@ -1003,6 +1003,8 @@ impl MediaPage {
         let denied = media.automation_denied.contains(&player);
         let playing = media.player(player).is_some_and(NowPlaying::is_playing);
         let active = self.state.borrow().active_playlist.clone().filter(|_| playing);
+        let queue: &[notchforge_core::model::QueueTrack] =
+            if player == MediaPlayer::Spotify { &media.spotify_queue } else { &[] };
         let mut h = std::collections::hash_map::DefaultHasher::new();
         player.hash(&mut h);
         format!("{status:?}{running}{denied}{active:?}").hash(&mut h);
@@ -1011,6 +1013,10 @@ impl MediaPage {
             l.name.hash(&mut h);
             l.track_count.hash(&mut h);
             l.artwork_path.hash(&mut h);
+        }
+        for t in queue {
+            t.title.hash(&mut h);
+            t.artist.hash(&mut h);
         }
         let key = h.finish();
         if self.state.borrow().playlists_key == key {
@@ -1069,25 +1075,66 @@ impl MediaPage {
             14.0,
         );
         self.list_action.setHidden(action == ListAction::None);
-        self.list_scroll.setHidden(lists.is_empty());
+        self.list_scroll.setHidden(lists.is_empty() && queue.is_empty());
 
         let p = &self.p;
         let w = self.list_width;
         let brand = rgb8(player.color());
         let visible_h = self.list_scroll.frame().size.height;
         // Five rows fill the tile; a shorter list spreads out, a longer one scrolls.
-        let row_h = if lists.is_empty() || lists.len() as f64 >= VISIBLE_ROWS {
+        let rows = lists.len() + queue.len();
+        let header_h = if queue.is_empty() { 0.0 } else { 20.0 };
+        let row_h = if rows == 0 || rows as f64 >= VISIBLE_ROWS {
             visible_h / VISIBLE_ROWS
         } else {
-            (visible_h / lists.len() as f64).min(MAX_ROW_H)
+            (visible_h / rows as f64).min(MAX_ROW_H)
         };
-        let doc_h = (lists.len() as f64 * row_h).max(visible_h);
+        let doc_h = (rows as f64 * row_h + header_h).max(visible_h);
         self.list_doc.setFrame(rect(0.0, 0.0, w, doc_h));
         let detail_color = rgba(1.0, 1.0, 1.0, 0.74);
+        // Spotify's play queue sits above the playlists, under an "Up next" heading.
+        let mut base = 0.0;
+        if !queue.is_empty() {
+            let head = label(self.mtm, "Up next", &font(10.5, Weight::Semibold), &p.secondary, rect(10.0, base, w - 20.0, header_h));
+            self.list_doc.addSubview(&head);
+            base += header_h;
+            for (i, t) in queue.iter().enumerate() {
+                let row = shape_view(self.mtm, rect(0.0, base + i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
+                let cy = (row_h - 40.0) / 2.0;
+                let cover = shape_view(self.mtm, rect(8.0, cy, 40.0, 40.0), &brand, 8.0);
+                cover.addSubview(&symbol_view(
+                    self.mtm,
+                    "music.quarternote.3",
+                    16.0,
+                    &rgba(1.0, 1.0, 1.0, 0.92),
+                    rect(10.0, 10.0, 20.0, 20.0),
+                    &t.title,
+                ));
+                row.addSubview(&cover);
+                let ty = (row_h - 33.0) / 2.0;
+                row.addSubview(&label(
+                    self.mtm,
+                    &t.title,
+                    &font(13.5, Weight::Medium),
+                    &p.primary,
+                    rect(58.0, ty, w - 66.0, 18.0),
+                ));
+                row.addSubview(&label(
+                    self.mtm,
+                    &t.artist,
+                    &font(12.0, Weight::Regular),
+                    &detail_color,
+                    rect(58.0, ty + 18.0, w - 66.0, 15.0),
+                ));
+                set_accessibility_label(&row, &format!("Queued: {}, {}", t.title, t.artist));
+                self.list_doc.addSubview(&row);
+            }
+            base += queue.len() as f64 * row_h;
+        }
         for (i, pl) in lists.iter().enumerate() {
             let is_active = active.as_deref() == Some(pl.id.as_str());
             let row_bg = if is_active { rgba(1.0, 1.0, 1.0, 0.14) } else { rgba(1.0, 1.0, 1.0, 0.0) };
-            let row = shape_view(self.mtm, rect(0.0, i as f64 * row_h, w, row_h), &row_bg, 13.0);
+            let row = shape_view(self.mtm, rect(0.0, base + i as f64 * row_h, w, row_h), &row_bg, 13.0);
             let cy = (row_h - 40.0) / 2.0;
             let cover = shape_view(self.mtm, rect(8.0, cy, 40.0, 40.0), &brand, 8.0);
             if let Some(l) = cover.layer() {

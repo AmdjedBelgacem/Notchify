@@ -1,6 +1,7 @@
-//! System-wide ⌃⌥N to show or hide the panel (the shortcut shown in the menu
-//! bar extra). Uses Carbon's `RegisterEventHotKey`, which needs no
-//! Accessibility permission and only fires for this exact combination.
+//! System-wide hotkeys via Carbon's `RegisterEventHotKey`, which needs no
+//! Accessibility permission and only fires for the exact combinations:
+//! * ⌃⌥N — show or hide the panel (the shortcut shown in the menu bar extra).
+//! * ⌃⌥C — shelve the clipboard's text or link into the tray.
 
 use std::ffi::c_void;
 
@@ -45,18 +46,43 @@ const CONTROL_KEY: u32 = 1 << 12;
 const OPTION_KEY: u32 = 1 << 11;
 /// `kVK_ANSI_N`.
 const KEY_N: u32 = 0x2D;
+/// `kVK_ANSI_C`.
+const KEY_C: u32 = 0x08;
 
-unsafe extern "C" fn on_hot_key(_next: *mut c_void, _event: *mut c_void, _user: *mut c_void) -> i32 {
-    // Delivered on the main thread (application event target).
-    crate::app::with_controller(|c| c.toggle());
+unsafe extern "C" fn on_hot_key(_next: *mut c_void, _event: *mut c_void, user: *mut c_void) -> i32 {
+    // Delivered on the main thread (application event target); `user` is the
+    // hotkey id we registered with.
+    match user as usize {
+        1 => {
+            crate::app::with_controller(|c| c.toggle());
+        }
+        2 => {
+            crate::app::with_controller(|c| c.capture_clipboard());
+        }
+        _ => {}
+    }
     0
 }
 
-/// Register ⌃⌥N. Failure (another app owns it) is logged, not fatal.
+/// Register one combination. Failure (another app owns it) is logged, not fatal.
+fn register(key_code: u32, id: usize) {
+    let mut hotkey_ref = std::ptr::null_mut();
+    // SAFETY: plain Carbon call with a valid out-pointer; the registration
+    // lives for the process and hands `id` back to the handler.
+    unsafe {
+        let id = EventHotKeyID { signature: u32::from_be_bytes(*b"NFrg"), id: id as u32 };
+        let status =
+            RegisterEventHotKey(key_code, CONTROL_KEY | OPTION_KEY, id, GetApplicationEventTarget(), 0, &mut hotkey_ref);
+        if status != 0 {
+            tracing::warn!(status, "hotkey is taken by another app; it will not fire");
+        }
+    }
+}
+
+/// Register ⌃⌥N and ⌃⌥C.
 pub fn install() {
     let spec = EventTypeSpec { event_class: K_EVENT_CLASS_KEYBOARD, event_kind: K_EVENT_HOT_KEY_PRESSED };
     let mut handler_ref = std::ptr::null_mut();
-    let mut hotkey_ref = std::ptr::null_mut();
     // SAFETY: plain Carbon calls with valid out-pointers; the handler is a
     // 'static fn and the registration lives for the process.
     unsafe {
@@ -66,10 +92,7 @@ pub fn install() {
             tracing::warn!(status, "could not install the hotkey handler");
             return;
         }
-        let id = EventHotKeyID { signature: u32::from_be_bytes(*b"NFrg"), id: 1 };
-        let status = RegisterEventHotKey(KEY_N, CONTROL_KEY | OPTION_KEY, id, target, 0, &mut hotkey_ref);
-        if status != 0 {
-            tracing::warn!(status, "⌃⌥N is taken by another app; the panel shortcut is unavailable");
-        }
     }
+    register(KEY_N, 1);
+    register(KEY_C, 2);
 }

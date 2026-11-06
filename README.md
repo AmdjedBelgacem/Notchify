@@ -32,13 +32,28 @@ It surfaces:
   apps you want to answer.
 - **Weather**: current conditions, high and low, and the next 5 hours (Open-Meteo,
   free with no key).
-- **Calendar**: your upcoming events from every connected calendar account
-  (iCloud, Google, Exchange, subscribed) on the Overview card — read-only, via
-  EventKit. Click through to Calendar for the rest.
+- **Calendar & reminders.** Your upcoming events from every connected calendar
+  account (iCloud, Google, Exchange, subscribed) on the Overview card — via
+  EventKit, read-only. Meetings show a **Join** button for the 15 minutes
+  before they start, and open the meeting link straight away. Incomplete
+  reminders due soon appear too, with a **Done** button that ticks them off.
+- **Timers.** Start 1 / 5 / 10 / 25 / 45-minute timers from the menu bar (or
+  notchforge-notify); the collapsed notch counts down in the wing and gives a
+  peek when time is up.
+- **Microphone mute.** A one-click mute for the default microphone sits beside
+  the volume slider in Quick controls (it hides itself when there is nothing
+  to mute).
+- **Rain soon.** The weather provider watches Open-Meteo's 15-minute
+  precipitation series and drops a "Rain in ~N min" peek when rain is about to
+  start — at most once every three hours.
+- **Clipboard shelf.** Press **⌃⌥C** (or use the menu bar's *Shelve Clipboard*)
+  to pin the clipboard's text or link into the tray, where it survives with
+  your files; click it again to put it back on the clipboard.
 - **Batteries**: your Mac's, plus AirPods (left, right and case),
   Magic Keyboard, Mouse, Trackpad and other HID accessories.
 - **A temporary file tray.** Drag files onto the notch, then drag them back out
-  to anywhere, AirDrop them, reveal them in Finder or copy their paths.
+  to anywhere, AirDrop them, reveal them in Finder or copy their paths. Shelved
+  clipboard text and links (⌃⌥C) live here too, and persist across restarts.
 - **Quick controls**: brightness, volume, display resolution (with a safe
   automatic revert) and a Focus / Do Not Disturb toggle.
 - **Audio & music.** Shows the current output device and what it can do
@@ -46,8 +61,9 @@ It surfaces:
   which apps are playing sound and through which device. Spotify and Apple
   Music get a full player: cover art, a seekable progress bar, play/pause,
   skip, shuffle and repeat, plus your playlists, which you can start with one
-  click. Spotify's sign-in happens in the island too ("approve in your
-  browser", with Cancel). When a browser tab, a video or a call is playing
+  click; Spotify's **play queue** shows what's coming next. Spotify's sign-in
+  happens in the island too ("approve in your browser", with Cancel). When a
+  browser tab, a video or a call is playing
   sound, the collapsed notch shows that app's icon and a live equaliser. Other
   apps (browsers, podcasts…) get play/pause and skip through the system media
   keys. **Browser audio is shown as music**: the notch titles it from the

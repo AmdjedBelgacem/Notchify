@@ -22,12 +22,12 @@ use super::media::MediaPage;
 use super::usage::UsagePage;
 use super::{app_icon_view, set_app_icon, temperature};
 use crate::app::with_controller;
-use crate::controls::{brightness, display_modes, volume};
+use crate::controls::{brightness, display_modes, mic, volume};
 use crate::panel::TrayItemView;
 use crate::ui::{
     FlippedView, Palette, Targets, ThinSlider, Weight, attributed, attributed_parts, click_overlay, font, label, make_card,
-    mono_digits, pill_button, rect, remove_all_subviews, rgba, set_accessibility_label, shape_view, style_pill,
-    symbol_button, symbol_view, wrapping_label,
+    mono_digits, pill_button, rect, remove_all_subviews, rgba, set_accessibility_label, set_button_symbol, shape_view,
+    style_pill, symbol_button, symbol_view, wrapping_label,
 };
 use notchforge_core::config::Config;
 use notchforge_core::engine::{Command, EngineHandle, Snapshot};
@@ -143,6 +143,7 @@ pub struct ExpandedView {
 
     brightness: Retained<ThinSlider>,
     volume: Retained<ThinSlider>,
+    mic_button: Retained<NSButton>,
     resolution: Retained<NSButton>,
     display: RefCell<Option<DisplayInfo>>,
     display_id: Cell<u32>,
@@ -539,6 +540,22 @@ impl ExpandedView {
         let volume_slider = slider("speaker.wave.1.fill", "Output volume", |v| {
             volume::set(v as f32);
         });
+        // Microphone mute sits at the trailing edge of the volume row.
+        let t = targets.add(mtm, move |_| {
+            with_controller(|c| c.toggle_mic());
+        });
+        let mic_button = symbol_button(
+            mtm,
+            "mic.fill",
+            13.0,
+            "Microphone mute",
+            &p.primary,
+            &t,
+            rect(0.0, 0.0, CONTROL_BUTTON, CONTROL_BUTTON),
+        );
+        make_card(&mic_button, &white(0.14), CONTROL_BUTTON / 2.0);
+        set_accessibility_label(&mic_button, "Microphone mute");
+        overview.addSubview(&mic_button);
 
         let t = targets.add(mtm, move |sender: Option<&AnyObject>| {
             if let Some(b) = sender.and_then(|s| s.downcast_ref::<NSButton>()) {
@@ -757,6 +774,7 @@ impl ExpandedView {
             half_h,
             brightness: brightness_slider,
             volume: volume_slider,
+            mic_button,
             resolution,
             display: RefCell::new(None),
             display_id: Cell::new(layout.screen.id),
@@ -1141,9 +1159,20 @@ impl ExpandedView {
         let room = tile_y - GAP - top;
         let used = rows.len() as f64 * self.control_h + rows.len().saturating_sub(1) as f64 * CONTROL_GAP;
         let mut y = top + ((room - used) / 2.0).max(0.0);
-        for s in [&self.brightness, &self.volume] {
+        let mic_on_volume_row = !self.volume.isHidden() && !self.mic_button.isHidden();
+        for (s, mic_here) in [(&self.brightness, false), (&self.volume, mic_on_volume_row)] {
             if !s.isHidden() {
-                s.set_slider_frame(rect(x, y, w, self.control_h));
+                // The volume row shares its trailing edge with the mic button.
+                let row_w = if mic_here { w - CONTROL_BUTTON - 8.0 } else { w };
+                s.set_slider_frame(rect(x, y, row_w, self.control_h));
+                if mic_here {
+                    self.mic_button.setFrame(rect(
+                        x + w - CONTROL_BUTTON,
+                        y + (self.control_h - CONTROL_BUTTON) / 2.0,
+                        CONTROL_BUTTON,
+                        CONTROL_BUTTON,
+                    ));
+                }
                 y += self.control_h + CONTROL_GAP;
             }
         }
@@ -1416,6 +1445,30 @@ impl ExpandedView {
         let cw = (self.tray_width - 2.0 * 4.0) / 3.0;
         for (i, item) in snap.tray.iter().enumerate() {
             let (c, r) = (i % 3, i / 3);
+            // Shelved clipboard entries: click to copy back to the pasteboard.
+            if let Some(text) = &item.text {
+                let is_link = notchforge_core::tray::Tray::is_link(item);
+                let text = text.clone();
+                let t = self._targets.add(mtm, move |_| {
+                    crate::sharing::copy_text(&text);
+                });
+                let tile = symbol_button(
+                    mtm,
+                    if is_link { "link" } else { "doc.on.doc" },
+                    18.0,
+                    "Click to copy",
+                    &p.primary,
+                    &t,
+                    rect(c as f64 * (cw + 4.0), r as f64 * (TILE_H + 4.0), cw, TILE_H),
+                );
+                make_card(&tile, &white(0.08), 8.0);
+                let name = label(mtm, &item.name, &font(10.5, Weight::Regular), &p.primary, rect(4.0, 49.0, cw - 8.0, 14.0));
+                name.setAlignment(NSTextAlignment::Center);
+                name.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingMiddle);
+                tile.addSubview(&name);
+                self.tray_doc.addSubview(&tile);
+                continue;
+            }
             let tile = TrayItemView::create(
                 mtm,
                 rect(c as f64 * (cw + 4.0), r as f64 * (TILE_H + 4.0), cw, TILE_H),
@@ -1610,12 +1663,17 @@ impl ExpandedView {
             ));
             return;
         }
-        for (i, ev) in cal.events.iter().take(2).enumerate() {
-            let y = 28.0 + i as f64 * 24.0;
+        let now = notchforge_core::time::now_ms();
+        let mut rows = 0;
+        for ev in cal.events.iter() {
+            if rows >= 2 {
+                break;
+            }
+            let y = 28.0 + rows as f64 * 22.0;
             let (r, g, b) = ev.color.unwrap_or((10, 132, 255));
             self.calendar_doc
                 .addSubview(&shape_view(mtm, rect(14.0, y + 4.0, 7.0, 7.0), &rgba(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0, 1.0), 3.5));
-            let time = relative(ev.starts_at_ms, notchforge_core::time::now_ms());
+            let time = relative(ev.starts_at_ms, now);
             self.calendar_doc.addSubview(&label(
                 mtm,
                 &time,
@@ -1630,10 +1688,61 @@ impl ExpandedView {
                 &p.primary,
                 rect(94.0, y, w - 108.0, 15.0),
             ));
-            set_accessibility_label(
-                &self.calendar_doc,
-                &format!("Event {}, {}", time, ev.title),
+            // An online meeting that is starting (or running): a Join pill.
+            if let Some(url) = &ev.meeting_url {
+                let soon = now + 15 * 60 * 1000 >= ev.starts_at_ms && now <= ev.ends_at_ms;
+                if soon {
+                    let url = url.clone();
+                    let t = self.calendar_targets.add(mtm, move |_| {
+                        crate::sharing::open_url(&url);
+                    });
+                    let pill = pill_button(
+                        mtm,
+                        "Join",
+                        None,
+                        &font(11.5, Weight::Semibold),
+                        &white(0.16),
+                        &NSColor::whiteColor(),
+                        12.0,
+                        &t,
+                        rect(w - 62.0, y - 2.0, 48.0, 20.0),
+                    );
+                    self.calendar_doc.addSubview(&pill);
+                }
+            }
+            rows += 1;
+        }
+
+        // Reminders due today: a Done checkbox each, click completes it.
+        for rem in cal.reminders.iter() {
+            if rows >= 2 {
+                break;
+            }
+            let y = 28.0 + rows as f64 * 22.0;
+            let id = rem.id.clone();
+            let t = self.calendar_targets.add(mtm, move |_| {
+                let _ = notchforge_providers::calendar::complete_reminder_by_id(&id);
+            });
+            let done = pill_button(
+                mtm,
+                "Done",
+                None,
+                &font(11.0, Weight::Semibold),
+                &white(0.16),
+                &NSColor::whiteColor(),
+                12.0,
+                &t,
+                rect(w - 58.0, y - 2.0, 44.0, 20.0),
             );
+            self.calendar_doc.addSubview(&done);
+            self.calendar_doc.addSubview(&label(
+                mtm,
+                &format!("☑ {}", rem.title),
+                &font(12.5, Weight::Regular),
+                &p.primary,
+                rect(14.0, y, w - 76.0, 15.0),
+            ));
+            rows += 1;
         }
     }
 
@@ -1650,6 +1759,7 @@ impl ExpandedView {
             let muted = volume::muted().unwrap_or(false);
             self.volume.set_value(if muted { 0.0 } else { v as f64 });
         }
+        self.set_mic_muted(mic::muted());
 
         self.resolution.setHidden(!cfg.controls.resolution);
         if cfg.controls.resolution {
@@ -1670,6 +1780,18 @@ impl ExpandedView {
             self.resolution.setHidden(info.modes.is_empty());
             *self.display.borrow_mut() = Some(info);
         }
+        self.layout_status();
+    }
+
+    /// Reflect the microphone's mute state in the toggle button (`None` hides
+    /// it: no input device, or one without a mute control).
+    pub fn set_mic_muted(&self, muted: Option<bool>) {
+        let Some(muted) = muted else {
+            self.mic_button.setHidden(true);
+            return;
+        };
+        self.mic_button.setHidden(false);
+        set_button_symbol(&self.mic_button, if muted { "mic.slash.fill" } else { "mic.fill" }, 13.0, "Microphone mute");
         self.layout_status();
     }
 

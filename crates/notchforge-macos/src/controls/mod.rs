@@ -3,4 +3,5 @@
 pub mod brightness;
 pub mod display_modes;
 pub mod focus;
+pub mod mic;
 pub mod volume;

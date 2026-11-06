@@ -8,9 +8,11 @@
 //!    layer through [`ProviderContext::location`],
 //! 3. any other string → Open-Meteo geocoding (cached).
 
+use notchforge_core::apps::AppRef;
 use notchforge_core::config::WeatherConfig;
 use notchforge_core::model::{
-    Coordinates, HourlyForecast, Permission, ProviderStatus, TemperatureUnit, Weather, WeatherCondition,
+    Coordinates, HourlyForecast, NewNotification, NotificationKind, Origin, Permission, Priority, ProviderStatus,
+    TemperatureUnit, Weather, WeatherCondition,
 };
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
@@ -41,6 +43,16 @@ struct Forecast {
     current: Current,
     hourly: Hourly,
     daily: Daily,
+    /// 15-minute precipitation for the next few hours; absent on old responses.
+    #[serde(default)]
+    minutely_15: Option<Minutely>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Minutely {
+    #[allow(dead_code)] // parsed for completeness; minutes come from slot order
+    time: Vec<String>,
+    precipitation: Vec<f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,6 +97,7 @@ pub fn forecast_url(cfg: &WeatherConfig, at: Coordinates) -> String {
         "{}?latitude={:.4}&longitude={:.4}\
          &current=temperature_2m,apparent_temperature,weather_code,is_day\
          &hourly=temperature_2m,weather_code,precipitation_probability\
+         &minutely_15=precipitation&forecast_minutely_15=12\
          &daily=temperature_2m_max,temperature_2m_min&forecast_days=2&timezone=auto",
         cfg.api_base, at.latitude, at.longitude
     );
@@ -127,6 +140,53 @@ pub fn parse_forecast(json: &[u8], place: &str, unit: TemperatureUnit) -> Result
         hourly,
         fetched_at_ms: now_ms(),
     })
+}
+
+/// Minutes until rain starts, from the 15-minute precipitation series.
+/// `None` while it is already raining (or nothing falls within the window).
+/// Slots are 15 min apart; slot 0 is "now".
+fn rain_soon_in_minutes(minutely: Option<&Minutely>) -> Option<u8> {
+    let m = minutely?;
+    let wet = |v: f32| v > 0.2;
+    if m.precipitation.first().copied().unwrap_or(0.0) > 0.2 {
+        return None; // already raining
+    }
+    m.precipitation
+        .iter()
+        .copied()
+        .skip(1)
+        .position(wet)
+        .map(|slot| (slot as u8 + 1) * 15)
+        .filter(|mins| *mins <= 120)
+}
+
+/// Rain-soon minutes straight from a forecast response body.
+fn rain_soon_from_json(json: &[u8]) -> Option<u8> {
+    let f: Forecast = serde_json::from_slice(json).ok()?;
+    rain_soon_in_minutes(f.minutely_15.as_ref())
+}
+
+/// The internal "rain soon" peek, styled as coming from Weather.
+fn rain_alert(mins: u8, place: &str) -> ProviderEvent {
+    let n = NewNotification {
+        app: AppRef {
+            known: None,
+            bundle_id: None,
+            display_name: "Weather".into(),
+            platform: None,
+        },
+        origin: Origin::Internal,
+        kind: NotificationKind::Info,
+        priority: Some(Priority::Normal),
+        title: format!("Rain in ~{mins} min"),
+        subtitle: Some(place.to_owned()),
+        body: "Grab an umbrella — precipitation is expected shortly.".into(),
+        timestamp_ms: now_ms(),
+        thread: Some("rain-soon".into()),
+        url: None,
+        tokens: None,
+    };
+    ProviderEvent::Notification(n)
 }
 
 pub struct WeatherProvider;
@@ -206,6 +266,8 @@ impl Provider for WeatherProvider {
                 .map_err(ProviderError::other)?;
             let mut resolver = Resolver { client: client.clone(), cached: None };
             let mut last_fetch: Option<std::time::Instant>;
+            // One "rain soon" peek per storm, never more than every 3 hours.
+            let mut last_rain_alert: Option<std::time::Instant> = None;
             loop {
                 let cfg = ctx.config().weather.clone();
                 let (coords, place) = resolver.resolve(&mut ctx, &cfg).await?;
@@ -225,6 +287,15 @@ impl Provider for WeatherProvider {
                 ctx.set_status(ProviderStatus::Running).await;
                 if !ctx.emit(ProviderEvent::Weather(weather)).await {
                     return Ok(());
+                }
+                if let Some(mins) = rain_soon_from_json(&body) {
+                    let cooled = last_rain_alert.is_none_or(|t| t.elapsed() > Duration::from_secs(3 * 3600));
+                    if cooled {
+                        last_rain_alert = Some(std::time::Instant::now());
+                        if !ctx.emit(rain_alert(mins, &place)).await {
+                            return Ok(());
+                        }
+                    }
                 }
                 let interval = Duration::from_secs(cfg.refresh_minutes * 60);
                 let mut cfg_rx = ctx.config.clone();
@@ -281,6 +352,35 @@ mod tests {
         assert_eq!(w.hourly[0].condition, WeatherCondition::Rain);
         assert_eq!(w.hourly[0].precipitation_chance, Some(70));
         assert_eq!(w.hourly[2].precipitation_chance, None);
+    }
+
+    #[test]
+    fn rain_soon_fires_before_the_first_drop() {
+        let m = |p: &[f32]| Minutely { time: (0..p.len()).map(|i| format!("2026-01-01T00:{:02}", i)).collect(), precipitation: p.to_vec() };
+        // Dry now, rain in slot 3 -> ~45 minutes.
+        assert_eq!(rain_soon_in_minutes(Some(&m(&[0.0, 0.0, 0.0, 0.5, 0.9]))), Some(45));
+        // Already raining: no alert.
+        assert_eq!(rain_soon_in_minutes(Some(&m(&[0.5, 0.9, 0.0]))), None);
+        // Dry through the whole window: no alert.
+        assert_eq!(rain_soon_in_minutes(Some(&m(&[0.0; 12]))), None);
+        // Missing series: no alert, never a panic.
+        assert_eq!(rain_soon_in_minutes(None), None);
+        // Rain beyond two hours is too far out to matter.
+        let mut far = vec![0.0; 12];
+        far[11] = 1.0;
+        assert_eq!(rain_soon_in_minutes(Some(&m(&far))), Some(165).filter(|m| *m <= 120).or(None));
+        let mut beyond = vec![0.0; 20];
+        beyond[13] = 1.0;
+        assert_eq!(rain_soon_in_minutes(Some(&m(&beyond))), None);
+        // Trace amounts don't count.
+        assert_eq!(rain_soon_in_minutes(Some(&m(&[0.0, 0.1, 0.3]))), Some(30));
+        // End to end from a response body.
+        let mut body = SAMPLE.trim_end().trim_end_matches('}').to_owned();
+        body.push_str(
+            r#", "minutely_15": {"time": ["2026-10-30T14:45","2026-10-30T15:00","2026-10-30T15:15"],
+                    "precipitation": [0.0, 0.0, 1.2]}}"#,
+        );
+        assert_eq!(rain_soon_from_json(body.as_bytes()), Some(30));
     }
 
     #[test]

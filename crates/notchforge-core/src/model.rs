@@ -632,6 +632,10 @@ pub struct TrayItem {
     pub is_dir: bool,
     pub bytes: Option<u64>,
     pub added_at_ms: i64,
+    /// A shelved clipboard entry (`⌃⌥C`): the copied text or link. File items
+    /// leave this `None`; text items carry an empty `path`.
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1032,8 +1036,31 @@ pub struct CalendarEvent {
     /// Calendar colour as RGB (the colour the user picked in Calendar.app).
     pub color: Option<(u8, u8, u8)>,
     pub location: Option<String>,
+    /// Video-call link when the event is an online meeting (Zoom, Meet, …).
+    pub meeting_url: Option<String>,
     /// Deep link back to the event in Calendar.app.
     pub url: Option<String>,
+}
+
+/// One due reminder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ReminderItem {
+    pub id: String,
+    pub title: String,
+    /// Unix epoch milliseconds, when the reminder has a due date.
+    pub due_at_ms: Option<i64>,
+}
+
+/// A user-started countdown timer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TimerState {
+    pub label: String,
+    /// Unix epoch ms when the timer finishes.
+    pub ends_at_ms: i64,
+    /// Full duration, so a progress readout can be shown.
+    pub duration_ms: i64,
+    /// Fired (waiting to be dismissed).
+    pub expired: bool,
 }
 
 /// Calendar accounts ("connections") and upcoming events.
@@ -1043,6 +1070,8 @@ pub struct CalendarState {
     pub accounts: Vec<String>,
     /// Upcoming events, soonest first.
     pub events: Vec<CalendarEvent>,
+    /// Reminders due today (or overdue), soonest first.
+    pub reminders: Vec<ReminderItem>,
     /// Whether Calendar access has been granted.
     pub granted: bool,
 }
@@ -1054,6 +1083,13 @@ pub struct UpNextVideo {
     pub author: String,
     pub duration: String,
     pub url: String,
+}
+
+/// A track waiting in Spotify's play queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct QueueTrack {
+    pub title: String,
+    pub artist: String,
 }
 
 /// Rich media state: every running player plus playlists.
@@ -1075,6 +1111,9 @@ pub struct MediaState {
     /// per video. Empty unless a YouTube video is playing.
     #[serde(default)]
     pub up_next: Vec<UpNextVideo>,
+    /// Spotify's play queue (Web API; needs a sign-in). Empty otherwise.
+    #[serde(default)]
+    pub spotify_queue: Vec<QueueTrack>,
 }
 
 impl MediaState {
