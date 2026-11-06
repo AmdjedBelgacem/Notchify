@@ -119,6 +119,12 @@ pub struct Controller {
     fs_active: Cell<bool>,
     /// The wing mask last sent to the machine.
     wing_mask: Cell<u8>,
+    /// Sides whose content wants a wing but is dodged beside menu bar items:
+    /// they show the wing chevron (`WING_LEFT` / `WING_RIGHT` bits).
+    wing_chevrons: Cell<u8>,
+    /// A chevron click pops a dodged wing out over the items for a moment:
+    /// the forced sides and when the pop-out started (0 = none).
+    wing_override: Cell<(u8, i64)>,
     /// Re-checks menu bar occupancy while the wings are visible.
     wing_timer: RefCell<Option<Retained<NSTimer>>>,
     /// Set while a pass-through click's synthetic down/up is in flight, so the
@@ -244,6 +250,8 @@ impl Controller {
             wanted_interactive: Cell::new(false),
             fs_active: Cell::new(false),
             wing_mask: Cell::new(0),
+            wing_chevrons: Cell::new(0),
+            wing_override: Cell::new((0, 0)),
             wing_timer: RefCell::new(None),
             repost_click: Cell::new(false),
             ax_note_logged: Cell::new(false),
@@ -556,14 +564,44 @@ impl Controller {
         mask
     }
 
+    /// How long a chevron-popped wing stays out over the menu bar items.
+    const WING_OVERRIDE_MS: i64 = 10_000;
+
     fn desired_wing_mask(&self, snap: &Snapshot) -> u8 {
         let cfg = self.config.borrow();
         let content = self.content_wing_mask(snap);
         if content == 0 || !cfg.appearance.dodge_menu_bar {
+            self.wing_chevrons.set(0);
+            self.wing_override.set((0, 0));
             return content;
         }
         let layout = self.layout.borrow();
-        wing_mask_for(&layout, content, &self.menu_bar_occupancy())
+        let base = wing_mask_for(&layout, content, &self.menu_bar_occupancy());
+        // Sides with content but no room: the chevron offers them on demand,
+        // the way the system's notch offers the items it hides.
+        self.wing_chevrons.set(content & !base);
+        let mut mask = base;
+        let (forced, at) = self.wing_override.get();
+        if forced != 0 {
+            if notchforge_core::time::now_ms() - at < Self::WING_OVERRIDE_MS {
+                mask |= forced & content;
+            } else {
+                self.wing_override.set((0, 0));
+            }
+        }
+        mask
+    }
+
+    /// A wing chevron was clicked: pop that side's wing out over the menu bar
+    /// items for a moment (the items are only ever covered by request, the
+    /// way the system reveals the items its notch hides).
+    pub fn wing_chevron_clicked(&self, sides: u8) {
+        if self.wing_chevrons.get() & sides == 0 {
+            return;
+        }
+        tracing::info!(sides, "wing chevron: popping the wing out over menu bar items");
+        self.wing_override.set((sides, notchforge_core::time::now_ms()));
+        self.refresh_wing_mask();
     }
 
 
@@ -640,6 +678,7 @@ impl Controller {
             media: cfg.media.show_in_wings,
             animate: false,
             mask: content,
+            chevrons: 0, // mirrors offer no chevrons; clicks move the island
         };
         let primary_h = NSScreen::screens(self.mtm).iter().next().map_or(0.0, |s| s.frame().size.height);
         let occupancy = self.menu_bar_occupancy();
@@ -649,10 +688,14 @@ impl Controller {
 
     fn refresh_wing_mask(&self) {
         self.update_pill_position();
+        let chevrons = self.wing_chevrons.get();
         let mask = self.desired_wing_mask(&self.snapshot.borrow());
         if mask != self.wing_mask.replace(mask) {
             tracing::info!(mask, "wing mask changed");
             self.handle(Event::WingsChanged(mask));
+        } else if chevrons != self.wing_chevrons.replace(chevrons) {
+            // Chevron appeared or vanished without a mask change: redraw.
+            self.render_small(&self.snapshot.borrow());
         }
         let want_timer = mask != 0 && self.wing_timer.borrow().is_none();
         if want_timer {
@@ -1130,6 +1173,13 @@ impl Controller {
             }
             return false;
         }
+        // A collapsed wing chevron pops its dodged wing out over the items.
+        if matches!(self.kind.get(), LayoutKind::Collapsed | LayoutKind::CollapsedWithWings(_)) {
+            if let Some(sides) = self.views.borrow().collapsed.chevron_hit(window_point) {
+                self.wing_chevron_clicked(sides);
+                return true;
+            }
+        }
         // Quick access: a collapsed wing showing the playing audio toggles it.
         // Any other click on the collapsed island falls through to the menu
         // bar item it covers, as it always has.
@@ -1320,7 +1370,7 @@ impl Controller {
         views.collapsed.update(
             &browser,
             &palette,
-            crate::views::collapsed::WingOptions { media: true, animate: false, mask: WING_LEFT | WING_RIGHT },
+            crate::views::collapsed::WingOptions { media: true, animate: false, mask: WING_LEFT | WING_RIGHT, chevrons: 0 },
         );
         show(
             "07e-notched-wings-browser",
@@ -1397,7 +1447,7 @@ impl Controller {
         float_view.update(
             &browser,
             &palette,
-            crate::views::collapsed::WingOptions { media: true, animate: false, mask: WING_LEFT | WING_RIGHT },
+            crate::views::collapsed::WingOptions { media: true, animate: false, mask: WING_LEFT | WING_RIGHT, chevrons: 0 },
         );
         let fs = float_layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
         float_view.root.setHidden(false);
@@ -1881,6 +1931,7 @@ impl Controller {
             media: self.config.borrow().media.show_in_wings,
             animate: !self.reduce_motion(),
             mask: self.wing_mask.get(),
+            chevrons: self.wing_chevrons.get(),
         };
         views.collapsed.update(snap, &palette, opts);
         if self.kind.get() == LayoutKind::Compact {
@@ -2017,6 +2068,18 @@ impl Controller {
         tracing::info!(screen = id, "mirror clicked: moving the island to that screen");
         self.focus_override.set(Some(id));
         self.relayout();
+    }
+
+    /// Set the wing chevron mask directly, bypassing occupancy detection
+    /// (self-test).
+    pub fn force_wing_chevrons(&self, sides: u8) {
+        self.wing_chevrons.set(sides);
+        self.render_small(&self.snapshot.borrow());
+    }
+
+    /// Is a wing chevron visible (self-test)?
+    pub fn wing_chevron_showing(&self, sides: u8) -> bool {
+        self.views.borrow().collapsed.chevron_showing(sides)
     }
 
     /// Send a wing mask directly, bypassing occupancy detection (self-test).

@@ -817,6 +817,30 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             // status item's menu); close it again.
             post_key(KEY_ESCAPE);
         }
+        // ── the wing chevron: a dodged wing offers itself on demand ──
+        38 => {
+            // Left wing shown, right wing dodged with content behind it.
+            with_controller(|c| c.force_wing_mask(WING_LEFT));
+            with_controller(|c| c.force_wing_chevrons(WING_RIGHT));
+            let mut r = ctx.report.borrow_mut();
+            r.check(
+                "wing chevron: shows for the dodged side",
+                with_controller(|c| c.wing_chevron_showing(WING_RIGHT)).unwrap_or(false),
+                "",
+            );
+            r.check(
+                "wing chevron: none on the side that is shown",
+                !with_controller(|c| c.wing_chevron_showing(WING_LEFT)).unwrap_or(true),
+                "",
+            );
+            drop(r);
+            // The chevron is a small, dim symbol over a black island (measured ~0.05%).
+            check_pixels(ctx, "collapsed-chevron", 0.0003, true);
+            with_controller(|c| {
+                c.force_wing_chevrons(0);
+                c.force_wing_mask(WING_LEFT | WING_RIGHT);
+            });
+        }
         _ => finish(ctx),
     }
 }
@@ -1697,7 +1721,7 @@ fn finish(ctx: &Rc<Ctx>) {
 /// Schedule the self-test; steps run 800 ms apart (long enough for every
 /// spring to settle at default speed).
 /// Index of the step that calls `finish` (one past the last explicit step).
-const LAST_STEP: usize = 38;
+const LAST_STEP: usize = 39;
 
 pub fn start(mtm: MainThreadMarker, dir: PathBuf) {
     let _ = std::fs::create_dir_all(&dir);

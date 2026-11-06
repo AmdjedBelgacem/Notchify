@@ -171,7 +171,8 @@ impl Mirrors {
             let cs = collapsed_container.frame().size;
             let ox = if mask & WING_LEFT == 0 && cs.width > w { -(cs.width - w) } else { (w - cs.width) / 2.0 };
             collapsed_container.setFrameOrigin(objc2_foundation::NSPoint::new(ox, h - cs.height));
-            let opts = crate::views::collapsed::WingOptions { media: opts.media, animate: false, mask };
+            // No chevrons on mirrors: their clicks move the island here.
+            let opts = crate::views::collapsed::WingOptions { media: opts.media, animate: false, mask, chevrons: 0 };
             m.collapsed.update(snap, palette, opts);
             // Out of the way while this screen is fullscreen-covered.
             let covered = crate::windows::fullscreen_covers(&windows, &m.layout.screen);

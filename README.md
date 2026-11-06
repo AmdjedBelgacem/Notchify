@@ -54,6 +54,14 @@ It surfaces:
 - **A temporary file tray.** Drag files onto the notch, then drag them back out
   to anywhere, AirDrop them, reveal them in Finder or copy their paths. Shelved
   clipboard text and links (⌃⌥C) live here too, and persist across restarts.
+- **A wing chevron, like the notch's own hidden-items arrow.** macOS reserves
+  menu-bar space only for the hardware notch, so nothing can make it move
+  items aside for an app — instead the island does what the system does for
+  the items its notch hides: a wing that would cover menu bar items stays
+  hidden (your items are never covered or blocked), and a small `»` chevron
+  appears at the notch's edge. Click it and that wing pops out over the items
+  for ten seconds — with your items briefly covered only because you asked —
+  then it tucks itself back in.
 - **Quick controls**: brightness, volume, display resolution (with a safe
   automatic revert) and a Focus / Do Not Disturb toggle.
 - **Audio & music.** Shows the current output device and what it can do

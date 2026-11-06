@@ -26,6 +26,10 @@ pub struct WingOptions {
     /// `WING_LEFT` / `WING_RIGHT` mask of the wings actually shown; a wing
     /// whose bit is off (dodged beside menu bar items) hides its content.
     pub mask: u8,
+    /// `WING_LEFT` / `WING_RIGHT` mask of sides whose content *wants* a wing
+    /// but is dodged beside menu bar items: a chevron offers it on demand
+    /// (the notch's version of the system's hidden-items chevron).
+    pub chevrons: u8,
 }
 
 const EQ_HEIGHTS: [f64; 4] = [7.0, 12.0, 9.0, 11.0];
@@ -44,6 +48,8 @@ pub struct CollapsedView {
     left_text: Retained<NSTextField>,
     right_icon: Retained<NSImageView>,
     right_text: Retained<NSTextField>,
+    chev_l: Retained<NSImageView>,
+    chev_r: Retained<NSImageView>,
 }
 
 impl CollapsedView {
@@ -104,7 +110,41 @@ impl CollapsedView {
         eq.setHidden(true);
         crate::ui::set_accessibility_label(&eq, "Music playing");
 
-        for v in [&*left_icon as &objc2_app_kit::NSView, &left_text, &right_icon, &right_text, &art_box, &art, &eq] {
+        // The notch's own "hidden items" chevron: shown on a side whose wing
+        // is dodged beside menu bar items; clicking pops the wing out over
+        // them for a moment. The double chevron points at the wing it brings
+        // back, sitting just inside the notch's edge.
+        let chev_size = 9.0;
+        let chev_l = symbol_view(
+            mtm,
+            "chevron.left.2",
+            chev_size,
+            &p.secondary,
+            rect(WING_WIDTH + 2.0, (h - chev_size) / 2.0, chev_size + 2.0, chev_size),
+            "Show what the notch hid",
+        );
+        let chev_r = symbol_view(
+            mtm,
+            "chevron.right.2",
+            chev_size,
+            &p.secondary,
+            rect(w - WING_WIDTH - chev_size - 4.0, (h - chev_size) / 2.0, chev_size + 2.0, chev_size),
+            "Show what the notch hid",
+        );
+        chev_l.setHidden(true);
+        chev_r.setHidden(true);
+
+        for v in [
+            &*left_icon as &objc2_app_kit::NSView,
+            &left_text,
+            &right_icon,
+            &right_text,
+            &art_box,
+            &art,
+            &eq,
+            &chev_l,
+            &chev_r,
+        ] {
             root.addSubview(v);
         }
         Self {
@@ -118,6 +158,8 @@ impl CollapsedView {
             left_text,
             right_icon,
             right_text,
+            chev_l,
+            chev_r,
         }
     }
 
@@ -220,6 +262,36 @@ impl CollapsedView {
         if opts.mask & WING_RIGHT == 0 {
             self.set_equalizer(false, &p.success, false);
         }
+        // The chevron stands in for a dodged wing that has content: visible
+        // only while that wing is actually hidden (not popped out).
+        self.chev_l.setHidden(opts.chevrons & WING_LEFT == 0 || opts.mask & WING_LEFT != 0);
+        self.chev_r.setHidden(opts.chevrons & WING_RIGHT == 0 || opts.mask & WING_RIGHT != 0);
+    }
+
+    /// Is the chevron for `side` (`WING_LEFT` / `WING_RIGHT`) on screen?
+    pub fn chevron_showing(&self, side: u8) -> bool {
+        (side & WING_LEFT != 0 && !self.chev_l.isHidden()) || (side & WING_RIGHT != 0 && !self.chev_r.isHidden())
+    }
+
+    /// Is `window_point` over one of the wing chevrons? Returns the side's
+    /// `WING_LEFT` / `WING_RIGHT` bit; only visible chevrons count.
+    pub fn chevron_hit(&self, window_point: NSPoint) -> Option<u8> {
+        if self.root.isHidden() {
+            return None;
+        }
+        let local = self.root.convertPoint_fromView(window_point, None);
+        let size = self.root.frame().size;
+        let in_band = (0.0..=size.height).contains(&local.y);
+        if !in_band {
+            return None;
+        }
+        if !self.chev_l.isHidden() && local.x < WING_WIDTH + 16.0 {
+            return Some(WING_LEFT);
+        }
+        if !self.chev_r.isHidden() && local.x >= size.width - WING_WIDTH - 16.0 {
+            return Some(WING_RIGHT);
+        }
+        None
     }
 
     fn update_inner(&self, snap: &Snapshot, p: &Palette, opts: WingOptions) {
