@@ -308,8 +308,9 @@ impl BatteryComponent {
 }
 
 /// A coding agent whose token usage can be read or reported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
 pub enum UsageAgent {
+    #[default]
     ClaudeCode,
     Codex,
     OpenCode,
@@ -423,14 +424,54 @@ pub struct UsageRange {
     pub sessions: Vec<UsageSession>,
 }
 
-/// A session that logged tokens in the last few minutes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A session active in the last half hour.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RunningSession {
     pub agent: UsageAgent,
     pub project: String,
     pub tokens: u64,
     /// How full the context window is, where the agent logs its size.
     pub context_percent: Option<u8>,
+    /// Logged something in the last few minutes, so it's working now.
+    #[serde(default)]
+    pub working: bool,
+    #[serde(default)]
+    pub model: String,
+    /// When the session's first line was logged.
+    #[serde(default)]
+    pub started_ms: i64,
+    /// When the current turn began: the person's latest message.
+    #[serde(default)]
+    pub turn_started_ms: Option<i64>,
+    #[serde(default)]
+    pub last_ms: i64,
+    /// How long its recent turns took, in seconds, oldest first.
+    #[serde(default)]
+    pub recent_turns: Vec<u32>,
+    /// What it did last: "Editing main.rs", "Running cargo test"…
+    #[serde(default)]
+    pub activity: Option<String>,
+}
+
+impl RunningSession {
+    /// A typical turn for this session: the median of its recent ones.
+    pub fn typical_turn_s(&self) -> Option<u32> {
+        if self.recent_turns.len() < 2 {
+            return None;
+        }
+        let mut t = self.recent_turns.clone();
+        t.sort_unstable();
+        Some(t[t.len() / 2])
+    }
+
+    /// Roughly how long the current turn has left, in seconds: a typical turn
+    /// less what has run. `Some(0)` when it's already taking longer than usual.
+    pub fn eta_s(&self, now_ms: i64) -> Option<u32> {
+        let typical = self.typical_turn_s()?;
+        let start = self.turn_started_ms.filter(|_| self.working)?;
+        let elapsed = ((now_ms - start).max(0) / 1000) as u32;
+        Some(typical.saturating_sub(elapsed))
+    }
 }
 
 /// One usage limit, as a share of its window.
@@ -1070,10 +1111,22 @@ pub struct CalendarState {
     pub accounts: Vec<String>,
     /// Upcoming events, soonest first.
     pub events: Vec<CalendarEvent>,
-    /// Reminders due today (or overdue), soonest first.
+    /// Incomplete reminders, soonest due first; undated ones last.
     pub reminders: Vec<ReminderItem>,
     /// Whether Calendar access has been granted.
     pub granted: bool,
+    /// Everything on today, morning to night, earliest first.
+    #[serde(default)]
+    pub today: Vec<CalendarEvent>,
+    /// This week, Monday to Sunday: which days have an event.
+    #[serde(default)]
+    pub busy_days: Vec<bool>,
+    /// Which day of this week today is, Monday being 0.
+    #[serde(default)]
+    pub weekday: u8,
+    /// The day of the month each of this week's days falls on.
+    #[serde(default)]
+    pub week_dates: Vec<u8>,
 }
 
 /// A recommended video in YouTube's up-next list.

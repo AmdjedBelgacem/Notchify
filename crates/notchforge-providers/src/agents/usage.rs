@@ -27,6 +27,10 @@ const DAY_MS: i64 = 86_400_000;
 const HOUR_MS: i64 = 3_600_000;
 /// The longest range shown, plus a day so a range never starts part-read.
 const KEEP_DAYS: i64 = 31;
+/// A session idle longer than this drops off the Live page.
+const LIVE_MS: i64 = 30 * 60_000;
+/// Turns kept per session to judge how long the next one takes.
+const TURNS_KEPT: usize = 8;
 /// A session that logged tokens this recently counts as running.
 const RUNNING_MS: i64 = 180_000;
 const TOP_SESSIONS: usize = 3;
@@ -95,6 +99,11 @@ fn project_name(cwd: &str) -> String {
 
 #[derive(Deserialize)]
 struct ClaudeLine {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    /// Lines the CLI adds itself, not something the person typed.
+    #[serde(rename = "isMeta", default)]
+    is_meta: bool,
     timestamp: Option<String>,
     cwd: Option<String>,
     #[serde(rename = "sessionId")]
@@ -110,6 +119,7 @@ struct ClaudeMessage {
     id: Option<String>,
     model: Option<String>,
     usage: Option<ClaudeUsage>,
+    content: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -150,6 +160,95 @@ struct SessionInfo {
     /// (tokens in use, window) as of `context_ms`.
     context: Option<(u64, u64)>,
     context_ms: i64,
+    first_ms: i64,
+    model: String,
+    /// The current turn: when it began, and its latest line.
+    turn_start_ms: Option<i64>,
+    turn_last_ms: i64,
+    /// Seconds each recent turn took, oldest first.
+    turns: Vec<u32>,
+    activity: Option<String>,
+}
+
+impl SessionInfo {
+    /// The person sent a message: the turn before it is over.
+    fn begin_turn(&mut self, ts: i64) {
+        if let Some(start) = self.turn_start_ms {
+            if ts <= start {
+                return;
+            }
+            if self.turn_last_ms > start {
+                self.turns.push(((self.turn_last_ms - start) / 1000) as u32);
+                if self.turns.len() > TURNS_KEPT {
+                    self.turns.remove(0);
+                }
+            }
+        }
+        self.turn_start_ms = Some(ts);
+        self.turn_last_ms = ts;
+        self.activity = None;
+    }
+
+    fn note_work(&mut self, ts: i64, activity: Option<String>) {
+        if self.turn_start_ms.is_some_and(|s| ts >= s) {
+            self.turn_last_ms = self.turn_last_ms.max(ts);
+        }
+        if activity.is_some() && ts >= self.turn_last_ms {
+            self.activity = activity;
+        }
+    }
+}
+
+/// The file a tool call works on, by its name only.
+fn file_name(input: &serde_json::Value) -> Option<String> {
+    let path = input.get("file_path").or(input.get("path")).or(input.get("notebook_path"))?.as_str()?;
+    Some(path.rsplit('/').next().unwrap_or(path).to_owned())
+}
+
+/// What an assistant message does, in a few words, from its last tool call.
+pub fn claude_activity(content: &serde_json::Value) -> Option<String> {
+    let parts = content.as_array()?;
+    let tool = parts.iter().rev().find(|p| p.get("type").and_then(|t| t.as_str()) == Some("tool_use"));
+    let Some(tool) = tool else {
+        return parts
+            .iter()
+            .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .then(|| "Writing a reply".to_owned());
+    };
+    let name = tool.get("name").and_then(|n| n.as_str()).unwrap_or("a tool");
+    let input = tool.get("input").cloned().unwrap_or_default();
+    let short = |s: &str| -> String {
+        let s = s.lines().next().unwrap_or("").trim();
+        if s.chars().count() > 48 { format!("{}…", s.chars().take(47).collect::<String>()) } else { s.to_owned() }
+    };
+    Some(match name {
+        "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => {
+            format!("Editing {}", file_name(&input).unwrap_or_else(|| "a file".into()))
+        }
+        "Read" => format!("Reading {}", file_name(&input).unwrap_or_else(|| "a file".into())),
+        "Bash" => match input.get("description").and_then(|d| d.as_str()) {
+            Some(d) if !d.is_empty() => short(d),
+            _ => format!("Running {}", short(input.get("command").and_then(|c| c.as_str()).unwrap_or("a command"))),
+        },
+        "Grep" | "Glob" => "Searching the code".into(),
+        "WebFetch" | "WebSearch" => "Searching the web".into(),
+        "Task" | "Agent" => "Working with a sub-agent".into(),
+        "TodoWrite" => "Planning the next steps".into(),
+        other => format!("Using {other}"),
+    })
+}
+
+/// Is this user line something the person typed, rather than a tool's result?
+fn is_prompt(content: &serde_json::Value) -> bool {
+    match content {
+        serde_json::Value::String(s) => !s.trim().is_empty(),
+        serde_json::Value::Array(parts) => {
+            let kind = |p: &serde_json::Value| p.get("type").and_then(|t| t.as_str()).map(str::to_owned);
+            parts.iter().all(|p| kind(p).as_deref() != Some("tool_result"))
+                && parts.iter().any(|p| kind(p).as_deref() == Some("text"))
+        }
+        _ => false,
+    }
 }
 
 /// A Codex rate limit entry, or `None` where it has no such window.
@@ -259,8 +358,13 @@ impl Scanner {
     }
 
     fn touch_session(&mut self, key: &Arc<str>, ts_ms: i64, project: Option<&str>) {
-        let info =
-            self.sessions.entry(key.clone()).or_insert_with(|| SessionInfo { last_ms: ts_ms, ..Default::default() });
+        let info = self
+            .sessions
+            .entry(key.clone())
+            .or_insert_with(|| SessionInfo { last_ms: ts_ms, first_ms: ts_ms, ..Default::default() });
+        if ts_ms > 0 && (info.first_ms == 0 || ts_ms < info.first_ms) {
+            info.first_ms = ts_ms;
+        }
         info.last_ms = info.last_ms.max(ts_ms);
         if let Some(p) = project.filter(|p| !p.is_empty()) {
             if info.project.is_empty() {
@@ -276,11 +380,17 @@ impl Scanner {
         if line.contains("\"quotaLimits\"") {
             self.note_claude_limit(line);
         }
+        // Something the person typed starts a turn; a tool's result is part of one.
+        if line.contains("\"type\":\"user\"") && !line.contains("\"tool_result\"") {
+            self.note_claude_prompt(line);
+            return;
+        }
         if !line.contains("\"usage\"") {
             return;
         }
         let Ok(l) = serde_json::from_str::<ClaudeLine>(line) else { return };
         let Some(msg) = l.message else { return };
+        let activity = msg.content.as_ref().and_then(claude_activity);
         let (Some(id), Some(usage), Some(ts)) = (msg.id, msg.usage, l.timestamp.as_deref().and_then(parse_time)) else {
             return;
         };
@@ -299,6 +409,12 @@ impl Scanner {
         let session = self.intern(&session_key);
         let model = self.intern(&model);
         self.touch_session(&session, ts, l.cwd.as_deref());
+        if let Some(info) = self.sessions.get_mut(&session) {
+            info.note_work(ts, if l.is_sidechain { None } else { activity });
+            if !l.is_sidechain && !model.is_empty() {
+                info.model = model.to_string();
+            }
+        }
         // What the session's context holds is everything sent with its latest message.
         if !l.is_sidechain {
             if let Some(info) = self.sessions.get_mut(&session).filter(|i| ts >= i.context_ms) {
@@ -317,6 +433,23 @@ impl Scanner {
             None => {
                 self.records.insert(key, Record { ts_ms: ts, session, model, agent: UsageAgent::ClaudeCode, counts });
             }
+        }
+    }
+
+    /// A message the person typed into Claude Code: a new turn begins.
+    fn note_claude_prompt(&mut self, line: &str) {
+        let Ok(l) = serde_json::from_str::<ClaudeLine>(line) else { return };
+        if l.kind.as_deref() != Some("user") || l.is_meta || l.is_sidechain {
+            return;
+        }
+        let Some(ts) = l.timestamp.as_deref().and_then(parse_time) else { return };
+        if !l.message.as_ref().and_then(|m| m.content.as_ref()).is_some_and(is_prompt) {
+            return;
+        }
+        let session = self.intern(&format!("claude:{}", l.session_id.unwrap_or_default()));
+        self.touch_session(&session, ts, l.cwd.as_deref());
+        if let Some(info) = self.sessions.get_mut(&session) {
+            info.begin_turn(ts);
         }
     }
 
@@ -340,7 +473,12 @@ impl Scanner {
 
     /// One Codex CLI log line. Its `input_tokens` already include cached ones.
     fn add_codex_line(&mut self, line: &str, state: &mut FileState, fallback: &str) {
-        if !(line.contains("token_count") || line.contains("session_meta") || line.contains("turn_context")) {
+        if !(line.contains("token_count")
+            || line.contains("session_meta")
+            || line.contains("turn_context")
+            || line.contains("user_message")
+            || line.contains("function_call"))
+        {
             return;
         }
         let Ok(l) = serde_json::from_str::<CodexLine>(line) else { return };
@@ -357,6 +495,38 @@ impl Scanner {
             Some("turn_context") => {
                 if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
                     state.model = Some(self.intern(m));
+                }
+            }
+            // The person's message starts a turn; a command the agent runs is its activity.
+            Some("event_msg") if payload.get("type").and_then(|v| v.as_str()) == Some("user_message") => {
+                let (Some(ts), Some(session)) = (ts, state.session.clone()) else { return };
+                if let Some(info) = self.sessions.get_mut(&session) {
+                    info.begin_turn(ts);
+                }
+            }
+            Some("response_item") if payload.get("type").and_then(|v| v.as_str()) == Some("function_call") => {
+                let (Some(ts), Some(session)) = (ts, state.session.clone()) else { return };
+                let args: serde_json::Value = payload
+                    .get("arguments")
+                    .and_then(|a| a.as_str())
+                    .and_then(|a| serde_json::from_str(a).ok())
+                    .unwrap_or_default();
+                let command = args.get("command").map(|c| match c {
+                    serde_json::Value::Array(parts) => {
+                        parts.iter().filter_map(|p| p.as_str()).collect::<Vec<_>>().join(" ")
+                    }
+                    other => other.as_str().unwrap_or("").to_owned(),
+                });
+                let activity = match command.filter(|c| !c.is_empty()) {
+                    Some(c) => {
+                        let c = c.trim_start_matches("bash -lc ").trim_matches(['\'', '"']);
+                        let c: String = c.chars().take(48).collect();
+                        format!("Running {c}")
+                    }
+                    None => "Working".to_owned(),
+                };
+                if let Some(info) = self.sessions.get_mut(&session) {
+                    info.note_work(ts, Some(activity));
                 }
             }
             Some("event_msg") if payload.get("type").and_then(|v| v.as_str()) == Some("token_count") => {
@@ -386,6 +556,10 @@ impl Scanner {
                 };
                 let model = state.model.clone().unwrap_or_else(|| self.intern("codex"));
                 self.touch_session(&session, ts, None);
+                if let Some(info) = self.sessions.get_mut(&session) {
+                    info.note_work(ts, None);
+                    info.model = model.to_string();
+                }
                 let input = num(last, "input_tokens");
                 let cached = num(last, "cached_input_tokens");
                 if let (Some(window), Some(info)) =
@@ -654,7 +828,7 @@ impl Scanner {
         claude: Option<ClaudeStatus>,
         claude_connected: bool,
     ) -> Vec<AgentLimits> {
-        let live = |agent| running.iter().find(|r| r.agent == agent);
+        let live = |agent| running.iter().find(|r| r.agent == agent && r.working);
         let mut out = Vec::new();
         if claude_found {
             let s = live(UsageAgent::ClaudeCode);
@@ -697,7 +871,8 @@ impl Scanner {
         out
     }
 
-    /// Sessions that logged tokens in the last few minutes, latest first.
+    /// Sessions active in the last half hour, latest first. Those that logged
+    /// something in the last few minutes are working.
     pub fn running(&self, now_ms: i64) -> Vec<RunningSession> {
         let mut tokens: HashMap<&Arc<str>, (u64, UsageAgent)> = HashMap::new();
         for r in self.records.values() {
@@ -707,7 +882,7 @@ impl Scanner {
         let mut live: Vec<(i64, RunningSession)> = self
             .sessions
             .iter()
-            .filter(|(_, s)| now_ms - s.last_ms <= RUNNING_MS)
+            .filter(|(_, s)| now_ms - s.last_ms <= LIVE_MS)
             .filter_map(|(key, s)| {
                 let (t, agent) = tokens.get(key)?;
                 Some((
@@ -720,6 +895,13 @@ impl Scanner {
                             .context
                             .filter(|(_, w)| *w > 0)
                             .map(|(used, w)| ((used as f64 / w as f64) * 100.0).round().min(100.0) as u8),
+                        working: now_ms - s.last_ms <= RUNNING_MS,
+                        model: model_label(&s.model),
+                        started_ms: s.first_ms,
+                        turn_started_ms: s.turn_start_ms,
+                        last_ms: s.last_ms,
+                        recent_turns: s.turns.clone(),
+                        activity: s.activity.clone(),
                     },
                 ))
             })
@@ -1026,6 +1208,52 @@ mod tests {
     }
 
     #[test]
+    fn times_turns_and_notes_what_a_session_is_doing() {
+        let at = |secs: i64| format!("2026-11-07T10:{:02}:{:02}.000Z", secs / 60, secs % 60);
+        let prompt = |secs| {
+            format!(
+                r#"{{"type":"user","timestamp":"{}","sessionId":"s1","cwd":"/x/Notchify","message":{{"role":"user","content":"go"}}}}"#,
+                at(secs)
+            )
+        };
+        let reply = |secs, id: &str, tool: &str| {
+            format!(
+                r#"{{"type":"assistant","timestamp":"{}","sessionId":"s1","message":{{"id":"{id}","model":"claude-opus-5-5","content":[{tool}],"usage":{{"input_tokens":1,"output_tokens":1}}}}}}"#,
+                at(secs)
+            )
+        };
+        let edit = r#"{"type":"tool_use","name":"Edit","input":{"file_path":"/x/src/main.rs"}}"#;
+        let result = r#"{"type":"user","timestamp":"2026-11-07T10:00:50.000Z","sessionId":"s1","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}"#;
+        let mut s = Scanner::default();
+        s.add_claude_line(&prompt(0));
+        s.add_claude_line(&reply(30, "m1", edit));
+        s.add_claude_line(result);
+        s.add_claude_line(&reply(90, "m2", r#"{"type":"text","text":"done"}"#));
+        s.add_claude_line(&prompt(120));
+        s.add_claude_line(&reply(150, "m3", edit));
+        let now = parse_time(&at(160)).unwrap();
+        let live = &s.running(now)[0];
+        assert_eq!(live.recent_turns, vec![90], "a tool's result doesn't start a turn");
+        assert_eq!(live.turn_started_ms, parse_time(&at(120)));
+        assert_eq!(live.activity.as_deref(), Some("Editing main.rs"));
+        assert!(live.working);
+    }
+
+    #[test]
+    fn estimates_what_a_turn_has_left() {
+        let r = RunningSession {
+            working: true,
+            turn_started_ms: Some(0),
+            recent_turns: vec![100, 300, 200],
+            ..Default::default()
+        };
+        assert_eq!(r.typical_turn_s(), Some(200));
+        assert_eq!(r.eta_s(50_000), Some(150));
+        assert_eq!(r.eta_s(500_000), Some(0), "taking longer than usual");
+        assert_eq!(RunningSession { recent_turns: vec![100], ..r.clone() }.eta_s(0), None, "too few turns to tell");
+    }
+
+    #[test]
     fn ignores_lines_without_usage_and_placeholders() {
         let mut s = Scanner::default();
         s.add_claude_line(r#"{"type":"user","message":{"content":"the word usage here"}}"#);
@@ -1056,7 +1284,8 @@ mod tests {
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].project, "api-server");
         assert_eq!(live[0].context_percent, Some(50));
-        assert!(s.running(now + RUNNING_MS + 1).is_empty());
+        assert!(s.running(now + RUNNING_MS + 1).iter().all(|r| !r.working), "quiet a while: no longer working");
+        assert!(s.running(now + LIVE_MS + 1).is_empty(), "quiet for half an hour: gone");
     }
 
     #[test]

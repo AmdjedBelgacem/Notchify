@@ -38,9 +38,6 @@ struct WatchState {
     windows: HashMap<i32, usize>,
     /// Apps to keep checking until this time, after opening a window.
     watch_until: HashMap<i32, i64>,
-    /// The last report per pid, so diagnostics note changes rather than repeats.
-    reports: HashMap<i32, String>,
-    audio: String,
     ticks: u32,
 }
 
@@ -120,7 +117,7 @@ pub fn bring_forward(bundle: String, caller: String, source: String, url: Option
                 .output()
                 .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim() == "found")
         });
-        tracing::info!(found, source = source.as_str(), "call diagnostics: bring forward");
+        tracing::debug!(found, source = source.as_str(), "call: bring forward");
         if !found {
             DispatchQueue::main().exec_async(move || {
                 if !url.as_deref().is_some_and(crate::sharing::open_url) {
@@ -136,20 +133,6 @@ pub fn tick() {
     if !app::with_config(|c| c.notifications.incoming_calls).unwrap_or(false) {
         return;
     }
-    // Temporary, while detection is tuned against real apps: what is making sound.
-    let audio = snap
-        .audio
-        .sources
-        .iter()
-        .map(|s| format!("{} ({}, pid {})", s.name, s.bundle_id.as_deref().unwrap_or("?"), s.pid))
-        .collect::<Vec<_>>()
-        .join(", ");
-    STATE.with(|st| {
-        if st.borrow().audio != audio {
-            tracing::info!(%audio, "call diagnostics: apps making sound");
-            st.borrow_mut().audio = audio;
-        }
-    });
     if BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -260,14 +243,8 @@ fn finish(
             let Some(count) = count else { continue };
             let before = st.windows.insert(pid, count);
             if before.is_some_and(|b| count > b) {
-                tracing::info!(source = name, count, "call diagnostics: new window");
+                tracing::debug!(source = name, count, "call: new window");
                 st.watch_until.insert(pid, now + NEW_WINDOW_WATCH_MS);
-            }
-        }
-        for (pid, _, source, window) in &found {
-            let text = window.report.join(" ; ");
-            if st.reports.insert(*pid, text.clone()).as_deref() != Some(text.as_str()) {
-                tracing::info!(source = source.as_str(), %text, "call diagnostics: window");
             }
         }
     });
@@ -292,7 +269,7 @@ fn finish(
         // Answer was pressed before its button could be: press it now.
         if let Some(c) = answering {
             if crate::accessibility::press_window_button(pid, ANSWER_WORDS) {
-                tracing::info!(source = source.as_str(), "call diagnostics: answered once it appeared");
+                tracing::debug!(source = source.as_str(), "call: answered once it appeared");
                 app::send(Command::CallAnsweredIn(c.id, pid));
                 continue;
             }

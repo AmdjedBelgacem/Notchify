@@ -587,6 +587,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 ("05b-settings-agents", Some(crate::settings::Pane::Agents)),
                 ("05c-settings-general", Some(crate::settings::Pane::General)),
                 ("05d-settings-permissions", Some(crate::settings::Pane::Permissions)),
+                ("05j-settings-calls", Some(crate::settings::Pane::Calls)),
                 ("05e-settings-appearance", Some(crate::settings::Pane::Appearance)),
                 ("05f-settings-notifications", Some(crate::settings::Pane::Notifications)),
                 ("05g-settings-weather", Some(crate::settings::Pane::Weather)),
@@ -886,6 +887,9 @@ fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engi
         r.check("music page: lists playlists", rows == 3 + 2, format!("{rows} rows"));
     }
     check_pixels(ctx, "music page", 0.004, true);
+    if let Some(png) = app::menubar_toggles_preview(&fake).as_deref().and_then(png_from_view) {
+        emit_png(ctx, "06b-menubar-toggles", png);
+    }
     if let Some(png) = app::menubar_preview(&fake).as_deref().and_then(png_from_view) {
         emit_png(ctx, "06-menubar-player", png);
     }
@@ -1102,6 +1106,45 @@ pub fn sample_active_call() -> notchforge_core::calls::ActiveCall {
     }
 }
 
+/// The Planner board's sample day: four events around now, plans and a busy week.
+pub fn sample_calendar(now_ms: i64) -> notchforge_core::model::CalendarState {
+    use notchforge_core::model::{CalendarEvent, CalendarState, ReminderItem};
+    let (today, weekday) = notchforge_providers::calendar::local_day(now_ms);
+    let hour = 3_600_000;
+    let event = |title: &str, start: i64, mins: i64, color: (u8, u8, u8), place: &str, meeting: bool| CalendarEvent {
+        title: title.into(),
+        starts_at_ms: start,
+        ends_at_ms: start + mins * 60_000,
+        all_day: false,
+        calendar: "Work".into(),
+        color: Some(color),
+        location: Some(place.into()),
+        meeting_url: meeting.then(|| "https://meet.google.com/sample".into()),
+        url: None,
+    };
+    let today_events = vec![
+        event("Team standup", now_ms - 2 * hour, 30, (90, 184, 255), "Google Meet", true),
+        event("Design review", now_ms + 18 * 60_000, 60, (191, 90, 242), "Google Meet", true),
+        event("Lunch with Léa", now_ms + 2 * hour, 60, (48, 209, 88), "Rue Oberkampf", false),
+        event("Notchify release", now_ms + 5 * hour, 60, (255, 159, 10), "Calendar · Work", false),
+    ];
+    CalendarState {
+        accounts: vec!["iCloud".into()],
+        events: today_events[1..].to_vec(),
+        reminders: vec![
+            ReminderItem { id: "r1".into(), title: "Send the invoice".into(), due_at_ms: Some(today + 12 * hour) },
+            ReminderItem { id: "r2".into(), title: "Review agent PR".into(), due_at_ms: Some(today) },
+            ReminderItem { id: "r3".into(), title: "Call the bank".into(), due_at_ms: Some(today + 24 * hour) },
+            ReminderItem { id: "r4".into(), title: "Book train to Lyon".into(), due_at_ms: None },
+        ],
+        granted: true,
+        today: today_events,
+        busy_days: vec![true, false, true, true, false, true, false],
+        weekday,
+        week_dates: (0..7).map(|d| d as u8 + 2).collect(),
+    }
+}
+
 /// The calls board's sample data.
 pub fn sample_calls() -> Vec<notchforge_core::calls::Call> {
     use notchforge_core::calls::{Call, CallId, CallKind};
@@ -1211,20 +1254,52 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
                 context_percent: Some(64),
             },
         ],
-        running: vec![
-            RunningSession {
-                agent: UsageAgent::Codex,
-                project: "api-server".into(),
-                tokens: 58_000,
-                context_percent: Some(64),
-            },
-            RunningSession {
-                agent: UsageAgent::ClaudeCode,
-                project: "Notchify".into(),
-                tokens: 96_000,
-                context_percent: None,
-            },
-        ],
+        running: {
+            // The Live sessions board's sample: one asking, two working.
+            let now = notchforge_core::time::now_ms();
+            let min = 60_000;
+            vec![
+                RunningSession {
+                    agent: UsageAgent::ClaudeCode,
+                    project: "Notchify".into(),
+                    tokens: 96_000,
+                    context_percent: Some(76),
+                    working: true,
+                    model: "Opus 5.5".into(),
+                    started_ms: now - 134 * min,
+                    turn_started_ms: Some(now - 192_000),
+                    last_ms: now - 12_000,
+                    recent_turns: vec![150, 230, 110, 400, 210, 190, 280, 240],
+                    activity: Some("Running cargo test".into()),
+                },
+                RunningSession {
+                    agent: UsageAgent::Codex,
+                    project: "api-server".into(),
+                    tokens: 58_000,
+                    context_percent: Some(64),
+                    working: true,
+                    model: "GPT-5 Codex".into(),
+                    started_ms: now - 100 * min,
+                    turn_started_ms: Some(now - 3 * min),
+                    last_ms: now - 5_000,
+                    recent_turns: vec![280, 320, 300, 260],
+                    activity: Some("Editing auth.rs".into()),
+                },
+                RunningSession {
+                    agent: UsageAgent::OpenCode,
+                    project: "website".into(),
+                    tokens: 31_000,
+                    context_percent: Some(22),
+                    working: true,
+                    model: "Sonnet 5.5".into(),
+                    started_ms: now - 52 * min,
+                    turn_started_ms: Some(now - 2 * min),
+                    last_ms: now - 20_000,
+                    recent_turns: vec![460, 520, 480],
+                    activity: Some("Running npm test".into()),
+                },
+            ]
+        },
     }
 }
 
@@ -1334,7 +1409,7 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
-    r.check("notched: sixteen views rendered", sizes.len() == 16, format!("{sizes:?}"));
+    r.check("notched: eighteen views rendered", sizes.len() == 18, format!("{sizes:?}"));
     r.metrics.insert("notched_sizes".into(), json!(sizes));
     // Island sizes on the design boards (Overview, Main, Hover, Peek): the
     // simulated 14-inch screen's shape for that view, using the live config's
@@ -1565,14 +1640,12 @@ fn board_snapshots(
             notchforge_core::model::QueueTrack { title: "Slow Light".into(), artist: "Neon Harbor".into() },
             notchforge_core::model::QueueTrack { title: "Meridian".into(), artist: "Kite Machine".into() },
         ],
-        up_next: vec![
-            notchforge_core::model::UpNextVideo {
-                title: "Daft Punk - One More Time".into(),
-                author: "Daft Punk".into(),
-                duration: "5:20".into(),
-                url: "https://www.youtube.com/watch?v=FGBhQbmPwH8".into(),
-            },
-        ],
+        up_next: vec![notchforge_core::model::UpNextVideo {
+            title: "Daft Punk - One More Time".into(),
+            author: "Daft Punk".into(),
+            duration: "5:20".into(),
+            url: "https://www.youtube.com/watch?v=FGBhQbmPwH8".into(),
+        }],
     };
     (overview, music)
 }
@@ -1662,7 +1735,10 @@ fn sample_media() -> notchforge_core::model::MediaState {
         running: vec![MediaPlayer::Spotify],
         browser_denied: None,
         up_next: Vec::new(),
-        spotify_queue: vec![notchforge_core::model::QueueTrack { title: "Next track".into(), artist: "NotchForge".into() }],
+        spotify_queue: vec![notchforge_core::model::QueueTrack {
+            title: "Next track".into(),
+            artist: "NotchForge".into(),
+        }],
         playlists: (1..=3)
             .map(|i| Playlist {
                 player: MediaPlayer::Spotify,

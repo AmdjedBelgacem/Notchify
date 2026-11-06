@@ -300,7 +300,7 @@ impl UsagePage {
             self.enabled.set(enabled);
             self.render();
         }
-        usage.running.len()
+        usage.running.iter().filter(|r| r.working).count()
     }
 
     pub fn set_range(&self, range: usize) {

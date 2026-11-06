@@ -9,7 +9,7 @@
 use crate::apps::AppRef;
 use crate::calls::{
     ACTIVE_GONE_MS, ActiveCall, Call, CallId, CallKind, ENDED_QUIET_MS, RING_TIMEOUT_MS, Recognised, UNKNOWN_CALLER,
-    WINDOW_GONE_MS, call_app_name, looks_call_like, recognise, same_call,
+    WINDOW_GONE_MS, recognise, same_call,
 };
 use crate::config::{Config, Paths};
 use crate::model::{
@@ -190,22 +190,6 @@ struct AppState {
     calendar: CalendarState,
     /// A user-started countdown timer.
     timer: Option<TimerState>,
-}
-
-/// Temporary, while call detection is being tuned against real apps: note that
-/// a calling app sent something, with its wording only if it mentions a call.
-fn note_for_call_diagnostics(n: &NewNotification, recognised: bool) {
-    let bundle = n.app.bundle_id.as_deref().unwrap_or("");
-    if call_app_name(bundle).is_none() && !crate::apps::is_browser(bundle) {
-        tracing::info!(bundle, "call diagnostics: notification from another app");
-        return;
-    }
-    let text = format!("{} | {} | {}", n.title, n.subtitle.as_deref().unwrap_or(""), n.body);
-    if looks_call_like(&text) {
-        tracing::info!(bundle, recognised, %text, "call diagnostics: notification");
-    } else {
-        tracing::info!(bundle, recognised, "call diagnostics: notification, no call wording");
-    }
 }
 
 /// Cheap handle for sending commands from any thread.
@@ -852,7 +836,6 @@ impl Engine {
             && self.config().notifications.incoming_calls
         {
             let seed = recognise(&n.app, &n.title, n.subtitle.as_deref(), &n.body);
-            note_for_call_diagnostics(&n, seed.is_some());
             if let Some(seed) = seed {
                 let (app, url, title) = (n.app, n.url, n.title);
                 return self.ring(seed, app, url, title, None, now_ms());

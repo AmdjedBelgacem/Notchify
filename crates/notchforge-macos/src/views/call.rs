@@ -139,7 +139,9 @@ impl CallView {
         self.content.addSubview(&disc);
         let tx = 16.0 + side + 14.0;
         let btn = 52.0;
-        let tw = w - 16.0 - btn - 12.0 - tx;
+        let show_app = call.app.bundle_id.clone();
+        let buttons_w = btn + if show_app.is_some() { 12.0 + btn } else { 0.0 };
+        let tw = w - 16.0 - buttons_w - 12.0 - tx;
         self.content.addSubview(&label(
             mtm,
             &format!("On call · {}", call.source),
@@ -177,6 +179,24 @@ impl CallView {
         );
         make_card(&hang_up, &red(), btn / 2.0);
         self.content.addSubview(&hang_up);
+        // The call's own window or tab, for video, the chat or more controls.
+        if let Some(bundle) = show_app {
+            let (caller, source) = (call.caller.clone(), call.source.clone());
+            let t = self.targets.add(mtm, move |_| {
+                crate::call_watch::bring_forward(bundle.clone(), caller.clone(), source.clone(), None);
+            });
+            let show = symbol_button(
+                mtm,
+                "macwindow",
+                18.0,
+                &format!("Show {}", call.source),
+                &NSColor::whiteColor(),
+                &t,
+                rect(w - 16.0 - btn - 12.0 - btn, y + 10.0, btn, btn),
+            );
+            make_card(&show, &rgba(1.0, 1.0, 1.0, 0.18), btn / 2.0);
+            self.content.addSubview(&show);
+        }
     }
 
     /// Move the running time on.

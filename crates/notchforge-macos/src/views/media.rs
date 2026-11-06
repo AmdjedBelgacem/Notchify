@@ -23,10 +23,9 @@ use crate::icons;
 use crate::media::{self as glue, MediaKey};
 use crate::ui::{
     FlippedView, Palette, Targets, ThinSlider, Weight, attributed, attributed_parts, click_overlay, font, label,
-    make_card,
-    mono_digits, pill_button, rect, remove_all_subviews, rgb8, rgba, set_accessibility_label, set_button_symbol,
-    set_gradient, set_text, shape_view, style_pill, symbol_button, symbol_view, text_width, without_animation,
-    wrapping_label,
+    make_card, mono_digits, pill_button, rect, remove_all_subviews, rgb8, rgba, set_accessibility_label,
+    set_button_symbol, set_gradient, set_text, shape_view, style_pill, symbol_button, symbol_view, text_width,
+    without_animation, wrapping_label,
 };
 use notchforge_core::engine::Snapshot;
 use notchforge_core::model::{
@@ -226,8 +225,8 @@ impl MediaPage {
 
         let top_y = nh + 6.0;
         let ph = h - top_y - PAD;
-        // The Overview's columns: the player takes two, the playlists one.
-        let lw = (w - 2.0 * PAD - 2.0 * 10.0) / 3.0 * 2.0 + 10.0;
+        // Two equal halves, each a 2 × 2 block of the Overview's modules.
+        let lw = (w - 2.0 * PAD - 10.0) / 2.0;
         let rx = PAD + lw + 10.0;
         let rw = w - PAD - rx;
 
@@ -983,11 +982,7 @@ impl MediaPage {
                 self.sources.addSubview(&icon);
             }
             let icon_end = x + 22.0;
-            let text = if is_featured {
-                format!("{} · on {}", s.name, audio.route_label(s))
-            } else {
-                s.name.clone()
-            };
+            let text = if is_featured { format!("{} · on {}", s.name, audio.route_label(s)) } else { s.name.clone() };
             let tw = text_width(&attributed(&text, &f, &entry_color)) + 6.0;
             if icon_end + tw > width {
                 break;
@@ -1154,11 +1149,18 @@ impl MediaPage {
         // Spotify's play queue sits above the playlists, under an "Up next" heading.
         let mut base = 0.0;
         if !queue.is_empty() {
-            let head = label(self.mtm, "Up next", &font(10.5, Weight::Semibold), &p.secondary, rect(10.0, base, w - 20.0, header_h));
+            let head = label(
+                self.mtm,
+                "Up next",
+                &font(10.5, Weight::Semibold),
+                &p.secondary,
+                rect(10.0, base, w - 20.0, header_h),
+            );
             self.list_doc.addSubview(&head);
             base += header_h;
             for (i, t) in queue.iter().enumerate() {
-                let row = shape_view(self.mtm, rect(0.0, base + i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
+                let row =
+                    shape_view(self.mtm, rect(0.0, base + i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
                 let cy = (row_h - 40.0) / 2.0;
                 let cover = shape_view(self.mtm, rect(8.0, cy, 40.0, 40.0), &brand, 8.0);
                 cover.addSubview(&symbol_view(

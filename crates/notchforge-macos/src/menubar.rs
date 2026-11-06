@@ -1,6 +1,7 @@
-//! Menu bar extra, built to the *Menu bar extra* board: a mini player, the
-//! everyday toggles, a Sound Output submenu that lists each device with its
-//! capabilities, then Settings and Quit. It is also the fallback entry point
+//! Menu bar extra, built to the *Menu bar extra* board of the redesign twin:
+//! what's running, a mini player, four quick toggles as tiles, then timers, a
+//! Sound Output submenu that lists each device with its capabilities, Settings
+//! and Quit. It is also the fallback entry point
 //! when the notch is hidden (no notch, full-screen apps).
 
 use crate::app::{self, with_controller};
@@ -27,8 +28,10 @@ pub struct MenuBar {
     title: Retained<NSTextField>,
     subtitle: Retained<NSTextField>,
     play: Retained<NSButton>,
-    pause: Retained<NSMenuItem>,
-    focus: Retained<NSMenuItem>,
+    header: Retained<NSMenuItem>,
+    /// Focus, Pause, Calls and Tray: (disc, subtitle) of each tile.
+    toggles: Vec<(Retained<FlippedView>, Retained<NSTextField>)>,
+    toggles_item: Retained<NSMenuItem>,
     output: Retained<NSMenu>,
     output_key: RefCell<String>,
     unread: Cell<bool>,
@@ -106,6 +109,11 @@ impl MenuBar {
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
 
+        // ── what's running ──
+        let header = NSMenuItem::new(mtm);
+        header.setEnabled(false);
+        menu.addItem(&header);
+
         // ── mini player (custom view) ──
         let w = 280.0;
         let pv = FlippedView::new(mtm, rect(0.0, 0.0, w, 58.0));
@@ -122,14 +130,24 @@ impl MenuBar {
             "",
             &font(13.0, Weight::Semibold),
             &NSColor::labelColor(),
-            rect(64.0, 11.0, w - 64.0 - 76.0, 17.0),
+            rect(64.0, 11.0, w - 64.0 - 108.0, 17.0),
         );
         let subtitle = label(
             mtm,
             "",
             &font(11.5, Weight::Regular),
             &NSColor::secondaryLabelColor(),
-            rect(64.0, 29.0, w - 64.0 - 76.0, 15.0),
+            rect(64.0, 29.0, w - 64.0 - 108.0, 15.0),
+        );
+        let t = targets.add(mtm, |_| player_action(MediaAction::Previous));
+        let prev = symbol_button(
+            mtm,
+            "backward.fill",
+            12.0,
+            "Previous track",
+            &NSColor::labelColor(),
+            &t,
+            rect(w - 104.0, 15.0, 28.0, 28.0),
         );
         let t = targets.add(mtm, |_| player_action(MediaAction::PlayPause));
         let play = symbol_button(
@@ -152,7 +170,7 @@ impl MenuBar {
             &t,
             rect(w - 40.0, 15.0, 28.0, 28.0),
         );
-        for v in [&*art_box as &objc2_app_kit::NSView, &title, &subtitle, &play, &next] {
+        for v in [&*art_box as &objc2_app_kit::NSView, &title, &subtitle, &prev, &play, &next] {
             pv.addSubview(v);
         }
         let player_item = NSMenuItem::new(mtm);
@@ -161,8 +179,77 @@ impl MenuBar {
         let player_sep = NSMenuItem::separatorItem(mtm);
         menu.addItem(&player_sep);
 
-        // ── everyday toggles ──
-        let show = menu_item(mtm, &targets, "Show Panel", "n", || {
+        // ── everyday toggles, as four tiles ──
+        let tiles: [Toggle; 4] = [
+            (
+                "moon.fill",
+                "Focus",
+                Box::new(|| {
+                    with_controller(|c| c.toggle_focus());
+                }),
+            ),
+            (
+                "bell.slash.fill",
+                "Pause",
+                Box::new(|| {
+                    with_controller(|c| c.toggle_pause());
+                }),
+            ),
+            ("phone.fill", "Calls", Box::new(toggle_calls)),
+            (
+                "tray.full.fill",
+                "Tray",
+                Box::new(|| {
+                    with_controller(|c| c.toggle());
+                }),
+            ),
+        ];
+        let (tile_w, tile_h, gap) = ((w - 28.0 - 8.0) / 2.0, 50.0, 8.0);
+        let grid = FlippedView::new(mtm, rect(0.0, 0.0, w, 2.0 * tile_h + gap + 8.0));
+        let mut toggles = Vec::new();
+        for (i, (sym, name, action)) in tiles.into_iter().enumerate() {
+            let (col, row) = ((i % 2) as f64, (i / 2) as f64);
+            let tile = shape_view(
+                mtm,
+                rect(14.0 + col * (tile_w + gap), 4.0 + row * (tile_h + gap), tile_w, tile_h),
+                &rgba(0.5, 0.5, 0.5, 0.14),
+                12.0,
+            );
+            let disc = shape_view(mtm, rect(10.0, 11.0, 28.0, 28.0), &rgba(0.5, 0.5, 0.5, 0.3), 14.0);
+            disc.addSubview(&crate::ui::symbol_view(
+                mtm,
+                sym,
+                12.0,
+                &NSColor::whiteColor(),
+                rect(7.0, 7.0, 14.0, 14.0),
+                "",
+            ));
+            tile.addSubview(&disc);
+            tile.addSubview(&label(
+                mtm,
+                name,
+                &font(12.5, Weight::Semibold),
+                &NSColor::labelColor(),
+                rect(46.0, 9.0, tile_w - 52.0, 16.0),
+            ));
+            let sub = label(
+                mtm,
+                "",
+                &font(11.0, Weight::Regular),
+                &NSColor::secondaryLabelColor(),
+                rect(46.0, 25.0, tile_w - 52.0, 15.0),
+            );
+            tile.addSubview(&sub);
+            let t = targets.add(mtm, move |_| action());
+            tile.addSubview(&crate::ui::click_overlay(mtm, &t, rect(0.0, 0.0, tile_w, tile_h), name));
+            grid.addSubview(&tile);
+            toggles.push((disc, sub));
+        }
+        let grid_item = NSMenuItem::new(mtm);
+        grid_item.setView(Some(&grid));
+        menu.addItem(&grid_item);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        let show = menu_item(mtm, &targets, "Open the Panel", "n", || {
             with_controller(|c| c.toggle());
         });
         // ⌃⌥N, registered system-wide by `crate::hotkey`.
@@ -170,14 +257,6 @@ impl MenuBar {
             objc2_app_kit::NSEventModifierFlags::Control | objc2_app_kit::NSEventModifierFlags::Option,
         );
         menu.addItem(&show);
-        let pause = menu_item(mtm, &targets, "Pause Notifications", "", || {
-            with_controller(|c| c.toggle_pause());
-        });
-        menu.addItem(&pause);
-        let focus = menu_item(mtm, &targets, "Focus", "", || {
-            with_controller(|c| c.toggle_focus());
-        });
-        menu.addItem(&focus);
         // ── timers ──
         let timer_root = NSMenuItem::new(mtm);
         timer_root.setTitle(&ns("Start Timer"));
@@ -228,8 +307,9 @@ impl MenuBar {
             title,
             subtitle,
             play,
-            pause,
-            focus,
+            header,
+            toggles,
+            toggles_item: grid_item,
             output,
             output_key: RefCell::new(String::new()),
             unread: Cell::new(false),
@@ -240,14 +320,42 @@ impl MenuBar {
 
     pub fn update(&self, snap: &Snapshot) {
         let mtm = self.mtm;
-        self.pause.setState(if snap.paused { NSControlStateValueOn } else { NSControlStateValueOff });
-        let focus_on = snap.focus.active == Some(true);
-        self.focus.setState(if focus_on { NSControlStateValueOn } else { NSControlStateValueOff });
-        let focus_title = match (&snap.focus.mode_name, focus_on) {
-            (Some(m), true) if !m.is_empty() => format!("Focus · {m}"),
-            _ => "Focus".to_owned(),
+        // What's running, beside the app's name.
+        let running = snap.usage.running.iter().filter(|r| r.working).count();
+        let status = match running {
+            0 => String::new(),
+            1 => "  ·  1 session running".to_owned(),
+            n => format!("  ·  {n} sessions running"),
         };
-        self.focus.setTitle(&ns(&focus_title));
+        self.header.setAttributedTitle(Some(&attributed_parts(&[
+            ("Notchisland", &font(13.0, Weight::Semibold), &NSColor::labelColor()),
+            (&status, &font(12.0, Weight::Regular), &NSColor::secondaryLabelColor()),
+        ])));
+
+        // The toggles: a coloured disc when on, and what each is doing.
+        let focus_on = snap.focus.active == Some(true);
+        let calls_on = app::with_config(|c| c.notifications.incoming_calls).unwrap_or(false);
+        let focus_sub = match (&snap.focus.mode_name, focus_on) {
+            (Some(m), true) if !m.is_empty() => m.clone(),
+            (_, true) => "On".to_owned(),
+            _ => "Off".to_owned(),
+        };
+        let files = match snap.tray.len() {
+            0 => "Empty".to_owned(),
+            1 => "1 file".to_owned(),
+            n => format!("{n} files"),
+        };
+        let states = [
+            (focus_on, rgba(0.369, 0.361, 0.902, 1.0), focus_sub),
+            (snap.paused, rgba(0.039, 0.518, 1.0, 1.0), if snap.paused { "On" } else { "Off" }.to_owned()),
+            (calls_on, rgba(0.188, 0.82, 0.345, 1.0), if calls_on { "Ringing on" } else { "Off" }.to_owned()),
+            (!snap.tray.is_empty(), rgba(0.039, 0.518, 1.0, 1.0), files),
+        ];
+        for ((disc, sub), (on, color, text)) in self.toggles.iter().zip(states) {
+            let fill = if on { color } else { rgba(0.5, 0.5, 0.5, 0.3) };
+            crate::ui::make_card(disc, &fill, 14.0);
+            set_text(sub, &text);
+        }
 
         let unread = snap.unread > 0;
         if let Some(button) = self.item.button(mtm) {
@@ -326,8 +434,24 @@ impl MenuBar {
         self.player_item.view()
     }
 
+    /// The quick toggles' view (self-test renders it).
+    pub fn toggles_view(&self) -> Option<Retained<objc2_app_kit::NSView>> {
+        self.toggles_item.view()
+    }
+
     pub fn set_visible(&self, visible: bool) {
         self.item.setVisible(visible);
+    }
+}
+
+/// A quick toggle: its symbol, its name and what clicking it does.
+type Toggle = (&'static str, &'static str, Box<dyn Fn()>);
+
+/// Turn ringing calls in the notch on or off.
+fn toggle_calls() {
+    if let Some(mut cfg) = app::with_config(|c| c.clone()) {
+        cfg.notifications.incoming_calls = !cfg.notifications.incoming_calls;
+        app::send(notchforge_core::engine::Command::UpdateConfig(Box::new(cfg)));
     }
 }
 
@@ -339,6 +463,7 @@ fn player_action(action: MediaAction) {
         None => {
             let key = match action {
                 MediaAction::Next => crate::media::MediaKey::Next,
+                MediaAction::Previous => crate::media::MediaKey::Previous,
                 _ => crate::media::MediaKey::PlayPause,
             };
             crate::media::press(key);

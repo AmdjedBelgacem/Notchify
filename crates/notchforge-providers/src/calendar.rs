@@ -3,8 +3,8 @@
 //! One provider owns everything: it requests Calendar access (macOS shows the
 //! system prompt), then reads the connected accounts ("calendar connections" —
 //! iCloud, Google, Exchange, subscribed, local) and the upcoming events, and
-//! emits them as a [`CalendarState`] the Overview card renders. Read-only:
-//! nothing in the notch ever writes to a calendar.
+//! emits them as a [`CalendarState`] the Overview and Planner render. Events are
+//! read-only; reminders can be added and completed from the Planner.
 
 use notchforge_core::model::Permission::Calendar as CalendarPermission;
 use notchforge_core::model::{
@@ -29,11 +29,51 @@ pub fn complete_reminder_by_id(id: &str) -> bool {
     .unwrap_or(false)
 }
 
+/// Add a reminder to the default Reminders list, on the main thread.
+pub fn add_reminder(title: &str) -> bool {
+    let title = title.trim().to_owned();
+    if title.is_empty() {
+        return false;
+    }
+    on_main(move |mtm| {
+        let store = mac::store_ref(mtm);
+        mac::add_reminder(&store, &title)
+    })
+    .unwrap_or(false)
+}
+
+/// Local midnight today, and today's place in the week (Monday is 0).
+pub fn local_day(now_ms: i64) -> (i64, u8) {
+    // SAFETY: localtime_r and mktime work on caller-owned structs.
+    unsafe {
+        let t = (now_ms / 1000) as libc::time_t;
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        let weekday = ((tm.tm_wday + 6) % 7) as u8;
+        tm.tm_hour = 0;
+        tm.tm_min = 0;
+        tm.tm_sec = 0;
+        tm.tm_isdst = -1;
+        (libc::mktime(&mut tm) as i64 * 1000, weekday)
+    }
+}
+
+/// The day of the month at `ms`, in local time.
+fn day_of_month(ms: i64) -> u8 {
+    // SAFETY: as above.
+    unsafe {
+        let t = (ms / 1000) as libc::time_t;
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        tm.tm_mday as u8
+    }
+}
+
 pub struct CalendarProvider;
 
 /// Poll while things are calm — Calendar.app edits surface within one cycle.
 #[cfg(target_os = "macos")]
-const POLL: Duration = Duration::from_secs(300);
+const POLL: Duration = Duration::from_secs(60);
 /// How far ahead the tile lists events.
 const HORIZON_MS: i64 = 12 * 3600 * 1000;
 const MAX_EVENTS: usize = 6;
@@ -167,10 +207,9 @@ mod mac {
         // SAFETY: read-only EventKit query; the completion is retained by
         // EventKit until it fires.
         unsafe {
-            let start = NSDate::dateWithTimeIntervalSince1970(now_ms as f64 / 1000.0 - 2.0 * 86400.0);
-            let predicate = store.predicateForIncompleteRemindersWithDueDateStarting_ending_calendars(
-                Some(&start), None, None,
-            );
+            // Every incomplete reminder, with or without a due date.
+            let _ = now_ms;
+            let predicate = store.predicateForIncompleteRemindersWithDueDateStarting_ending_calendars(None, None, None);
             let block = RcBlock::new(move |list: *mut objc2_foundation::NSArray<objc2_event_kit::EKReminder>| {
                 let mut items: Vec<ReminderItem> = Vec::new();
                 if !list.is_null() {
@@ -181,18 +220,16 @@ mod mac {
                         }
                         let id = r.calendarItemExternalIdentifier().map(|s| s.to_string()).unwrap_or_default();
                         let title = r.title().to_string();
-                        let mut due = String::new();
-                        if let Some(dc) = r.dueDateComponents() {
-                            let (h, m) = (dc.hour(), dc.minute());
-                            if h >= 0 && m >= 0 {
-                                due = format!("{h:02}:{m:02}");
-                            }
-                        }
-                        let title = if due.is_empty() { title } else { format!("{title} ({due})") };
-                        items.push(ReminderItem { id, title, due_at_ms: None });
+                        let due_at_ms = r
+                            .dueDateComponents()
+                            .and_then(|dc| objc2_foundation::NSCalendar::currentCalendar().dateFromComponents(&dc))
+                            .map(|d| (d.timeIntervalSince1970() * 1000.0).round() as i64);
+                        items.push(ReminderItem { id, title, due_at_ms });
                     }
                 }
-                items.truncate(4);
+                // Soonest due first; those without a date after them.
+                items.sort_by_key(|r| r.due_at_ms.unwrap_or(i64::MAX));
+                items.truncate(8);
                 *REMINDER_CACHE.lock().unwrap() = items;
             });
             store.fetchRemindersMatchingPredicate_completion(&predicate, &block);
@@ -209,6 +246,77 @@ mod mac {
             reminder.setCompleted(true);
             store.saveReminder_commit_error(&reminder, true).is_ok()
         }
+    }
+
+    /// Add a reminder titled `title` to the default list.
+    pub fn add_reminder(store: &EKEventStore, title: &str) -> bool {
+        // SAFETY: create + save on the main thread.
+        unsafe {
+            let Some(list) = store.defaultCalendarForNewReminders() else { return false };
+            let reminder = objc2_event_kit::EKReminder::reminderWithEventStore(store);
+            reminder.setTitle(Some(&NSString::from_str(title)));
+            reminder.setCalendar(Some(&list));
+            store.saveReminder_commit_error(&reminder, true).is_ok()
+        }
+    }
+
+    /// Today's events, and which days of this week have one.
+    pub fn week(store: &EKEventStore, now_ms: i64) -> (Vec<CalendarEvent>, Vec<bool>, u8, Vec<u8>) {
+        const DAY: i64 = 86_400_000;
+        let (today, weekday) = super::local_day(now_ms);
+        let monday = today - weekday as i64 * DAY;
+        let span = |from: i64, to: i64| {
+            // SAFETY: read-only EventKit query.
+            unsafe {
+                let start = NSDate::dateWithTimeIntervalSince1970(from as f64 / 1000.0);
+                let end = NSDate::dateWithTimeIntervalSince1970(to as f64 / 1000.0);
+                store
+                    .eventsMatchingPredicate(&store.predicateForEventsWithStartDate_endDate_calendars(&start, &end, None))
+                    .into_iter()
+                    .map(|e| (
+                        (e.startDate().timeIntervalSince1970() * 1000.0).round() as i64,
+                        e,
+                    ))
+                    .collect::<Vec<_>>()
+            }
+        };
+        let in_week = span(monday, monday + 7 * DAY);
+        let busy = (0..7)
+            .map(|d| {
+                let (from, to) = (monday + d * DAY, monday + (d + 1) * DAY);
+                in_week.iter().any(|(start, _)| (from..to).contains(start))
+            })
+            .collect();
+        let dates = (0..7).map(|d| super::day_of_month(monday + d * DAY + DAY / 2)).collect();
+        // SAFETY: read-only accessors on the events just fetched.
+        let mut list: Vec<CalendarEvent> = unsafe {
+            span(today, today + DAY)
+                .into_iter()
+                .map(|(starts_at_ms, e)| {
+                    let location = e.location().map(|l| l.to_string());
+                    let notes = e.notes().map(|n| n.to_string()).unwrap_or_default();
+                    let (calendar, color) = match e.calendar() {
+                        Some(c) => (c.title().to_string(), color(&c)),
+                        None => (String::new(), None),
+                    };
+                    CalendarEvent {
+                        title: e.title().to_string(),
+                        starts_at_ms,
+                        ends_at_ms: (e.endDate().timeIntervalSince1970() * 1000.0).round() as i64,
+                        all_day: e.isAllDay(),
+                        calendar,
+                        color,
+                        meeting_url: meeting_url_in(&location.clone().unwrap_or_default())
+                            .or_else(|| meeting_url_in(&notes)),
+                        location,
+                        url: None,
+                    }
+                })
+                .collect()
+        };
+        list.sort_by_key(|e| (!e.all_day, e.starts_at_ms));
+        list.truncate(8);
+        (list, busy, weekday, dates)
     }
 
     /// Upcoming events within the horizon, soonest first.
@@ -277,11 +385,16 @@ mod mac {
             };
             fetch_reminders(store, now_ms);
             let reminders = REMINDER_CACHE.lock().unwrap().clone();
+            let (today, busy_days, weekday, week_dates) = week(store, now_ms);
             CalendarState {
                 accounts: accounts(store),
                 events: events(store, now_ms),
                 reminders,
                 granted: true,
+                today,
+                busy_days,
+                weekday,
+                week_dates,
             }
         })
     }

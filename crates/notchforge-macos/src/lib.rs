@@ -32,6 +32,7 @@ pub mod media;
 pub mod menubar;
 #[cfg(target_os = "macos")]
 pub mod mirrors;
+pub mod notes;
 #[cfg(target_os = "macos")]
 pub mod panel;
 #[cfg(target_os = "macos")]

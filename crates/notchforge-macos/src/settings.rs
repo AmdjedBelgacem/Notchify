@@ -137,6 +137,7 @@ pub enum Pane {
     Appearance,
     Notifications,
     Agents,
+    Calls,
     Weather,
     Media,
     Tray,
@@ -145,11 +146,12 @@ pub enum Pane {
 }
 
 impl Pane {
-    pub const ALL: [Pane; 9] = [
+    pub const ALL: [Pane; 10] = [
         Pane::General,
         Pane::Appearance,
         Pane::Notifications,
         Pane::Agents,
+        Pane::Calls,
         Pane::Media,
         Pane::Weather,
         Pane::Tray,
@@ -160,7 +162,7 @@ impl Pane {
     /// The sidebar's captioned sections.
     const SECTIONS: [(&'static str, &'static [Pane]); 3] = [
         ("Surface", &[Pane::General, Pane::Appearance]),
-        ("Content", &[Pane::Notifications, Pane::Agents, Pane::Media, Pane::Weather, Pane::Tray]),
+        ("Content", &[Pane::Notifications, Pane::Agents, Pane::Calls, Pane::Media, Pane::Weather, Pane::Tray]),
         ("System", &[Pane::Controls, Pane::Permissions]),
     ];
 
@@ -171,6 +173,7 @@ impl Pane {
             Pane::Appearance => "Motion, animation speed and the live indicators.",
             Pane::Notifications => "Which notifications peek out, and from where.",
             Pane::Agents => "Claude Code, Codex, Cursor, Zed and anything that can post JSON.",
+            Pane::Calls => "Calls from any app or browser tab ring in the notch.",
             Pane::Media => "What plays beside the notch, and how your music apps connect.",
             Pane::Weather => "Location, units and how often the forecast refreshes.",
             Pane::Tray => "A temporary shelf for files you drag onto the notch.",
@@ -186,6 +189,7 @@ impl Pane {
             Pane::Appearance => ((156, 139, 255), (111, 92, 255)),
             Pane::Notifications => ((255, 106, 96), (232, 55, 47)),
             Pane::Agents => ((238, 149, 119), (217, 119, 87)),
+            Pane::Calls => ((76, 217, 100), (40, 167, 69)),
             Pane::Media => ((255, 100, 130), (245, 43, 73)),
             Pane::Weather => ((99, 208, 255), (47, 155, 224)),
             Pane::Tray => ((90, 165, 255), (31, 112, 240)),
@@ -204,6 +208,11 @@ impl Pane {
             }),
             Pane::Agents => Some(if c.providers.agents {
                 (format!("Listening on {}", c.agents.http_port), Tone::Ok)
+            } else {
+                ("Off".into(), Tone::Neutral)
+            }),
+            Pane::Calls => Some(if c.notifications.incoming_calls {
+                ("Ringing on".into(), Tone::Ok)
             } else {
                 ("Off".into(), Tone::Neutral)
             }),
@@ -227,6 +236,7 @@ impl Pane {
             Pane::Appearance => "Appearance & Motion",
             Pane::Notifications => "Notifications",
             Pane::Agents => "Coding Agents",
+            Pane::Calls => "Calls",
             Pane::Weather => "Weather",
             Pane::Media => "Media",
             Pane::Tray => "File Tray",
@@ -242,6 +252,7 @@ impl Pane {
             Pane::Appearance => ("circle.lefthalf.filled", (60, 60, 67)),
             Pane::Notifications => ("bell.badge.fill", (255, 59, 48)),
             Pane::Agents => ("chevron.left.forwardslash.chevron.right", (217, 119, 87)),
+            Pane::Calls => ("phone.fill", (52, 199, 89)),
             Pane::Weather => ("cloud.sun.fill", (50, 173, 230)),
             Pane::Media => ("music.note", (250, 45, 72)),
             Pane::Tray => ("tray.full.fill", (10, 132, 255)),
@@ -258,6 +269,9 @@ impl Pane {
             Pane::Notifications => "focus banners apps whatsapp discord slack messages priority notification center",
             Pane::Agents => {
                 "claude cursor zed codex opencode qoder webhook port token socket inbox allow deny approval authorize consent"
+            }
+            Pane::Calls => {
+                "call ring ringing answer decline hang up whatsapp facetime discord meet teams zoom instagram messenger"
             }
             Pane::Weather => "location city units celsius fahrenheit refresh",
             Pane::Media => "spotify apple music audio output playlists automation",
@@ -1369,26 +1383,6 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 c.notifications.quick_reply,
                 |cfg, on| cfg.notifications.quick_reply = on,
             );
-            form.begin("Calls");
-            form.switch(
-                "Show incoming calls",
-                Some("Rings in the notch when a notification announces a call. Answering uses the banner's button, which needs Accessibility; without it the app comes forward instead"),
-                c.notifications.incoming_calls,
-                |cfg, on| cfg.notifications.incoming_calls = on,
-            );
-            form.action_row(
-                "Try it",
-                Some("Rings a sample call in the notch"),
-                None,
-                vec![(
-                    "Test call",
-                    false,
-                    Box::new(|| {
-                        app::send(notchforge_core::engine::Command::TestCall);
-                    }),
-                )],
-                Some(("phone.fill", (36, 138, 61))),
-            );
             form.begin("Sources");
             form.switch(
                 "Notification Center",
@@ -1582,6 +1576,41 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 Box::new(move || {
                     crate::sharing::copy_text(&cmd);
                 }),
+            );
+        }
+        Pane::Calls => {
+            form.begin("");
+            form.switch(
+                "Show incoming calls",
+                Some("Calls from apps and browser tabs ring in the notch, where you can answer, decline and hang up."),
+                c.notifications.incoming_calls,
+                |cfg, on| cfg.notifications.incoming_calls = on,
+            );
+            form.action_row(
+                "Try it",
+                Some("Rings a sample call in the notch"),
+                None,
+                vec![(
+                    "Test call",
+                    false,
+                    Box::new(|| {
+                        app::send(notchforge_core::engine::Command::TestCall);
+                    }),
+                )],
+                Some(("phone.fill", (36, 138, 61))),
+            );
+            form.begin("What calls need");
+            form.permission_as(
+                Permission::Accessibility,
+                "Accessibility",
+                "Finds the answer, decline and hang-up buttons in a call's window or tab.",
+                None,
+            );
+            form.permission_as(
+                Permission::FullDiskAccess,
+                "Full Disk Access",
+                "Reads call notifications from apps and from tabs in the background.",
+                None,
             );
         }
         Pane::Weather => {

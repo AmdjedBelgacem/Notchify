@@ -151,6 +151,15 @@ pub fn menubar_preview(snap: &Snapshot) -> Option<Retained<objc2_app_kit::NSView
     .flatten()
 }
 
+/// The menu bar menu's quick toggles, for self-test renders.
+pub fn menubar_toggles_preview(snap: &Snapshot) -> Option<Retained<objc2_app_kit::NSView>> {
+    with_app(|a| {
+        a.menubar.update(snap);
+        a.menubar.toggles_view()
+    })
+    .flatten()
+}
+
 /// Show Settings on a given pane.
 pub fn show_settings_pane(pane: crate::settings::Pane) {
     with_app(|a| {

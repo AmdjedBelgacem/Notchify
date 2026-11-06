@@ -1395,6 +1395,15 @@ impl Controller {
         views.expanded.update(&agents);
         views.expanded.show_tab(Tab::Agents);
         show("07i-notched-agents", LayoutKind::Expanded, &views.expanded.root);
+        views.expanded.show_tab(Tab::Live);
+        show("07q-notched-live", LayoutKind::Expanded, &views.expanded.root);
+        // The Planner, with a sample day.
+        let mut planner = agents.clone();
+        planner.generation += 1;
+        planner.calendar = crate::selftest::sample_calendar(planner.now_ms);
+        views.expanded.update(&planner);
+        views.expanded.show_tab(Tab::Planner);
+        show("07r-notched-planner", LayoutKind::Expanded, &views.expanded.root);
         // As from the desktop app alone: Claude Code's limits unknown, large totals.
         let mut desktop = agents.clone();
         desktop.generation += 1;
@@ -1641,6 +1650,35 @@ impl Controller {
 
     /// Answer an authorization prompt: Allow / Deny for an agent asking to show
     /// notifications, Cancel for a Spotify sign-in waiting on the browser.
+    /// Add a plan to Reminders. EventKit runs on the main thread, which this
+    /// is, so the save waits on a worker that hops back to it.
+    pub fn add_plan(&self, title: &str) {
+        self.views.borrow().expanded.planner.plan_added(title);
+        let title = title.to_owned();
+        std::thread::spawn(move || {
+            if !notchforge_providers::calendar::add_reminder(&title) {
+                tracing::warn!("could not add a reminder");
+            }
+        });
+    }
+
+    /// Tick a plan off in Reminders.
+    pub fn complete_plan(&self, id: &str) {
+        self.views.borrow().expanded.planner.plan_done(id);
+        let id = id.to_owned();
+        std::thread::spawn(move || {
+            notchforge_providers::calendar::complete_reminder_by_id(&id);
+        });
+    }
+
+    pub fn new_note(&self) {
+        self.views.borrow().expanded.planner.new_note();
+    }
+
+    pub fn open_note(&self, id: u64) {
+        self.views.borrow().expanded.planner.open_note(id);
+    }
+
     pub fn answer_auth(&self, target: &notchforge_core::model::AuthTarget, primary: bool) {
         use notchforge_core::model::AuthTarget;
         match target {
@@ -1840,7 +1878,7 @@ impl Controller {
         let pressed = Self::press_hang_up(call);
         let now = now_ms();
         let again = now - self.hang_up_tried_ms.get() < HANG_UP_AGAIN_MS;
-        tracing::info!(pressed, again, source = %call.source, "call diagnostics: hang up");
+        tracing::debug!(pressed, again, source = %call.source, "call: hang up");
         let bundle = call.app.bundle_id.clone();
         match bundle {
             Some(b) if !pressed && !again => {
@@ -1863,7 +1901,7 @@ impl Controller {
         let snap = self.snapshot.borrow().clone();
         let Some(call) = &snap.active_call else { return };
         if Self::press_hang_up(call) {
-            tracing::info!(source = %call.source, "call diagnostics: hung up once in view");
+            tracing::debug!(source = %call.source, "call: hung up once in view");
             self.hang_up_tried_ms.set(0);
             self.engine.send(Command::EndActiveCall);
         }
@@ -1879,7 +1917,7 @@ impl Controller {
                 let pressed = Self::ringing_pid(call)
                     .is_some_and(|pid| crate::accessibility::press_window_button(pid, ANSWER_WORDS))
                     || crate::accessibility::press_banner_button(&call.banner_title, ANSWER_WORDS);
-                tracing::info!(pressed, source = %call.source, "call diagnostics: answer");
+                tracing::debug!(pressed, source = %call.source, "call: answer");
                 if pressed {
                     self.engine.send(Command::CallAnswered(call.id));
                     return;
@@ -1899,7 +1937,7 @@ impl Controller {
                 let pressed = Self::ringing_pid(call)
                     .is_some_and(|pid| crate::accessibility::press_window_button(pid, DECLINE_WORDS))
                     || crate::accessibility::press_banner_button(&call.banner_title, DECLINE_WORDS);
-                tracing::info!(pressed, source = %call.source, "call diagnostics: decline");
+                tracing::debug!(pressed, source = %call.source, "call: decline");
                 self.engine.send(Command::EndCall(call.id));
             }
         }

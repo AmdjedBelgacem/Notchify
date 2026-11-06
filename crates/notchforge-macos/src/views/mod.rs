@@ -9,8 +9,10 @@ pub mod call;
 pub mod collapsed;
 pub mod compact;
 pub mod expanded;
+pub mod live;
 pub mod media;
 pub mod peek;
+pub mod planner;
 pub mod usage;
 
 use crate::ui::{FlippedView, Palette, rgb8, symbol_image};

@@ -62,23 +62,21 @@ pub struct CompactView {
     battery_detail: Retained<NSTextField>,
 }
 
-/// The lead card's art during a call.
-const CALL_ART: f64 = 40.0;
-
 impl CompactView {
     pub fn new(mtm: MainThreadMarker, layout: &NotchLayout, p: &Palette) -> Self {
         let s = layout.shape(LayoutKind::Compact);
         let nh = layout.notch.rect.height;
         let root = FlippedView::new(mtm, rect(0.0, 0.0, s.width, s.height));
-        let pad = 14.0;
+        // Three equal cards, as on the redesign twin's hover glance.
+        let pad = 10.0;
         let gap = 8.0;
-        let top = nh + 10.0;
+        let top = nh + 6.0;
         let ch = s.height - top - pad;
-        let col = (s.width - 2.0 * pad - 3.0 * gap) / 4.0;
+        let col = (s.width - 2.0 * pad - 2.0 * gap) / 3.0;
         let white = |a: f64| rgba(1.0, 1.0, 1.0, a);
 
-        // ── lead card (2 columns) ──
-        let lw = 2.0 * col + gap;
+        // ── lead card: art and titles at the top, progress along the bottom ──
+        let lw = col;
         let lead = shape_view(mtm, rect(pad, top, lw, ch), &white(0.06), 16.0);
         let lead_wash = objc2_quartz_core::CAGradientLayer::layer();
         lead_wash.setType(&objc2_foundation::NSString::from_str("radial"));
@@ -91,8 +89,8 @@ impl CompactView {
             l.setBorderColor(Some(&white(0.08).CGColor()));
             l.addSublayer(&lead_wash);
         }
-        let art_side = (ch - 24.0).min(72.0);
-        let art_box = shape_view(mtm, rect(12.0, (ch - art_side) / 2.0, art_side, art_side), &white(0.08), 11.0);
+        let art_side = 46.0;
+        let art_box = shape_view(mtm, rect(12.0, 12.0, art_side, art_side), &white(0.08), 10.0);
         if let Some(l) = art_box.layer() {
             l.setMasksToBounds(true);
         }
@@ -100,17 +98,18 @@ impl CompactView {
         art.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
         art.setFrame(rect(0.0, 0.0, art_side, art_side));
         art_box.addSubview(&art);
-        let tx = 12.0 + art_side + 12.0;
+        let tx = 12.0 + art_side + 10.0;
         let tw = lw - tx - 12.0;
-        let lead_kicker = label(mtm, "", &font(11.0, Weight::Semibold), &p.secondary, rect(tx, 27.0, tw - 20.0, 14.0));
-        let lead_title = label(mtm, "", &font(15.0, Weight::Semibold), &p.primary, rect(tx, 44.0, tw, 19.0));
-        let lead_sub = label(mtm, "", &font(12.0, Weight::Regular), &p.secondary, rect(tx, 64.0, tw, 16.0));
+        let lead_kicker = label(mtm, "", &font(11.0, Weight::Semibold), &p.secondary, rect(tx, 13.0, tw - 22.0, 14.0));
+        let lead_title = label(mtm, "", &font(14.0, Weight::Semibold), &p.primary, rect(tx, 27.0, tw, 18.0));
+        let lead_sub = label(mtm, "", &font(12.0, Weight::Regular), &p.secondary, rect(tx, 44.0, tw, 15.0));
+        // A notification's message gets the card's whole width, under the art.
         let lead_body =
-            wrapping_label(mtm, "", &font(11.5, Weight::Regular), &p.secondary, rect(tx, 64.0, tw, 30.0), 2);
-        let progress_track = shape_view(mtm, rect(tx, 87.0, tw, 3.0), &white(0.16), 1.5);
-        let progress_fill = shape_view(mtm, rect(0.0, 0.0, 0.0, 3.0), &white(0.9), 1.5);
+            wrapping_label(mtm, "", &font(11.5, Weight::Regular), &p.secondary, rect(12.0, 64.0, lw - 24.0, 30.0), 2);
+        let progress_track = shape_view(mtm, rect(12.0, ch - 18.0, lw - 24.0, 4.0), &white(0.2), 2.0);
+        let progress_fill = shape_view(mtm, rect(0.0, 0.0, 0.0, 4.0), &white(0.9), 2.0);
         progress_track.addSubview(&progress_fill);
-        let eq_host = FlippedView::new(mtm, rect(lw - 12.0 - 12.0, 28.0, 12.0, 11.0));
+        let eq_host = FlippedView::new(mtm, rect(lw - 12.0 - 12.0, 14.0, 12.0, 11.0));
         for v in [&*art_box as &NSView, &lead_kicker, &lead_title, &lead_sub, &lead_body, &progress_track, &eq_host] {
             lead.addSubview(v);
         }
@@ -125,9 +124,9 @@ impl CompactView {
             "Hang up",
             &objc2_app_kit::NSColor::whiteColor(),
             &t,
-            rect(lw - 12.0 - 36.0, (ch - 36.0) / 2.0, 36.0, 36.0),
+            rect(lw - 12.0 - 34.0, ch - 12.0 - 34.0, 34.0, 34.0),
         );
-        crate::ui::make_card(&hang_up, &rgba(0.851, 0.176, 0.125, 1.0), 18.0);
+        crate::ui::make_card(&hang_up, &rgba(0.851, 0.176, 0.125, 1.0), 17.0);
         hang_up.setHidden(true);
         lead.addSubview(&hang_up);
 
@@ -201,7 +200,7 @@ impl CompactView {
             showing_media: std::cell::Cell::new(false),
             hang_up,
             title_width: tw,
-            art_frame: rect(12.0, (ch - art_side) / 2.0, art_side, art_side),
+            art_frame: rect(12.0, 12.0, art_side, art_side),
             text_x: tx,
             _targets: targets,
             weather_card,
@@ -257,9 +256,18 @@ impl CompactView {
         self.lead_kicker.setAttributedStringValue(&attributed("On call", &font(11.0, Weight::Semibold), &green));
         set_text(&self.lead_title, &call.caller);
         let clock = notchforge_core::calls::call_clock(call.started_ms, now_ms());
-        set_text(&self.lead_sub, &format!("{clock} · {}", call.source));
+        set_text(&self.lead_sub, &call.source);
         self.lead_sub.setHidden(false);
-        self.lead_body.setHidden(true);
+        // The running time, large, beside the hang-up button.
+        let lw = self.lead.frame().size.width;
+        let bottom = self.progress_track.frame().origin.y + 18.0;
+        self.lead_body.setFrame(rect(12.0, bottom - 12.0 - 32.0, lw - 24.0 - 40.0, 32.0));
+        self.lead_body.setAttributedStringValue(&attributed(
+            &clock,
+            &crate::ui::mono_digits(24.0, Weight::Light),
+            &rgba(1.0, 1.0, 1.0, 0.96),
+        ));
+        self.lead_body.setHidden(false);
         self.progress_track.setHidden(true);
         self.set_equalizer(None);
         set_accessibility_label(&self.lead, &format!("On a call with {} on {}", call.caller, call.source));
@@ -307,7 +315,7 @@ impl CompactView {
                     _ => 0.0,
                 };
                 let tw = self.progress_track.frame().size.width;
-                self.progress_fill.setFrame(rect(0.0, 0.0, tw * frac, 3.0));
+                self.progress_fill.setFrame(rect(0.0, 0.0, tw * frac, 4.0));
                 self.progress_track.setHidden(n.duration.is_none());
                 self.set_equalizer(n.is_playing().then_some(&*brand));
                 set_accessibility_label(
@@ -348,6 +356,11 @@ impl CompactView {
 
     /// Lead card: the latest notification, or "All caught up".
     fn render_notification(&self, snap: &Snapshot, p: &Palette) {
+        let lw = self.lead.frame().size.width;
+        self.lead_body.setFrame(rect(12.0, 64.0, lw - 24.0, 30.0));
+        // A call may have left its large clock style behind.
+        self.lead_body.setFont(Some(&font(11.5, Weight::Regular)));
+        self.lead_body.setTextColor(Some(&p.secondary));
         self.set_wash(None);
         self.set_equalizer(None);
         self.progress_track.setHidden(true);
@@ -403,22 +416,14 @@ impl CompactView {
         // A call in progress comes before either.
         let in_call = snap.active_call.is_some();
         self.hang_up.setHidden(!in_call);
-        // Leave room for the hang-up button during a call.
-        // During a call the art shrinks, so the name and source have room too.
+        // The hang-up button sits along the bottom, under the caller's name.
         let art = self.art_frame;
-        let small = CALL_ART;
-        let (art_box, art_view, text_x) = if in_call {
-            let y = art.origin.y + (art.size.height - small) / 2.0;
-            (rect(art.origin.x, y, small, small), rect(0.0, 0.0, small, small), art.origin.x + small + 10.0)
-        } else {
-            (art, rect(0.0, 0.0, art.size.width, art.size.height), self.text_x)
-        };
-        self.art_box.setFrame(art_box);
-        self.art.setFrame(art_view);
-        let right_edge = self.text_x + self.title_width - if in_call { 42.0 } else { 0.0 };
-        for v in [&self.lead_kicker, &self.lead_title, &self.lead_sub] {
+        self.art_box.setFrame(art);
+        self.art.setFrame(rect(0.0, 0.0, art.size.width, art.size.height));
+        // The label above the title stops short of the equaliser.
+        for (v, inset) in [(&self.lead_kicker, 22.0), (&self.lead_title, 0.0), (&self.lead_sub, 0.0)] {
             let f = v.frame();
-            v.setFrame(rect(text_x, f.origin.y, right_edge - text_x, f.size.height));
+            v.setFrame(rect(self.text_x, f.origin.y, self.title_width - inset, f.size.height));
         }
         if let Some(call) = &snap.active_call {
             crate::ui::remove_all_subviews(&self.art_box);
