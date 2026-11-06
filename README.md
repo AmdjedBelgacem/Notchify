@@ -77,9 +77,10 @@ It surfaces:
   keys. **Browser audio is shown as music**: the notch titles it from the
   playing tab, shows the video's **thumbnail**, and when sound comes from the
   browser it is featured over other players. Even browsers whose tabs cannot
-  be read are handled: a `… - YouTube` window title is enough — the video is
+  be read are handled: a `… - YouTube` page title is enough — the video is
   found by its title, which fills the name, the thumbnail and the **Up next**
-  recommendations.
+  recommendations. This covers feed autoplay too, where the video plays right
+  on youtube.com and the tab's URL never changes.
 - **Agents that finished.** Hooks report every finished turn, and a session
   watcher says when a coding-agent CLI (Claude Code, Codex, OpenCode, Cursor
   Agent, Gemini CLI…) ends, with no setup. **Settings › Coding Agents** connects

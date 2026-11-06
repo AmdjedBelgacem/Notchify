@@ -361,9 +361,18 @@ impl Session {
             // every browser (Firefox included): the tab title is the window
             // title.
             if tabs.is_empty() {
-                let pid = src.pid;
-                let titles =
-                    tokio::task::spawn_blocking(move || crate::sys::ax::window_titles(pid)).await.unwrap_or_default();
+                // The audio pid is a browser helper; the windows live in the
+                // browser's own (responsible) process. The page's own <title>
+                // (via the AX tree) beats the window title, which macOS
+                // truncates.
+                let pid = crate::sys::process::responsible_pid(src.pid);
+                let mut titles =
+                    tokio::task::spawn_blocking(move || crate::sys::ax::web_titles(pid)).await.unwrap_or_default();
+                if titles.is_empty() {
+                    titles = tokio::task::spawn_blocking(move || crate::sys::ax::window_titles(pid))
+                        .await
+                        .unwrap_or_default();
+                }
                 if !titles.is_empty() && !self.browser_ax_logged {
                     tracing::info!(browser = b.name, count = titles.len(), "using window titles as browser tabs");
                     self.browser_ax_logged = true;
@@ -371,14 +380,32 @@ impl Session {
                 tabs = titles.into_iter().map(|title| browser::Tab { title, url: String::new() }).collect();
             }
             self.browser_denied = denied.then(|| b.name.to_owned());
-            // A YouTube video whose URL we never saw (browsers whose tabs
-            // cannot be read, e.g. Dia, only give the window title) is found
-            // by its title: that fills the name, the thumbnail and the up-next.
+            // A YouTube video whose URL we never saw is found by its title:
+            // that fills the name, the thumbnail and the up-next. The title
+            // comes from the tab when it has one, else from the page's own
+            // `<title>` in the Accessibility tree — feed autoplay (the video
+            // plays right on youtube.com) never changes the tab's URL.
             let mut picked = browser::pick(&tabs).cloned();
             let mut resolved_author: Option<String> = None;
+            let page_titles = if picked.as_ref().is_some_and(|t| browser::youtube_id(&t.url).is_none())
+                && picked.as_ref().and_then(|t| browser::youtube_title_query(&t.title)).is_none()
+            {
+                // The audio source's pid is a helper; the real page lives in
+                // the browser's own (responsible) process.
+                let main_pid = crate::sys::process::responsible_pid(src.pid);
+                tokio::task::spawn_blocking(move || crate::sys::ax::web_titles(main_pid))
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
             if let Some(t) = picked.as_mut() {
+                let title_query = match browser::youtube_title_query(&t.title) {
+                    Some(q) => Some(q),
+                    None => page_titles.iter().find_map(|t| browser::youtube_title_query(t)),
+                };
                 if browser::youtube_id(&t.url).is_none() {
-                    match browser::youtube_title_query(&t.title) {
+                    match title_query {
                         Some(query) => {
                             let found = match &self.yt_resolved {
                                 Some((q, v)) if *q == query => Some(v.clone()),

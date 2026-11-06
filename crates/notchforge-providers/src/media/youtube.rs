@@ -293,7 +293,11 @@ mod tests {
                 .user_agent(concat!("NotchForge/", env!("CARGO_PKG_VERSION")))
                 .build()
                 .unwrap();
-            search_first(&http, "Daft Punk One More Time official video").await
+            search_first(
+                &http,
+                &std::env::var("YT_QUERY").unwrap_or_else(|_| "Daft Punk One More Time official video".into()),
+            )
+            .await
         });
         let v = v.expect("search found a video");
         assert_eq!(v.url.len(), "https://www.youtube.com/watch?v=".len() + 11);
