@@ -1117,14 +1117,17 @@ pub struct MediaState {
 }
 
 impl MediaState {
-    /// The player to feature: whichever is playing (the most recently sampled
-    /// wins a tie), else the most recently sampled paused one.
+    /// The player to feature. A browser that is actually audible wins — its
+    /// sound is what the user hears right now (a YouTube video, a call, a
+    /// podcast) — then any other playing player (most recently sampled wins a
+    /// tie), else the most recently sampled paused one.
     pub fn primary(&self) -> Option<&NowPlaying> {
         let latest = |a: &&NowPlaying, b: &&NowPlaying| a.sampled_at_ms.cmp(&b.sampled_at_ms);
-        self.players
-            .iter()
-            .filter(|p| p.is_playing())
-            .max_by(latest)
+        let playing = self.players.iter().filter(|p| p.is_playing());
+        playing
+            .clone()
+            .find(|p| p.player == MediaPlayer::Browser)
+            .or_else(|| playing.max_by(latest))
             .or_else(|| self.players.iter().filter(|p| p.state == PlaybackState::Paused).max_by(latest))
     }
 
@@ -1327,6 +1330,13 @@ mod tests {
         m.players.remove(1);
         assert_eq!(m.primary().map(|p| p.player), Some(MediaPlayer::Spotify));
         assert!(m.is_playing());
+        // An audible browser (a YouTube video) outranks another playing player:
+        // it is the sound the user hears right now.
+        m.players.insert(0, np(MediaPlayer::Browser, PlaybackState::Playing, 4));
+        assert_eq!(m.primary().map(|p| p.player), Some(MediaPlayer::Browser));
+        // But a paused browser loses to anything playing.
+        m.players[0].state = PlaybackState::Paused;
+        assert_eq!(m.primary().map(|p| p.player), Some(MediaPlayer::Spotify));
     }
 
     #[test]

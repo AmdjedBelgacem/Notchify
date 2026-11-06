@@ -200,6 +200,21 @@ pub fn clean_title(title: &str, service_name: Option<&str>) -> String {
     s
 }
 
+/// The video query in a tab title when the page is YouTube but we have no
+/// URL (browsers whose tabs cannot be read give the window title only):
+/// `"(2) Daft Punk - One More Time - YouTube"` → `"Daft Punk - One More Time"`.
+/// `None` for a bare "YouTube" (a feed, no specific video) or any other site.
+pub fn youtube_title_query(title: &str) -> Option<String> {
+    let lowered = title.to_lowercase();
+    if !lowered.contains("youtube") {
+        return None;
+    }
+    let t = clean_title(title, Some("YouTube"));
+    let t = t.trim();
+    let bare = t.is_empty() || t.eq_ignore_ascii_case("youtube") || t.eq_ignore_ascii_case("youtube music");
+    (!bare).then(|| t.to_owned())
+}
+
 /// The YouTube video id of a watch URL, for its thumbnail.
 pub fn youtube_id(url: &str) -> Option<String> {
     let h = host(url);
@@ -311,6 +326,22 @@ mod tests {
         assert_eq!(youtube_id(&t.url).as_deref(), Some("FGBhQbmPwH8"));
         // With no media tab, the active tab is used.
         assert_eq!(pick(&tabs[..1]).map(|t| t.title.as_str()), Some("Inbox (4)"));
+    }
+
+    #[test]
+    fn youtube_titles_give_a_search_query() {
+        assert_eq!(
+            youtube_title_query("(2) Daft Punk - One More Time - YouTube").as_deref(),
+            Some("Daft Punk - One More Time")
+        );
+        assert_eq!(youtube_title_query("Some Video - YouTube").as_deref(), Some("Some Video"));
+        // A bare feed title names no video.
+        assert_eq!(youtube_title_query("YouTube"), None);
+        assert_eq!(youtube_title_query("(12) YouTube"), None);
+        assert_eq!(youtube_title_query("YouTube Music"), None);
+        // Any other site is not YouTube's business.
+        assert_eq!(youtube_title_query("Inbox (4) - Gmail"), None);
+        assert_eq!(youtube_title_query("GitHub - Dia"), None);
     }
 
     #[test]

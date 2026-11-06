@@ -75,7 +75,11 @@ It surfaces:
   sound, the collapsed notch shows that app's icon and a live equaliser. Other
   apps (browsers, podcasts…) get play/pause and skip through the system media
   keys. **Browser audio is shown as music**: the notch titles it from the
-  playing tab (YouTube thumbnails included).
+  playing tab, shows the video's **thumbnail**, and when sound comes from the
+  browser it is featured over other players. Even browsers whose tabs cannot
+  be read are handled: a `… - YouTube` window title is enough — the video is
+  found by its title, which fills the name, the thumbnail and the **Up next**
+  recommendations.
 - **Agents that finished.** Hooks report every finished turn, and a session
   watcher says when a coding-agent CLI (Claude Code, Codex, OpenCode, Cursor
   Agent, Gemini CLI…) ends, with no setup. **Settings › Coding Agents** connects

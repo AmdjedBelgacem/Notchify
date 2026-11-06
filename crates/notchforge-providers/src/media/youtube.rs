@@ -6,7 +6,7 @@
 //! robust to layout changes because the walk is recursive rather than
 //! path-based. A consent cookie keeps EU requests on the watch page.
 
-use notchforge_core::model::UpNextVideo;
+pub use notchforge_core::model::UpNextVideo;
 
 /// Fetch the recommendations for a video. Best effort: an empty list on any
 /// failure (offline, consent wall, layout change).
@@ -37,6 +37,34 @@ pub fn parse_up_next(html: &str, watching: &str) -> Vec<UpNextVideo> {
     pairs.retain(|(id, _)| id != watching);
     pairs.truncate(8);
     pairs.into_iter().map(|(_, v)| v).collect()
+}
+
+/// Find a video by a title, for browsers whose tabs we cannot read: the
+/// window title ("Song - YouTube") is all we have. Best effort.
+pub async fn search_first(http: &reqwest::Client, query: &str) -> Option<UpNextVideo> {
+    let url = reqwest::Url::parse_with_params("https://www.youtube.com/results", &[("search_query", query)]).ok()?;
+    let resp = match http
+        .get(url)
+        .header("Cookie", "SOCS=CAI; CONSENT=YES+cb")
+        .header("Accept-Language", "en")
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return None,
+    };
+    let Ok(html) = resp.text().await else { return None };
+    parse_search(&html)
+}
+
+/// The first video of a results page. Pure and tested.
+pub fn parse_search(html: &str) -> Option<UpNextVideo> {
+    let data = extract_initial_data(html)?;
+    let value = serde_json::from_str::<serde_json::Value>(&data).ok()?;
+    let mut pairs = Vec::new();
+    collect_renderers(&value, &mut pairs);
+    pairs.into_iter().next().map(|(_, v)| v)
 }
 
 /// Slice out the `ytInitialData` JSON object.
@@ -81,7 +109,9 @@ fn extract_initial_data(html: &str) -> Option<String> {
 fn collect_renderers(value: &serde_json::Value, out: &mut Vec<(String, UpNextVideo)>) {
     match value {
         serde_json::Value::Object(map) => {
-            if let Some(node) = map.get("compactVideoRenderer") {
+            // Search results use `videoRenderer`, watch-page sidebars the
+            // compact variant — the fields we read are the same.
+            if let Some(node) = map.get("videoRenderer").or_else(|| map.get("compactVideoRenderer")) {
                 if let Some(pair) = video_from_compact(node) {
                     out.push(pair);
                 }
@@ -107,7 +137,10 @@ fn collect_renderers(value: &serde_json::Value, out: &mut Vec<(String, UpNextVid
 fn video_from_compact(node: &serde_json::Value) -> Option<(String, UpNextVideo)> {
     let video_id = node.get("videoId")?.as_str()?.to_owned();
     let title = text_of(node.get("title"))?;
-    let author = text_of(node.get("authorText")).unwrap_or_default();
+    // Watch-page sidebars say `authorText`, search results `ownerText`.
+    let author = text_of(node.get("authorText"))
+        .or_else(|| text_of(node.get("ownerText")))
+        .unwrap_or_default();
     let duration = text_of(node.get("lengthText")).unwrap_or_default();
     Some((
         video_id.clone(),
@@ -226,6 +259,21 @@ mod tests {
 
 
     #[test]
+    fn parses_search_results_for_a_title() {
+        // A minimal results page: the classic `videoRenderer` shape.
+        let page = r#"<script>var ytInitialData = {"contents":{"twoColumnSearchResultsRenderer":{"primaryContents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[
+        {"videoRenderer":{"videoId":"abc12345678","title":{"runs":[{"text":"Daft Punk - One More Time (Official Video)"}]},"ownerText":{"runs":[{"text":"Daft Punk"}]},"lengthText":{"simpleText":"4:11"}}},
+        {"videoRenderer":{"videoId":"def23456789","title":{"simpleText":"Second"}}}
+        ]}}]}}}}};</script>"#;
+        let v = parse_search(page).expect("first result");
+        assert_eq!(v.title, "Daft Punk - One More Time (Official Video)");
+        assert_eq!(v.author, "Daft Punk");
+        assert_eq!(v.duration, "4:11");
+        assert_eq!(v.url, "https://www.youtube.com/watch?v=abc12345678");
+        assert!(parse_search("<html>nothing</html>").is_none());
+    }
+
+    #[test]
     #[ignore = "live: run with --ignored and network; parses today's real layout"]
     fn parses_a_real_watch_page() {
         let html = std::fs::read_to_string("/tmp/yt-page.html").expect("save a watch page first");
@@ -234,6 +282,23 @@ mod tests {
         assert!(list.iter().all(|v| v.url.starts_with("https://www.youtube.com/watch?v=")));
         assert!(list.iter().any(|v| !v.title.is_empty()));
         println!("parsed {} recommendations, first: {} — {}", list.len(), list[0].title, list[0].author);
+    }
+
+    #[test]
+    #[ignore = "live: network; run with -- --ignored"]
+    fn finds_a_video_by_its_title() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let v = rt.block_on(async {
+            let http = reqwest::Client::builder()
+                .user_agent(concat!("NotchForge/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .unwrap();
+            search_first(&http, "Daft Punk One More Time official video").await
+        });
+        let v = v.expect("search found a video");
+        assert_eq!(v.url.len(), "https://www.youtube.com/watch?v=".len() + 11);
+        assert!(!v.title.is_empty());
+        println!("found: {} — {}", v.title, v.author);
     }
 
     #[test]

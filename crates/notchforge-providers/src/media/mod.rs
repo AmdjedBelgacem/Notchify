@@ -189,6 +189,10 @@ struct Session {
     up_next_for: Option<String>,
     /// Last time the Spotify play queue was refreshed (throttled).
     queue_at: Option<std::time::Instant>,
+    /// The window-title query last sent to YouTube's search, with the video
+    /// it resolved to: a title is searched once, then reused until the title
+    /// changes.
+    yt_resolved: Option<(String, youtube::UpNextVideo)>,
 }
 
 /// How long a silent browser tab stays on the notch as a paused track.
@@ -367,7 +371,41 @@ impl Session {
                 tabs = titles.into_iter().map(|title| browser::Tab { title, url: String::new() }).collect();
             }
             self.browser_denied = denied.then(|| b.name.to_owned());
-            let mut np = browser::now_playing(b, browser::pick(&tabs), PlaybackState::Playing, now);
+            // A YouTube video whose URL we never saw (browsers whose tabs
+            // cannot be read, e.g. Dia, only give the window title) is found
+            // by its title: that fills the name, the thumbnail and the up-next.
+            let mut picked = browser::pick(&tabs).cloned();
+            let mut resolved_author: Option<String> = None;
+            if let Some(t) = picked.as_mut() {
+                if browser::youtube_id(&t.url).is_none() {
+                    match browser::youtube_title_query(&t.title) {
+                        Some(query) => {
+                            let found = match &self.yt_resolved {
+                                Some((q, v)) if *q == query => Some(v.clone()),
+                                _ => {
+                                    let v = youtube::search_first(&self.http, &query).await;
+                                    if let Some(found) = &v {
+                                        tracing::info!(from = %t.title, found = %found.title, "resolved the YouTube video from its title");
+                                    }
+                                    self.yt_resolved = v.clone().map(|v| (query.clone(), v.clone()));
+                                    v
+                                }
+                            };
+                            if let Some(v) = found {
+                                resolved_author = (!v.author.is_empty()).then(|| v.author.clone());
+                                t.title = v.title;
+                                t.url = v.url;
+                            }
+                        }
+                        // Not YouTube after all (or a bare feed): forget it.
+                        None => self.yt_resolved = None,
+                    }
+                }
+            }
+            let mut np = browser::now_playing(b, picked.as_ref(), PlaybackState::Playing, now);
+            if let Some(author) = resolved_author {
+                np.artist = author;
+            }
             np.artwork_path = self.artwork_for(&np, "").await;
             // YouTube's up-next recommendations: fetched once per video.
             let video_id = np.track_id.as_deref().and_then(browser::youtube_id);
@@ -478,6 +516,7 @@ impl Provider for MediaProvider {
                 browser_ax_logged: false,
                 up_next_for: None,
                 queue_at: None,
+                yt_resolved: None,
             };
             let mut login: Option<tokio::task::JoinHandle<Result<(), spotify::SpotifyError>>> = None;
             let mut last_emitted: Option<MediaState> = None;
