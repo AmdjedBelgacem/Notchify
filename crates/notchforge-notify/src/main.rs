@@ -31,6 +31,11 @@ OPTIONS:
     --thread <ID>       Conversation / session id (used for grouping)
     --url <URL>         Link or file path opened by \"Open\"
     --stdin             Read a JSON event (or a Claude Code hook payload) from stdin
+    --input <N>         Tokens used, reported to the Agents tab (counts instead of showing a notification)
+    --output <N>        Output tokens
+    --cache-read <N>    Cache-read tokens
+    --cache-write <N>   Cache-write tokens
+    --model <NAME>      The model the tokens were spent on
     --port <N>          Webhook port (default 47815 or $NOTCHFORGE_PORT)
     --token <T>         Bearer token (or $NOTCHFORGE_TOKEN)
     --best-effort       Always exit 0 (recommended in hooks)
@@ -47,6 +52,12 @@ struct Args {
     source: Option<String>,
     kind: Option<String>,
     json_arg: Option<String>,
+    /// Reported token usage (see the usage ingest).
+    input: Option<u64>,
+    output: Option<u64>,
+    cache_read: Option<u64>,
+    cache_write: Option<u64>,
+    model: Option<String>,
 }
 
 fn parse() -> Result<Option<Args>, String> {
@@ -65,6 +76,13 @@ fn parse() -> Result<Option<Args>, String> {
             "--port" => a.port = Some(value("--port")?.parse().map_err(|_| "invalid --port")?),
             "--token" => a.token = Some(value("--token")?),
             "--stdin" => a.stdin = true,
+            "--input" => a.input = Some(value("--input")?.parse().map_err(|_| "invalid --input")?),
+            "--output" => a.output = Some(value("--output")?.parse().map_err(|_| "invalid --output")?),
+            "--cache-read" => a.cache_read = Some(value("--cache-read")?.parse().map_err(|_| "invalid --cache-read")?),
+            "--cache-write" => {
+                a.cache_write = Some(value("--cache-write")?.parse().map_err(|_| "invalid --cache-write")?)
+            }
+            "--model" => a.model = Some(value("--model")?),
             "--best-effort" => a.best_effort = true,
             "-h" | "--help" => return Ok(None),
             // A bare JSON argument (the Codex CLI `notify` hook passes one).
@@ -109,6 +127,25 @@ fn build_body(a: &Args, stdin_json: Option<&str>) -> Result<serde_json::Value, S
     }
     if let Some(k) = &a.kind {
         obj.insert("kind".into(), k.clone().into());
+    }
+    if a.input.is_some() || a.output.is_some() || a.cache_read.is_some() || a.cache_write.is_some() {
+        let mut t = serde_json::Map::new();
+        if let Some(v) = a.input {
+            t.insert("input".into(), v.into());
+        }
+        if let Some(v) = a.output {
+            t.insert("output".into(), v.into());
+        }
+        if let Some(v) = a.cache_read {
+            t.insert("cache_read".into(), v.into());
+        }
+        if let Some(v) = a.cache_write {
+            t.insert("cache_write".into(), v.into());
+        }
+        obj.insert("tokens".into(), serde_json::Value::Object(t));
+    }
+    if let Some(m) = &a.model {
+        obj.insert("model".into(), m.clone().into());
     }
     if obj.is_empty() {
         return Err("nothing to send (use --title/--body or --stdin)".into());

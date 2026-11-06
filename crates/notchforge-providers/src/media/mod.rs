@@ -18,6 +18,7 @@
 pub mod browser;
 pub mod script;
 pub mod spotify;
+pub mod youtube;
 
 use notchforge_core::config::Paths;
 use notchforge_core::model::{
@@ -42,7 +43,7 @@ const PLAYLIST_TTL_MS: i64 = 60_000;
 const ARTWORK_KEEP: usize = 160;
 
 /// 64-bit FNV-1a, for cache file names.
-pub fn fnv(s: &str) -> u64 {
+pub(crate) fn fnv(s: &str) -> u64 {
     s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
 }
 
@@ -68,7 +69,10 @@ pub fn prune_dir(dir: &Path, keep: usize) {
     }
 }
 
-async fn download(http: &reqwest::Client, url: &str, dest: &Path) -> Option<PathBuf> {
+/// Download a small file into the artwork cache (skipped when it exists).
+/// Best effort: `None` on any failure. Shared with the other providers
+/// (platform favicons).
+pub(crate) async fn download(http: &reqwest::Client, url: &str, dest: &Path) -> Option<PathBuf> {
     if dest.exists() {
         return Some(dest.to_owned());
     }
@@ -176,6 +180,13 @@ struct Session {
     loading: std::collections::HashSet<MediaPlayer>,
     /// The last browser track, kept as "paused" for a while after the sound stops.
     last_browser: Option<(NowPlaying, std::time::Instant)>,
+    /// A browser that is audible but whose tabs Automation hides.
+    browser_denied: Option<String>,
+    /// One-shot markers so tab-reading trouble is logged at INFO exactly once.
+    browser_fail_logged: bool,
+    browser_ax_logged: bool,
+    /// The YouTube video whose recommendations are in `state.up_next`.
+    up_next_for: Option<String>,
 }
 
 /// How long a silent browser tab stays on the notch as a paused track.
@@ -199,7 +210,9 @@ impl Session {
                     let url = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
                     download(&self.http, &url, &dir.join(format!("yt-{id}.jpg"))).await
                 }
-                None => None,
+                // No video thumbnail: the site's favicon stands in — for any
+                // site with a URL, or a known platform matched by title.
+                None => self.site_icon_for(n).await,
             },
             MediaPlayer::Spotify => match script::artwork_url(script_out) {
                 Some(url) => download(&self.http, &url, &dir.join(format!("sp-{:016x}.jpg", fnv(&url)))).await,
@@ -224,6 +237,24 @@ impl Session {
         self.artwork.insert(key, path.clone());
         prune_dir(&dir, ARTWORK_KEEP);
         path
+    }
+
+    /// The favicon of the site a browser track belongs to. Known platforms
+    /// cache under their stable key (`site-youtube.jpg`) — the same file the
+    /// notification path uses — and any other site under its host's hash.
+    async fn site_icon_for(&mut self, n: &NowPlaying) -> Option<PathBuf> {
+        use notchforge_core::sites;
+        let host = n.track_id.as_deref().map(browser::host).filter(|h| !h.is_empty());
+        let site = host.and_then(sites::site_for_host).or_else(|| sites::site_from_text(&n.title));
+        let (key, domain) = match (site, host) {
+            (Some(s), _) => (s.key.to_owned(), s.hosts[0].to_owned()),
+            (None, Some(h)) => (format!("host-{:016x}", fnv(h)), h.to_owned()),
+            (None, None) => return None,
+        };
+        let dir = self.paths.artwork_dir();
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let url = format!("https://www.google.com/s2/favicons?domain={domain}&sz=128");
+        download(&self.http, &url, &dir.join(format!("site-{key}.jpg"))).await
     }
 
     /// Read every running player. Returns players that just started running.
@@ -260,6 +291,7 @@ impl Session {
         self.state.players = players;
         self.state.running = running;
         self.state.automation_denied = denied;
+        self.state.browser_denied = self.browser_denied.clone();
         started
     }
 
@@ -267,28 +299,80 @@ impl Session {
     async fn read_browser(&mut self) -> Option<NowPlaying> {
         let now = notchforge_core::time::now_ms();
         let sources = tokio::task::spawn_blocking(crate::audio::playing_sources).await.unwrap_or_default();
-        if let Some((b, _)) = browser::find(&sources) {
-            let tabs = match browser::tabs_script(b) {
+        if let Some((b, src)) = browser::find(&sources) {
+            let mut denied = false;
+            let mut tabs = match browser::tabs_script(b) {
                 Some(src) => match script::run(&src, &[]).await {
-                    Ok(out) => browser::parse_tabs(&out),
+                    Ok(out) => {
+                        self.browser_fail_logged = false;
+                        browser::parse_tabs(&out)
+                    }
+                    Err(script::ScriptError::NotPermitted) => {
+                        tracing::info!(browser = b.name, "browser tab reading needs Automation");
+                        denied = true;
+                        vec![]
+                    }
                     Err(e) => {
-                        tracing::debug!(browser = b.name, error = %e, "could not read browser tabs");
+                        // Once at INFO: this failure is why the card shows no
+                        // video title, so it must not hide at DEBUG level.
+                        if !self.browser_fail_logged {
+                            tracing::info!(browser = b.name, error = %e, "cannot read browser tabs; using window titles");
+                            self.browser_fail_logged = true;
+                        } else {
+                            tracing::debug!(browser = b.name, error = %e, "could not read browser tabs");
+                        }
                         vec![]
                     }
                 },
                 None => vec![],
             };
+            // Fallback: the windows' titles via Accessibility — a different
+            // permission than AppleScript Automation, and one that works for
+            // every browser (Firefox included): the tab title is the window
+            // title.
+            if tabs.is_empty() {
+                let pid = src.pid;
+                let titles =
+                    tokio::task::spawn_blocking(move || crate::sys::ax::window_titles(pid)).await.unwrap_or_default();
+                if !titles.is_empty() && !self.browser_ax_logged {
+                    tracing::info!(browser = b.name, count = titles.len(), "using window titles as browser tabs");
+                    self.browser_ax_logged = true;
+                }
+                tabs = titles.into_iter().map(|title| browser::Tab { title, url: String::new() }).collect();
+            }
+            self.browser_denied = denied.then(|| b.name.to_owned());
             let mut np = browser::now_playing(b, browser::pick(&tabs), PlaybackState::Playing, now);
             np.artwork_path = self.artwork_for(&np, "").await;
+            // YouTube's up-next recommendations: fetched once per video.
+            let video_id = np.track_id.as_deref().and_then(browser::youtube_id);
+            match &video_id {
+                Some(id) if self.up_next_for.as_deref() == Some(id) => {}
+                Some(id) => {
+                    self.up_next_for = Some(id.clone());
+                    self.state.up_next = youtube::fetch_up_next(&self.http, id).await;
+                    if self.state.up_next.is_empty() {
+                        self.up_next_for = None; // retry next poll (offline?)
+                    } else {
+                        tracing::info!(count = self.state.up_next.len(), "fetched YouTube up-next");
+                    }
+                }
+                None => {
+                    self.up_next_for = None;
+                    self.state.up_next = Vec::new();
+                }
+            }
             self.last_browser = Some((np.clone(), std::time::Instant::now()));
             return Some(np);
         }
+        self.browser_denied = None;
         match &self.last_browser {
             Some((np, at)) if at.elapsed() < BROWSER_LINGER => {
                 Some(NowPlaying { state: PlaybackState::Paused, sampled_at_ms: np.sampled_at_ms, ..np.clone() })
             }
             _ => {
                 self.last_browser = None;
+                self.up_next_for = None;
+                self.state.up_next = Vec::new();
                 None
             }
         }
@@ -363,6 +447,10 @@ impl Provider for MediaProvider {
                 playlist_tx,
                 loading: Default::default(),
                 last_browser: None,
+                browser_denied: None,
+                browser_fail_logged: false,
+                browser_ax_logged: false,
+                up_next_for: None,
             };
             let mut login: Option<tokio::task::JoinHandle<Result<(), spotify::SpotifyError>>> = None;
             let mut last_emitted: Option<MediaState> = None;
@@ -395,7 +483,11 @@ impl Provider for MediaProvider {
                     last_emitted = Some(s.state.clone());
                 }
 
-                let poll = if s.state.running.is_empty() {
+                // A browser track has no change announcements of its own: keep
+                // polling at the configured rate so tab switches surface.
+                let poll = if s.state.running.is_empty()
+                    && !s.state.players.iter().any(|p| p.player == MediaPlayer::Browser)
+                {
                     IDLE_POLL
                 } else {
                     Duration::from_secs(ctx.config().media.poll_seconds)
@@ -492,6 +584,7 @@ impl Provider for MediaProvider {
                         s.playlists_loaded_ms.remove(&MediaPlayer::Spotify);
                     }
                     Wake::Command(ProviderCommand::SetOutputDevice(_)) => {}
+                    Wake::Command(ProviderCommand::Usage { .. }) => {}
                 }
             }
         })

@@ -51,12 +51,17 @@ struct AppState {
     engine: EngineHandle,
     provider_events: mpsc::Sender<ProviderEvent>,
     on_quit: Box<dyn Fn()>,
-    _timers: [Retained<NSTimer>; 2],
+    _timers: [Retained<NSTimer>; 3],
     _media_observers: crate::media::Observers,
 }
 
 thread_local! {
     static APP: RefCell<Option<Rc<AppState>>> = const { RefCell::new(None) };
+}
+
+/// The app's data directory, for icon/artwork caches outside `app.rs`.
+pub(crate) fn data_dir() -> Option<std::path::PathBuf> {
+    with_app(|a| a.paths.artwork_dir())
 }
 
 fn with_app<R>(f: impl FnOnce(&AppState) -> R) -> Option<R> {
@@ -159,6 +164,38 @@ pub fn show_settings_pane(pane: crate::settings::Pane) {
 pub fn show_settings_soon() {
     let when = dispatch2::DispatchTime::NOW.time(300_000_000);
     let _ = dispatch2::DispatchQueue::main().after(when, show_settings);
+}
+
+/// Connect Claude Code's limits and say what that changes.
+pub fn connect_claude_limits() {
+    use notchforge_providers::agents::connect;
+    let Some(data_dir) = with_app(|a| a.paths.data_dir.clone()) else { return };
+    let env = connect::Env { home: dirs_home(), notify_bin: None, port: 0, token: None };
+    match connect::connect_claude_limits(&env, &data_dir) {
+        Ok(note) => alert("Claude Code limits connected", &note),
+        Err(e) => alert("Connect Claude Code limits", &e),
+    }
+}
+
+/// Is Claude Code's status line reporting limits?
+pub fn claude_limits_connected() -> bool {
+    use notchforge_providers::agents::connect;
+    let env = connect::Env { home: dirs_home(), notify_bin: None, port: 0, token: None };
+    connect::claude_limits_status(&env) == connect::Status::Connected
+}
+
+/// Stop Claude Code's status line reporting limits.
+pub fn disconnect_claude_limits() {
+    use notchforge_providers::agents::connect;
+    let Some(data_dir) = with_app(|a| a.paths.data_dir.clone()) else { return };
+    let env = connect::Env { home: dirs_home(), notify_bin: None, port: 0, token: None };
+    if let Err(e) = connect::disconnect_claude_limits(&env, &data_dir) {
+        alert("Disconnect Claude Code limits", &e);
+    }
+}
+
+fn dirs_home() -> std::path::PathBuf {
+    std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default()
 }
 
 /// A Spotify Web API token is stored.
@@ -326,6 +363,11 @@ pub fn run(boot: Boot) -> Result<(), String> {
             }
         });
     });
+    // Apps ringing in their own windows send no notification: while a calling
+    // app makes sound, look for its answer and decline buttons.
+    let call_block = RcBlock::new(|_t: NonNull<NSTimer>| crate::call_watch::tick());
+    // SAFETY: documented NSTimer API.
+    let call_timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(1.5, true, &call_block) };
     // SAFETY: documented NSTimer API.
     let permission_timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(5.0, true, &block) };
 
@@ -344,7 +386,7 @@ pub fn run(boot: Boot) -> Result<(), String> {
         engine: boot.engine,
         provider_events: boot.provider_events,
         on_quit: boot.on_quit,
-        _timers: [location_timer, permission_timer],
+        _timers: [location_timer, permission_timer, call_timer],
         _media_observers: crate::media::install_observers(),
     });
     sync_accessibility_observer(&boot.config, &state.provider_events);

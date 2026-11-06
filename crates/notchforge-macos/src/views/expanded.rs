@@ -25,7 +25,7 @@ use crate::app::with_controller;
 use crate::controls::{brightness, display_modes, volume};
 use crate::panel::TrayItemView;
 use crate::ui::{
-    FlippedView, Palette, Targets, ThinSlider, Weight, attributed_parts, click_overlay, font, label, make_card,
+    FlippedView, Palette, Targets, ThinSlider, Weight, attributed, attributed_parts, click_overlay, font, label, make_card,
     mono_digits, pill_button, rect, remove_all_subviews, rgba, set_accessibility_label, shape_view, style_pill,
     symbol_button, symbol_view, wrapping_label,
 };
@@ -33,7 +33,8 @@ use notchforge_core::config::Config;
 use notchforge_core::engine::{Command, EngineHandle, Snapshot};
 use notchforge_core::geometry::{LayoutKind, NotchLayout};
 use notchforge_core::model::{
-    AuthTarget, BatteryComponent, BatteryStatus, DisplayInfo, Notification, NotificationKind, Priority,
+    AuthTarget, BatteryComponent, BatteryStatus, CalendarState, DisplayInfo, Notification,
+    NotificationKind, Priority,
 };
 use notchforge_core::time::{relative, relative_spoken};
 use notchforge_core::tray::format_bytes;
@@ -55,6 +56,10 @@ const ROW_GAP: f64 = 10.0;
 const MAX_ROWS: usize = 40;
 const TILE_H: f64 = 64.0;
 const TILE_R: f64 = 20.0;
+const CONTROL_BUTTON: f64 = 40.0;
+const CONTROL_GAP: f64 = 6.0;
+/// Notifications shown at once, sharing the height of the list equally.
+const VISIBLE_NOTIFICATIONS: f64 = 3.0;
 const ICON: f64 = 46.0;
 /// Shown while a tile's content is thinner than the tile.
 const MIN_FILLER: f64 = 44.0;
@@ -87,11 +92,26 @@ pub struct ExpandedView {
     /// Keeps the static controls' action targets alive.
     _targets: Targets,
     row_targets: Targets,
+    /// Calendar card: accounts + upcoming events (EventKit).
+    calendar_card: Retained<FlippedView>,
+    calendar_doc: Retained<FlippedView>,
+    calendar_targets: Targets,
+    calendar_last: RefCell<Option<CalendarState>>,
+    /// The quick-reply bar: an overlay strip under the notch band.
+    reply_bar: Retained<FlippedView>,
+    reply_label: Retained<NSTextField>,
+    reply_field: Retained<NSTextField>,
+    /// Keeps the Send pill's action target alive.
+    _reply_targets: Targets,
 
     date_top: Retained<NSTextField>,
     now_pill: Retained<FlippedView>,
     weather_pill: Retained<FlippedView>,
     agents_pill: Retained<FlippedView>,
+    /// A call in progress, on every page.
+    call_pill: Retained<FlippedView>,
+    call_pill_text: Retained<NSTextField>,
+    in_call: Cell<bool>,
     pill_right: f64,
     pill_max: f64,
     battery_top: Retained<FlippedView>,
@@ -117,6 +137,9 @@ pub struct ExpandedView {
     status_y: f64,
     status_width: f64,
     status_h: f64,
+    /// The height of each row of controls, and of the batteries' tile.
+    control_h: f64,
+    half_h: f64,
 
     brightness: Retained<ThinSlider>,
     volume: Retained<ThinSlider>,
@@ -300,7 +323,7 @@ impl ExpandedView {
             &p.primary,
             rect(138.0, ty + 3.0, (side - 144.0).max(40.0), 18.0),
         );
-        let battery_top = FlippedView::new(mtm, rect(w - 18.0 - 62.0, ty, 62.0, 24.0));
+        let battery_top = FlippedView::new(mtm, rect(w - 18.0 - 72.0, ty, 72.0, 24.0));
         root.addSubview(&battery_top);
 
         // Overview content lives in its own container so the music page can
@@ -311,9 +334,11 @@ impl ExpandedView {
         let body_y = nh + 6.0;
         let body_h = h - body_y - PAD;
         let avail = w - 2.0 * PAD - 2.0 * GAP;
-        let c1w = (avail * 268.0 / 672.0).floor();
-        let c2w = (avail * 190.0 / 672.0).floor();
-        let c3w = avail - c1w - c2w;
+        // Three equal columns; the second and third hold two equal tiles each.
+        let c1w = avail / 3.0;
+        let c2w = c1w;
+        let c3w = c1w;
+        let half_h = (body_h - GAP) / 2.0;
         let c1x = PAD;
         let c2x = c1x + c1w + GAP;
         let c3x = c2x + c2w + GAP;
@@ -345,8 +370,9 @@ impl ExpandedView {
         let notif_scroll = scroll_view(mtm, rect(c1x, body_y + 30.0, c1w, list_h), &notif_doc);
         overview.addSubview(&notif_scroll);
 
-        // ── weather ──
-        let weather_h = ((body_h - GAP) * 166.0 / 304.0).round();
+        // ── weather (slightly shorter to make room for the calendar strip) ──
+        let cal_h = 74.0;
+        let weather_h = half_h - cal_h - GAP;
         let weather_card = FlippedView::new(mtm, rect(c2x, body_y, c2w, weather_h));
         weather_card.setWantsLayer(true);
         if let Some(l) = weather_card.layer() {
@@ -364,9 +390,27 @@ impl ExpandedView {
         }
         overview.addSubview(&weather_card);
 
+        // ── calendar ──
+        let calendar_card = FlippedView::new(mtm, rect(c2x, body_y + weather_h + GAP, c2w, cal_h));
+        calendar_card.setWantsLayer(true);
+        if let Some(l) = calendar_card.layer() {
+            l.setBackgroundColor(Some(&rgba(1.0, 1.0, 1.0, 0.05).CGColor()));
+            l.setCornerRadius(16.0);
+        }
+        calendar_card.addSubview(&label(
+            mtm,
+            "Calendar",
+            &font(15.0, Weight::Semibold),
+            &p.primary,
+            rect(14.0, 8.0, c2w - 28.0, 19.0),
+        ));
+        let calendar_doc = FlippedView::new(mtm, rect(0.0, 0.0, c2w, cal_h));
+        calendar_card.addSubview(&calendar_doc);
+        overview.addSubview(&calendar_card);
+
         // ── tray ──
-        let tray_y = body_y + weather_h + GAP;
-        let tray_h = body_h - weather_h - GAP;
+        let tray_y = body_y + weather_h + cal_h + 2.0 * GAP;
+        let tray_h = body_h - weather_h - cal_h - 2.0 * GAP;
         let tray_box = glass_tile(mtm, rect(c2x, tray_y, c2w, tray_h));
         let tray_header =
             label(mtm, "Tray", &font(12.0, Weight::Semibold), &p.primary, rect(12.0, 9.0, c2w - 24.0, 15.0));
@@ -463,23 +507,25 @@ impl ExpandedView {
                 tip,
                 &p.primary,
                 &t,
-                rect(c3x + i as f64 * cell + (cell - 44.0) / 2.0, body_y, 44.0, 44.0),
+                rect(c3x + i as f64 * cell + (cell - CONTROL_BUTTON) / 2.0, body_y, CONTROL_BUTTON, CONTROL_BUTTON),
             );
-            make_card(&b, &white(0.14), 22.0);
+            make_card(&b, &white(0.14), CONTROL_BUTTON / 2.0);
             overview.addSubview(&b);
             made.push(b);
         }
         let focus_button = made[0].clone();
         let pause_button = made[1].clone();
 
+        // The buttons and the rows below them fill the same height as the batteries.
+        let control_h = ((half_h - CONTROL_BUTTON - 3.0 * CONTROL_GAP) / 3.0).clamp(26.0, 36.0);
         let slider = |sym: &str, tip: &str, set: fn(f64)| {
-            let s = ThinSlider::capsule(mtm, rect(c3x, body_y, c3w, 36.0), 36.0, &ink(0.46), &white(0.94));
+            let s = ThinSlider::capsule(mtm, rect(c3x, body_y, c3w, control_h), control_h, &ink(0.46), &white(0.94));
             s.addSubview(&symbol_view(
                 mtm,
                 sym,
-                14.0,
+                13.0,
                 &rgba(0.11, 0.11, 0.118, 1.0),
-                rect(11.0, 10.0, 16.0, 16.0),
+                rect(11.0, (control_h - 16.0) / 2.0, 16.0, 16.0),
                 tip,
             ));
             set_accessibility_label(&s, tip);
@@ -507,9 +553,9 @@ impl ExpandedView {
             &font(12.0, Weight::Medium),
             &p.primary,
             &ink(0.46),
-            16.0,
+            control_h / 2.0,
             &t,
-            rect(c3x, body_y, c3w, 32.0),
+            rect(c3x, body_y, c3w, control_h),
         );
         resolution.setAlignment(NSTextAlignment::Left);
         resolution.addSubview(&symbol_view(
@@ -517,7 +563,7 @@ impl ExpandedView {
             "chevron.up.chevron.down",
             9.0,
             &p.secondary,
-            rect(c3w - 24.0, 10.0, 12.0, 12.0),
+            rect(c3w - 24.0, (control_h - 12.0) / 2.0, 12.0, 12.0),
             "",
         ));
         set_accessibility_label(&resolution, "Display resolution");
@@ -540,6 +586,41 @@ impl ExpandedView {
         root.addSubview(&weather_pill);
         let agents_pill = FlippedView::new(mtm, rect(0.0, ty, 0.0, 24.0));
         root.addSubview(&agents_pill);
+        let call_w = (side - 72.0 - 18.0 - 16.0).max(60.0);
+        let call_pill = FlippedView::new(mtm, rect(w - 18.0 - 72.0 - 8.0 - call_w, ty, call_w, 24.0));
+        make_card(&call_pill, &rgba(0.141, 0.541, 0.239, 1.0), 12.0);
+        call_pill.addSubview(&symbol_view(
+            mtm,
+            "phone.fill",
+            11.0,
+            &p.primary,
+            rect(8.0, 5.0, 14.0, 14.0),
+            "On a call",
+        ));
+        let call_pill_text = label(
+            mtm,
+            "",
+            &mono_digits(12.0, Weight::Semibold),
+            &p.primary,
+            rect(25.0, 4.0, call_w - 25.0 - 26.0, 16.0),
+        );
+        call_pill.addSubview(&call_pill_text);
+        let t = targets.add(mtm, |_| {
+            with_controller(|c| c.hang_up());
+        });
+        let hang_up = symbol_button(
+            mtm,
+            "phone.down.fill",
+            9.0,
+            "Hang up",
+            &NSColor::whiteColor(),
+            &t,
+            rect(call_w - 22.0, 2.0, 20.0, 20.0),
+        );
+        make_card(&hang_up, &rgba(0.851, 0.176, 0.125, 1.0), 10.0);
+        call_pill.addSubview(&hang_up);
+        call_pill.setHidden(true);
+        root.addSubview(&call_pill);
         let track = shape_view(mtm, rect(PAD, ty - 2.0, 112.0, 28.0), &white(0.12), 14.0);
         root.addSubview(&track);
         let tabs: [(&str, &str, Tab); 3] = [
@@ -569,6 +650,58 @@ impl ExpandedView {
             })
             .collect();
 
+
+        // ── quick reply bar: an overlay under the notch band ──
+        let reply_bar = FlippedView::new(mtm, rect(PAD, layout.notch.rect.height + 6.0, w - 2.0 * PAD, 48.0));
+        reply_bar.setWantsLayer(true);
+        if let Some(l) = reply_bar.layer() {
+            l.setBackgroundColor(Some(&rgba(0.09, 0.09, 0.11, 0.98).CGColor()));
+            l.setCornerRadius(14.0);
+            l.setBorderWidth(0.5);
+            l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.14).CGColor()));
+        }
+        let reply_label = label(
+            mtm,
+            "",
+            &font(12.0, Weight::Semibold),
+            &p.primary,
+            rect(14.0, 6.0, 240.0, 16.0),
+        );
+        reply_bar.addSubview(&reply_label);
+        let reply_targets = Targets::default();
+        let rt = reply_targets.add(mtm, move |_| {
+            crate::app::with_controller(|c| c.send_reply());
+        });
+        let reply_field = NSTextField::initWithFrame(
+            NSTextField::alloc(mtm),
+            rect(14.0, 27.0, w - 2.0 * PAD - 96.0, 17.0),
+        );
+        reply_field.setEditable(true);
+        reply_field.setBordered(false);
+        reply_field.setBezeled(true);
+        reply_field.setBezelStyle(objc2_app_kit::NSTextFieldBezelStyle::SquareBezel);
+        reply_field.setFont(Some(&font(13.0, Weight::Regular)));
+        reply_field.setPlaceholderString(Some(&crate::ui::ns("Type your reply, ⏎ to send")));
+        // SAFETY: a valid target and selector; the target outlives the field.
+        unsafe {
+            reply_field.setTarget(Some(rt.as_any()));
+            reply_field.setAction(Some(crate::ui::ActionTarget::action()));
+        }
+        reply_bar.addSubview(&reply_field);
+        let send = pill_button(
+            mtm,
+            "Send",
+            None,
+            &font(12.5, Weight::Semibold),
+            &p.primary,
+            &rgba(0.039, 0.518, 1.0, 1.0),
+            14.0,
+            &rt,
+            rect(w - 2.0 * PAD - 76.0, 9.0, 62.0, 30.0),
+        );
+        reply_bar.addSubview(&send);
+        reply_bar.setHidden(true);
+
         Self {
             root,
             overview,
@@ -582,13 +715,24 @@ impl ExpandedView {
             engine,
             config: RefCell::new(config),
             _targets: targets,
+            calendar_card,
+            calendar_doc,
+            calendar_targets: Targets::default(),
+            calendar_last: RefCell::new(None),
+            reply_bar,
+            reply_label,
+            reply_field,
+            _reply_targets: reply_targets,
             row_targets: Targets::default(),
             date_top,
             now_pill,
             weather_pill,
             agents_pill,
-            pill_right: w - 18.0 - 62.0 - 8.0,
-            pill_max: (side - 62.0 - 18.0 - 16.0).max(60.0),
+            call_pill,
+            call_pill_text,
+            in_call: Cell::new(false),
+            pill_right: w - 18.0 - 72.0 - 8.0,
+            pill_max: (side - 72.0 - 18.0 - 16.0).max(60.0),
             battery_top,
             notif_header,
             notif_scroll,
@@ -606,9 +750,11 @@ impl ExpandedView {
             devices,
             device_rings: RefCell::new(Vec::new()),
             status_x: c3x,
-            status_y: body_y + 44.0 + 8.0,
+            status_y: body_y + CONTROL_BUTTON + CONTROL_GAP,
             status_width: c3w,
-            status_h: body_h - 44.0 - 8.0,
+            status_h: body_h - CONTROL_BUTTON - CONTROL_GAP,
+            control_h,
+            half_h,
             brightness: brightness_slider,
             volume: volume_slider,
             resolution,
@@ -636,9 +782,7 @@ impl ExpandedView {
             // Selected segment: a lighter pill inside the shared track.
             make_card(b, &white(if on { 0.28 } else { 0.0 }), 12.0);
         }
-        self.now_pill.setHidden(tab != Tab::Overview || self.now_pill.subviews().is_empty());
-        self.weather_pill.setHidden(tab != Tab::Media || self.weather_pill.subviews().is_empty());
-        self.agents_pill.setHidden(tab != Tab::Agents || self.agents_pill.subviews().is_empty());
+        self.sync_pills();
         self.media.set_active(self.visible.get() && tab == Tab::Media);
         if tab == Tab::Media && previous != Tab::Media {
             crate::media::send(notchforge_core::provider::ProviderCommand::MediaChanged(None));
@@ -692,19 +836,39 @@ impl ExpandedView {
         self.render_tray(snap);
         self.render_weather(snap);
         self.render_devices(snap);
+        self.render_calendar(snap);
 
         let p = &self.palette;
         let focus_on = snap.focus.active == Some(true);
         let focus_bg = if focus_on { rgba(0.368, 0.361, 0.902, 1.0) } else { white(0.14) };
-        make_card(&self.focus_button, &focus_bg, 22.0);
+        make_card(&self.focus_button, &focus_bg, CONTROL_BUTTON / 2.0);
         self.focus_button.setContentTintColor(Some(&p.primary));
         let pause_bg = if snap.paused { rgba(1.0, 0.62, 0.04, 1.0) } else { white(0.14) };
-        make_card(&self.pause_button, &pause_bg, 22.0);
+        make_card(&self.pause_button, &pause_bg, CONTROL_BUTTON / 2.0);
         self.pause_button.setContentTintColor(Some(&p.primary));
         set_accessibility_label(
             &self.pause_button,
             if snap.paused { "Resume notifications" } else { "Pause notifications" },
         );
+    }
+
+    /// Only one pill beside the notch: a call in progress, else the page's own.
+    fn sync_pills(&self) {
+        let (in_call, tab) = (self.in_call.get(), self.tab.get());
+        self.call_pill.setHidden(!in_call);
+        self.now_pill.setHidden(in_call || tab != Tab::Overview || self.now_pill.subviews().is_empty());
+        self.weather_pill.setHidden(in_call || tab != Tab::Media || self.weather_pill.subviews().is_empty());
+        self.agents_pill.setHidden(in_call || tab != Tab::Agents || self.agents_pill.subviews().is_empty());
+    }
+
+    /// Show the call in progress, or that there isn't one. Called every second.
+    pub fn set_call(&self, call: Option<&notchforge_core::calls::ActiveCall>, now_ms: i64) {
+        if let Some(c) = call {
+            let clock = notchforge_core::calls::call_clock(c.started_ms, now_ms);
+            crate::ui::set_text(&self.call_pill_text, &format!("{clock} · {}", c.caller));
+        }
+        self.in_call.set(call.is_some());
+        self.sync_pills();
     }
 
     /// The date and time beside the page switch.
@@ -773,9 +937,7 @@ impl ExpandedView {
             self.agents_pill.addSubview(&shape_view(mtm, rect(9.0, 8.5, 7.0, 7.0), &p.success, 3.5));
             self.agents_pill.addSubview(&label(mtm, &text, &f, &p.primary, rect(22.0, 4.0, width - 30.0, 16.0)));
         }
-        self.now_pill.setHidden(self.tab.get() != Tab::Overview || self.now_pill.subviews().is_empty());
-        self.weather_pill.setHidden(self.tab.get() != Tab::Media || self.weather_pill.subviews().is_empty());
-        self.agents_pill.setHidden(self.tab.get() != Tab::Agents || self.agents_pill.subviews().is_empty());
+        self.sync_pills();
 
         remove_all_subviews(&self.battery_top);
         if let Some(b) = snap.battery.as_ref().filter(|b| b.present) {
@@ -800,7 +962,7 @@ impl ExpandedView {
         let wc = self.weather_width;
         let wh = self.weather_card.frame().size.height;
         remove_all_subviews(&self.weather_card);
-        let light = font(40.0, Weight::Light);
+        let light = font(36.0, Weight::Light);
         let Some(w) = &snap.weather else {
             let temp = label(mtm, "--°", &light, &p.primary, rect(12.0, 12.0, wc - 24.0, 46.0));
             self.weather_card.addSubview(&temp);
@@ -830,31 +992,27 @@ impl ExpandedView {
         );
         crate::views::multicolor(&icon);
         self.weather_card.addSubview(&icon);
+        // The temperature on the left; what it's like on the right, under the icon.
         self.weather_card.addSubview(&label(
             mtm,
             &temperature(w.temperature),
             &light,
             &p.primary,
-            rect(12.0, 25.0, wc - 24.0, 46.0),
+            rect(12.0, 24.0, wc / 2.0, 44.0),
         ));
-        let line = font(12.0, Weight::Regular);
-        self.weather_card.addSubview(&label(
-            mtm,
-            w.condition.label(),
-            &line,
-            &p.primary,
-            rect(12.0, 70.0, wc - 24.0, 15.0),
-        ));
-        self.weather_card.addSubview(&label(
-            mtm,
-            &format!("H:{} L:{}", temperature(w.high), temperature(w.low)),
-            &line,
-            &p.primary,
-            rect(12.0, 85.0, wc - 24.0, 15.0),
-        ));
+        let line = font(11.5, Weight::Regular);
+        let side_w = wc - 24.0 - 56.0;
+        for (text, y) in [
+            (w.condition.label().to_owned(), 36.0),
+            (format!("H:{} L:{}", temperature(w.high), temperature(w.low)), 51.0),
+        ] {
+            let l = label(mtm, &text, &line, &p.primary, rect(wc - 12.0 - side_w, y, side_w, 15.0));
+            l.setAlignment(NSTextAlignment::Right);
+            self.weather_card.addSubview(&l);
+        }
         let n = 5usize.min(w.hourly.len() + 1);
         let cw = (wc - 16.0) / 5.0;
-        let hy = (wh - 50.0).max(102.0);
+        let hy = wh - 50.0;
         for i in 0..n {
             let (hour, cond, t) = if i == 0 {
                 ("Now".to_owned(), w.condition.symbol(w.is_day), w.temperature)
@@ -929,14 +1087,14 @@ impl ExpandedView {
             return;
         }
         let cell = (size.width - 12.0) / 3.0;
-        let side = (size.height - 28.0 - 42.0).clamp(26.0, 52.0);
+        let side = (size.height - 28.0 - 42.0).clamp(26.0, (cell - 6.0).min(60.0));
         // Centre the rings when there are fewer than three.
         let x0 = 6.0 + (3 - rings.len()) as f64 * cell / 2.0;
         for (i, r) in rings.iter().enumerate() {
             let x = x0 + i as f64 * cell;
             let low = r.level <= 20;
             let color = if low { p.warning.clone() } else { rgba(0.188, 0.82, 0.345, 1.0) };
-            let top = 28.0;
+            let top = 26.0 + (size.height - 26.0 - 6.0 - side - 33.0) / 2.0;
             let ring = ring_view(mtm, rect(x + (cell - side) / 2.0, top, side, side), r.level as f64 / 100.0, &color);
             let g = side * 0.42;
             ring.addSubview(&symbol_view(
@@ -973,19 +1131,26 @@ impl ExpandedView {
     /// Stack the controls that are in use; the batteries take what is left.
     fn layout_status(&self) {
         let (x, w) = (self.status_x, self.status_width);
-        let mut y = self.status_y;
-        let bottom = y + self.status_h;
+        let rows: Vec<&NSView> = [&*self.brightness as &NSView, &*self.volume, &*self.resolution]
+            .into_iter()
+            .filter(|v| !v.isHidden())
+            .collect();
+        // Whichever rows are in use sit evenly in the height above the batteries.
+        let top = self.status_y;
+        let tile_y = top + self.status_h - self.half_h;
+        let room = tile_y - GAP - top;
+        let used = rows.len() as f64 * self.control_h + rows.len().saturating_sub(1) as f64 * CONTROL_GAP;
+        let mut y = top + ((room - used) / 2.0).max(0.0);
         for s in [&self.brightness, &self.volume] {
             if !s.isHidden() {
-                s.set_slider_frame(rect(x, y, w, 36.0));
-                y += 36.0 + 8.0;
+                s.set_slider_frame(rect(x, y, w, self.control_h));
+                y += self.control_h + CONTROL_GAP;
             }
         }
         if !self.resolution.isHidden() {
-            self.resolution.setFrame(rect(x, y, w, 32.0));
-            y += 32.0 + 8.0;
+            self.resolution.setFrame(rect(x, y, w, self.control_h));
         }
-        self.devices.setFrame(rect(x, y, w, (bottom - y).max(60.0)));
+        self.devices.setFrame(rect(x, tile_y, w, self.half_h));
         self.draw_batteries();
     }
 
@@ -1013,7 +1178,8 @@ impl ExpandedView {
             return;
         }
         let rows: Vec<&Notification> = snap.notifications.iter().take(MAX_ROWS).collect();
-        let mut heights: Vec<f64> = rows.iter().map(|n| Self::row_height(n)).collect();
+        let fit = (visible_h - (VISIBLE_NOTIFICATIONS - 1.0) * ROW_GAP) / VISIBLE_NOTIFICATIONS;
+        let mut heights: Vec<f64> = rows.iter().map(|n| Self::row_height(n).max(fit)).collect();
         // Only a stack's lip adds to the row height.
         let lips: Vec<f64> = rows.iter().map(|n| if n.group_count > 1 { 6.0 } else { 0.0 }).collect();
         let used: f64 = heights.iter().sum::<f64>() + lips.iter().sum::<f64>() + ROW_GAP * (rows.len() - 1) as f64;
@@ -1086,7 +1252,10 @@ impl ExpandedView {
         let urgent =
             n.priority >= Priority::High || matches!(n.kind, NotificationKind::NeedsInput | NotificationKind::Error);
         let row = glass_tile(mtm, frame);
-        let icon = app_icon_view(mtm, rect(12.0, 12.0, 34.0, 34.0));
+        // A row taller than its text keeps the text in the middle. Sign-in rows
+        // have buttons along the bottom.
+        let top = if n.auth_target().is_some() { 12.0 } else { ((frame.size.height - 48.0) / 2.0).max(10.0) };
+        let icon = app_icon_view(mtm, rect(12.0, top, 34.0, 34.0));
         set_app_icon(&icon, &n.app);
         row.addSubview(&icon);
 
@@ -1115,7 +1284,7 @@ impl ExpandedView {
             &relative(n.timestamp_ms, now_ms),
             &font(12.0, Weight::Regular),
             &body_color,
-            rect(w - 62.0, 12.0, 50.0, 16.0),
+            rect(w - 46.0, top, 34.0, 16.0),
         );
         time.setAlignment(NSTextAlignment::Right);
         row.addSubview(&time);
@@ -1124,7 +1293,7 @@ impl ExpandedView {
             &head,
             &font(12.0, Weight::Semibold),
             &head_color,
-            rect(tx, 12.0, w - tx - 58.0, 16.0),
+            rect(tx, top, w - tx - 46.0, 16.0),
         ));
         let auth = n.auth_target();
         let mut title = n.title.clone();
@@ -1137,7 +1306,7 @@ impl ExpandedView {
             &title,
             &font(13.0, Weight::Semibold),
             &p.primary,
-            rect(tx, 28.0, w - tx - 12.0, 17.0),
+            rect(tx, top + 16.0, w - tx - 12.0, 17.0),
         ));
         if !n.body.trim().is_empty() {
             row.addSubview(&label(
@@ -1145,13 +1314,35 @@ impl ExpandedView {
                 &n.body.replace('\n', " "),
                 &font(12.0, Weight::Regular),
                 &body_color,
-                rect(tx, 45.0, w - tx - 12.0, 15.0),
+                rect(tx, top + 33.0, w - tx - 12.0, 15.0),
             ));
         }
         if let Some(target) = auth {
             set_accessibility_label(&row, &format!("{}, {}", n.plain_text(), relative_spoken(n.timestamp_ms, now_ms)));
             self.auth_buttons(&row, &target, w, frame.size.height);
             return row;
+        }
+        // Messaging messages can be answered from the notch.
+        let replyable = self.config.borrow().notifications.quick_reply
+            && matches!(n.kind, NotificationKind::Message)
+            && n.app.category() == notchforge_core::apps::AppCategory::Messaging;
+        if replyable {
+            let id = n.id;
+            let t = self.row_targets.add(mtm, move |_| {
+                with_controller(|c| c.start_reply(id));
+            });
+            let pill = pill_button(
+                mtm,
+                "Reply",
+                None,
+                &font(12.0, Weight::Semibold),
+                &white(0.16),
+                &NSColor::whiteColor(),
+                13.0,
+                &t,
+                rect(w - 78.0, frame.size.height - 34.0, 62.0, 24.0),
+            );
+            row.addSubview(&pill);
         }
         // Click opens; right-click offers Open, Copy and Dismiss.
         let id = n.id;
@@ -1344,6 +1535,108 @@ impl ExpandedView {
     }
 
     /// Read live control values; called each time the panel expands.
+    /// Show the reply bar for a message: who it's from and what it says.
+    pub fn show_reply_bar(&self, n: &Notification) {
+        self.reply_label.setAttributedStringValue(&attributed(
+            &format!("Reply to {} — {}", n.app.display_name, n.title),
+            &font(12.0, Weight::Semibold),
+            &self.palette.primary,
+        ));
+        crate::ui::set_text(&self.reply_field, "");
+        self.reply_bar.setHidden(false);
+        // Keep the bar above the notifications list.
+        self.root.addSubview(&self.reply_bar);
+    }
+
+    /// Hide the reply bar and drop the typed text.
+    pub fn hide_reply_bar(&self) {
+        self.reply_bar.setHidden(true);
+        crate::ui::set_text(&self.reply_field, "");
+        self.reply_field.abortEditing();
+    }
+
+    /// The reply text field, for the controller to focus.
+    pub fn reply_field(&self) -> Retained<NSTextField> {
+        self.reply_field.clone()
+    }
+
+    /// What the user typed.
+    pub fn reply_text(&self) -> String {
+        self.reply_field.stringValue().to_string()
+    }
+
+    /// The calendar card: connected accounts, then the next events with their
+    /// calendar colours. Click an event to open it in Calendar.
+    fn render_calendar(&self, snap: &Snapshot) {
+        let mtm = self.mtm;
+        let p = &self.palette;
+        let cal = &snap.calendar;
+        let w = self.calendar_card.frame().size.width;
+        if self.calendar_last.borrow().as_ref() == Some(cal) {
+            return;
+        }
+        *self.calendar_last.borrow_mut() = Some(cal.clone());
+        self.calendar_targets.clear();
+        remove_all_subviews(&self.calendar_doc);
+
+        let small = font(12.0, Weight::Regular);
+        if !cal.granted {
+            self.calendar_doc.addSubview(&label(
+                mtm,
+                "Allow Calendar access to see your upcoming events.",
+                &small,
+                &white(0.76),
+                rect(14.0, 30.0, w - 28.0, 30.0),
+            ));
+            return;
+        }
+        // Connected accounts ("calendar connections") as a quiet footer line.
+        if !cal.accounts.is_empty() {
+            self.calendar_doc.addSubview(&label(
+                mtm,
+                &format!("Connected: {}", cal.accounts.join(", ")),
+                &font(11.0, Weight::Regular),
+                &white(0.6),
+                rect(14.0, 56.0, w - 28.0, 14.0),
+            ));
+        }
+        if cal.events.is_empty() {
+            self.calendar_doc.addSubview(&label(
+                mtm,
+                "No events in the next 12 hours.",
+                &small,
+                &white(0.76),
+                rect(14.0, 30.0, w - 28.0, 16.0),
+            ));
+            return;
+        }
+        for (i, ev) in cal.events.iter().take(2).enumerate() {
+            let y = 28.0 + i as f64 * 24.0;
+            let (r, g, b) = ev.color.unwrap_or((10, 132, 255));
+            self.calendar_doc
+                .addSubview(&shape_view(mtm, rect(14.0, y + 4.0, 7.0, 7.0), &rgba(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0, 1.0), 3.5));
+            let time = relative(ev.starts_at_ms, notchforge_core::time::now_ms());
+            self.calendar_doc.addSubview(&label(
+                mtm,
+                &time,
+                &mono_digits(11.5, Weight::Semibold),
+                &p.primary,
+                rect(26.0, y, 64.0, 15.0),
+            ));
+            self.calendar_doc.addSubview(&label(
+                mtm,
+                &ev.title,
+                &font(12.5, Weight::Regular),
+                &p.primary,
+                rect(94.0, y, w - 108.0, 15.0),
+            ));
+            set_accessibility_label(
+                &self.calendar_doc,
+                &format!("Event {}, {}", time, ev.title),
+            );
+        }
+    }
+
     pub fn refresh_controls(&self, display_id: u32) {
         let cfg = self.config.borrow().clone();
         let b = if cfg.controls.brightness { brightness::get() } else { None };

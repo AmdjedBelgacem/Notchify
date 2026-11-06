@@ -2,7 +2,9 @@
 # Build NotchForge.app (Apple Silicon by default, optionally universal),
 # sign it, and optionally notarize it.
 #
-#   packaging/bundle.sh                       # arm64, ad-hoc signed
+#   packaging/bundle.sh                       # arm64, signed for this Mac
+#   INSTALL=1 packaging/bundle.sh             # quick local build, then install it
+#   INSTALL=1 RELEASE=1 packaging/bundle.sh   # the fully optimized build, then install it
 #   UNIVERSAL=1 packaging/bundle.sh           # arm64 + x86_64 via lipo
 #   CODESIGN_IDENTITY="Developer ID Application: You (TEAMID)" packaging/bundle.sh
 #   CODESIGN_IDENTITY=… NOTARY_PROFILE=notchforge packaging/bundle.sh
@@ -11,9 +13,10 @@
 #   xcrun notarytool store-credentials notchforge --apple-id … --team-id … --password …
 #
 # Note: macOS ties privacy permissions (Accessibility, Full Disk Access) to the
-# code signature. Ad-hoc builds get a new identity each time, so you may have
-# to re-grant permissions after rebuilding. Use a stable signing identity to
-# avoid that.
+# code signature. Ad-hoc builds get a new identity each time, so permissions
+# would have to be granted again after every rebuild. Without CODESIGN_IDENTITY,
+# builds use the local identity from packaging/make_signing_identity.sh if it
+# exists, and are ad-hoc signed if not.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -29,8 +32,17 @@ if [[ "$(uname)" != "Darwin" ]]; then
   exit 1
 fi
 
-echo "==> Building NotchForge $VERSION ($BUILD)"
-cargo build --release --target aarch64-apple-darwin --bins
+# Trying a change locally shouldn't wait for link-time optimization, which is
+# slow and can take many minutes when the Mac is short on memory.
+if [[ "${INSTALL:-0}" == "1" && "${RELEASE:-0}" != "1" && "${UNIVERSAL:-0}" != "1" ]]; then
+  echo "==> Building NotchForge $VERSION ($BUILD), quick local build"
+  cargo build --bins
+  BUILT="target/debug"
+else
+  echo "==> Building NotchForge $VERSION ($BUILD)"
+  cargo build --release --target aarch64-apple-darwin --bins
+  BUILT="target/aarch64-apple-darwin/release"
+fi
 if [[ "${UNIVERSAL:-0}" == "1" ]]; then
   rustup target add x86_64-apple-darwin >/dev/null
   cargo build --release --target x86_64-apple-darwin --bins
@@ -43,7 +55,7 @@ for bin in "${BINS[@]}"; do
     lipo -create -output "$APP/Contents/MacOS/$bin" \
       "target/aarch64-apple-darwin/release/$bin" "target/x86_64-apple-darwin/release/$bin"
   else
-    cp "target/aarch64-apple-darwin/release/$bin" "$APP/Contents/MacOS/$bin"
+    cp "$BUILT/$bin" "$APP/Contents/MacOS/$bin"
   fi
 done
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" packaging/Info.plist > "$APP/Contents/Info.plist"
@@ -52,9 +64,17 @@ packaging/make_icns.sh packaging/icon/AppIcon-1024.png "$APP/Contents/Resources/
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 IDENTITY="${CODESIGN_IDENTITY:--}"
+LOCAL_KEYCHAIN="$HOME/.config/notchify/signing/signing.keychain-db"
+LOCAL_ARGS=()
+if [[ "$IDENTITY" == "-" && -f "$LOCAL_KEYCHAIN" ]]; then
+  security unlock-keychain -p "$(cat "$(dirname "$LOCAL_KEYCHAIN")/password")" "$LOCAL_KEYCHAIN"
+  IDENTITY="$(security find-identity -p codesigning "$LOCAL_KEYCHAIN" | awk '/\)/ {print $2; exit}')"
+  LOCAL_ARGS=(--keychain "$LOCAL_KEYCHAIN")
+fi
 echo "==> Signing with identity: $IDENTITY"
-SIGN_ARGS=(--force --options runtime --entitlements packaging/NotchForge.entitlements --sign "$IDENTITY")
-if [[ "$IDENTITY" != "-" ]]; then
+SIGN_ARGS=(--force --options runtime --entitlements packaging/NotchForge.entitlements --sign "$IDENTITY" ${LOCAL_ARGS[@]+"${LOCAL_ARGS[@]}"})
+# Apple's timestamp service only serves Developer ID certificates.
+if [[ "$IDENTITY" != "-" && ${#LOCAL_ARGS[@]} -eq 0 ]]; then
   SIGN_ARGS+=(--timestamp)
 fi
 # Sign nested executables first, then the bundle.
@@ -63,7 +83,7 @@ codesign "${SIGN_ARGS[@]}" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 if [[ -n "${NOTARY_PROFILE:-}" ]]; then
-  [[ "$IDENTITY" == "-" ]] && { echo "Notarization needs a Developer ID identity" >&2; exit 1; }
+  [[ -z "${CODESIGN_IDENTITY:-}" ]] && { echo "Notarization needs a Developer ID identity" >&2; exit 1; }
   echo "==> Notarizing"
   ZIP="$DIST/NotchForge-$VERSION.zip"
   ditto -c -k --keepParent "$APP" "$ZIP"

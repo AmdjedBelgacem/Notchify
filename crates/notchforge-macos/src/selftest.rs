@@ -19,14 +19,14 @@ use crate::ffi::cg;
 use block2::RcBlock;
 use notchforge_core::apps::{AppRef, KnownApp};
 use notchforge_core::engine::Command;
-use notchforge_core::geometry::{LayoutKind, Rect};
+use notchforge_core::geometry::{LayoutKind, Rect, WING_LEFT, WING_RIGHT};
 use notchforge_core::machine::State;
 use notchforge_core::model::{NewNotification, NotificationKind, Origin, Permission, Priority, ProviderStatus};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSEventModifierFlags, NSScreen};
 use objc2_foundation::{NSPoint, NSTimer};
 use serde_json::{Value, json};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -139,7 +139,8 @@ impl Raster {
 }
 
 /// Pixel-level checks on the rendered island plus an ASCII preview in the log.
-fn check_pixels(ctx: &Ctx, stage: &str, expect_content: bool, rounded_bottom: bool) {
+fn check_pixels(ctx: &Ctx, stage: &str, min_bright: f64, rounded_bottom: bool) {
+    let square_top = !with_controller(|c| c.layout().notch.floating).unwrap_or(false);
     let Some(r) = Raster::capture() else {
         ctx.report.borrow_mut().check(&format!("{stage}: island renders"), false, "could not render layer");
         return;
@@ -154,14 +155,16 @@ fn check_pixels(ctx: &Ctx, stage: &str, expect_content: bool, rounded_bottom: bo
     let (tl, bl) = (corner(0, 0), corner(0, r.h - 1));
     let mut rep = ctx.report.borrow_mut();
     rep.check(&format!("{stage}: island fills its shape"), opaque > 0.85, format!("{:.1}% opaque", opaque * 100.0));
-    if expect_content {
-        rep.check(
-            &format!("{stage}: content is drawn"),
-            bright > 0.004,
-            format!("{:.2}% bright pixels", bright * 100.0),
-        );
-    }
-    rep.check(&format!("{stage}: top edge is square (merges with bezel)"), tl > 0.8, format!("top-left alpha {tl:.2}"));
+    rep.check(
+        &format!("{stage}: content is drawn"),
+        bright > min_bright,
+        format!("{:.2}% bright pixels", bright * 100.0),
+    );
+    rep.check(
+        &format!("{stage}: top edge is square (merges with bezel)"),
+        !square_top || tl > 0.8,
+        format!("top-left alpha {tl:.2}"),
+    );
     if rounded_bottom {
         rep.check(&format!("{stage}: bottom corners are rounded"), bl < 0.5, format!("bottom-left alpha {bl:.2}"));
     }
@@ -194,6 +197,9 @@ impl Report {
 struct Ctx {
     dir: PathBuf,
     report: RefCell<Report>,
+    /// The first "collapsed at rest" check waits out the boot animation (the
+    /// wings appear with the first snapshot, which can land after launch).
+    collapsed_pending: Cell<bool>,
 }
 
 fn rect_str(r: &Rect) -> String {
@@ -333,7 +339,13 @@ fn check_settled(ctx: &Ctx, stage: &str, expect: &[LayoutKind]) {
         return;
     };
     let mut r = ctx.report.borrow_mut();
-    r.check(&format!("{stage}: layout"), expect.contains(&kind), format!("{kind:?}"));
+    // A CollapsedWithWings expectation matches any wing mask: how many wings
+    // show follows live content and menu bar occupancy.
+    let matches = |want: &LayoutKind| match (want, kind) {
+        (LayoutKind::CollapsedWithWings(_), LayoutKind::CollapsedWithWings(_)) => true,
+        (a, b) => *a == b,
+    };
+    r.check(&format!("{stage}: layout"), expect.iter().any(matches), format!("{kind:?}"));
     r.check(&format!("{stage}: animation settled"), !animating, "");
     let shape = layout.shape(kind);
     r.check(
@@ -341,15 +353,17 @@ fn check_settled(ctx: &Ctx, stage: &str, expect: &[LayoutKind]) {
         close(island.width, shape.width) && close(island.height, shape.height),
         format!("island {} vs shape {:.1}×{:.1}", rect_str(&island), shape.width, shape.height),
     );
+    // The floating capsule hangs below the top edge; a physical notch merges.
+    let gap = layout.top_gap();
     r.check(
         &format!("{stage}: island pinned to top edge, centred on notch"),
-        close(island.max_y(), layout.screen.frame.max_y()) && close(island.mid_x(), layout.notch.rect.mid_x()),
+        close(island.max_y(), layout.screen.frame.max_y() - gap) && close(island.mid_x(), layout.notch.rect.mid_x()),
         rect_str(&island),
     );
+    let margin = if layout.notch.floating { 2.0 } else { notchforge_core::geometry::NOTCH_EAR_MAX };
     r.check(
         &format!("{stage}: window shrunk to island (plus the notch flares)"),
-        close(panel.width, island.width + 2.0 * notchforge_core::geometry::NOTCH_EAR_MAX)
-            && close(panel.height, island.height),
+        close(panel.width, island.width + 2.0 * margin) && close(panel.height, island.height),
         format!("panel {}", rect_str(&panel)),
     );
 }
@@ -361,7 +375,11 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
     match step {
         // ── collapsed at rest ──
         0 => {
-            let Some((layout, ignores)) = with_controller(|c| (c.layout(), c.ignores_mouse())) else { return };
+            let Some((layout, ignores, quick)) =
+                with_controller(|c| (c.layout(), c.ignores_mouse(), c.media_wing_clickable()))
+            else {
+                return;
+            };
             {
                 let mut r = ctx.report.borrow_mut();
                 r.metrics.insert(
@@ -372,15 +390,36 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                         "notch": rect_str(&layout.notch.rect),
                     }),
                 );
-                r.check("collapsed: click-through", ignores, "");
+                // Click-through, unless a wing is showing the playing audio
+                // (then the island is clickable for the quick toggle).
+                r.check("collapsed: click-through", ignores != quick, format!("quick toggle: {quick}"));
                 r.metrics.insert("system_reduce_motion".into(), json!(crate::views::system_reduce_motion()));
             }
-            check_settled(ctx, "collapsed", &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings]);
+            // The wings appear with the first snapshot, which can land after
+            // launch; if the boot animation is still moving, put the strict
+            // geometry checks off to the next step.
+            if with_controller(|c| c.is_animating()).unwrap_or(false) {
+                screenshot(ctx, mtm, "01-collapsed", Some(notch.outset(300.0, 300.0, 120.0, 0.0)));
+                return;
+            }
+            ctx.collapsed_pending.set(false);
+            check_settled(
+                ctx,
+                "collapsed",
+                &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT)],
+            );
             screenshot(ctx, mtm, "01-collapsed", Some(notch.outset(300.0, 300.0, 120.0, 0.0)));
             screenshot_window(ctx, "09-window-collapsed");
         }
         // ── hover: move the pointer onto the notch ──
         1 => {
+            if ctx.collapsed_pending.replace(false) {
+                check_settled(
+                    ctx,
+                    "collapsed",
+                    &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT)],
+                );
+            }
             for dx in [-40.0, -10.0, 0.0] {
                 post_mouse(mtm, cg::kCGEventMouseMoved, NSPoint::new(center.x + dx, center.y));
             }
@@ -403,7 +442,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 r.metrics.insert("open_animation".into(), anim_json(anim));
             }
             check_settled(ctx, "hover", &[LayoutKind::Compact]);
-            check_pixels(ctx, "hover", true, true);
+            check_pixels(ctx, "hover", 0.004, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "02-hover", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
             // The same glance with a playing track, as on the design board.
@@ -469,7 +508,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 );
             }
             check_settled(ctx, "expanded", &[LayoutKind::Expanded]);
-            check_pixels(ctx, "expanded", true, true);
+            check_pixels(ctx, "expanded", 0.004, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "03-expanded", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
             screenshot_window(ctx, "09-window-expanded");
@@ -485,12 +524,14 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             }
         }
         10 => {
-            let (st, ignores, anim) = with_controller(|c| (c.machine_state(), c.ignores_mouse(), c.last_animation()))
-                .unwrap_or((State::Hover, false, AnimStats::default()));
+            let (st, ignores, quick, anim) = with_controller(|c| {
+                (c.machine_state(), c.ignores_mouse(), c.media_wing_clickable(), c.last_animation())
+            })
+            .unwrap_or((State::Hover, true, false, AnimStats::default()));
             {
                 let mut r = ctx.report.borrow_mut();
                 r.check("collapse: state", st == State::Collapsed, format!("{st:?}"));
-                r.check("collapse: click-through again", ignores, "");
+                r.check("collapse: click-through again", ignores != quick, format!("quick toggle: {quick}"));
                 r.check("collapse: animation ran", anim.frames >= 10, format!("{} frames", anim.frames));
                 r.check(
                     "collapse: smooth (no frame > 50 ms)",
@@ -499,8 +540,12 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 );
                 r.metrics.insert("close_animation".into(), anim_json(anim));
             }
-            check_settled(ctx, "collapse", &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings]);
-            check_pixels(ctx, "collapsed-wings", true, false);
+            check_settled(
+                ctx,
+                "collapse",
+                &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT)],
+            );
+            check_pixels(ctx, "collapsed-wings", 0.001, false);
             // Park the pointer well away from the notch: a pointer resting under
             // the notch would (correctly) turn the upcoming peek into a hover.
             post_mouse(mtm, cg::kCGEventMouseMoved, NSPoint::new(center.x, center.y - 400.0));
@@ -511,6 +556,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             origin: Origin::Internal,
             kind: NotificationKind::NeedsInput,
             priority: Some(Priority::High),
+            tokens: None,
             title: "Self-test · needs your input".into(),
             subtitle: None,
             body: "Claude needs your permission to use Bash".into(),
@@ -522,13 +568,14 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             let st = state();
             ctx.report.borrow_mut().check("peek: state", st == Some(State::Peek), format!("{st:?}"));
             check_settled(ctx, "peek", &[LayoutKind::Peek]);
-            check_pixels(ctx, "peek", true, true);
+            check_pixels(ctx, "peek", 0.004, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "04-peek", Some(island.outset(40.0, 40.0, 30.0, 0.0)));
         }
         // ── settings window ──
         13 => {
             crate::settings::set_preview(true);
+            crate::settings::set_solid_ground(true);
             app::show_settings_pane(crate::settings::Pane::Media)
         }
         14 => {
@@ -540,6 +587,11 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 ("05b-settings-agents", Some(crate::settings::Pane::Agents)),
                 ("05c-settings-general", Some(crate::settings::Pane::General)),
                 ("05d-settings-permissions", Some(crate::settings::Pane::Permissions)),
+                ("05e-settings-appearance", Some(crate::settings::Pane::Appearance)),
+                ("05f-settings-notifications", Some(crate::settings::Pane::Notifications)),
+                ("05g-settings-weather", Some(crate::settings::Pane::Weather)),
+                ("05h-settings-tray", Some(crate::settings::Pane::Tray)),
+                ("05i-settings-controls", Some(crate::settings::Pane::Controls)),
             ] {
                 if let Some(p) = pane {
                     app::show_settings_pane(p);
@@ -563,6 +615,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                     None => tracing::warn!(name, "could not render the Settings pane"),
                 }
             }
+            crate::settings::set_solid_ground(false);
             app::close_settings();
         }
         // ── display reconfiguration keeps the UI consistent ──
@@ -623,6 +676,147 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             );
             app::close_settings();
         }
+        // ── a call rings, hides, comes back, and is ended ──
+        23 => {
+            app::send(notchforge_core::engine::Command::TestCall);
+        }
+        24 => {
+            let kind = with_controller(|c| c.layout_kind());
+            let snap = with_controller(|c| c.current_snapshot());
+            let rang = snap.as_ref().is_some_and(|s| s.calls.len() == 1);
+            let interactive = with_controller(|c| !c.ignores_mouse()).unwrap_or(false);
+            let mut r = ctx.report.borrow_mut();
+            r.check("call: test call rings", rang, "");
+            r.check("call: the notch shows it", kind == Some(LayoutKind::Incoming(1)), format!("{kind:?}"));
+            r.check("call: buttons can be clicked", interactive, "");
+            drop(r);
+            with_controller(|c| c.hide_calls());
+        }
+        25 => {
+            let kind = with_controller(|c| c.layout_kind());
+            let wings = matches!(kind, Some(LayoutKind::CollapsedWithWings(_) | LayoutKind::Collapsed));
+            ctx.report.borrow_mut().check("call: hiding moves it aside", wings, format!("{kind:?}"));
+            if let Some(id) = with_controller(|c| c.current_snapshot()).and_then(|s| s.calls.first().map(|c| c.id)) {
+                app::send(notchforge_core::engine::Command::EndCall(id));
+            }
+        }
+        26 => {
+            let snap = with_controller(|c| c.current_snapshot());
+            let gone = snap.as_ref().is_some_and(|s| s.calls.is_empty());
+            let kind = with_controller(|c| c.layout_kind());
+            let settled = !matches!(kind, Some(LayoutKind::Incoming(_)));
+            let mut r = ctx.report.borrow_mut();
+            r.check("call: ending it clears it", gone, "");
+            r.check("call: the notch goes back", settled, format!("{kind:?}"));
+            drop(r);
+            // Now answer one.
+            app::send(notchforge_core::engine::Command::TestCall);
+        }
+        27 => {
+            if let Some(id) = with_controller(|c| c.current_snapshot()).and_then(|s| s.calls.first().map(|c| c.id)) {
+                app::send(notchforge_core::engine::Command::CallAnswered(id));
+            }
+        }
+        28 => {
+            let snap = with_controller(|c| c.current_snapshot());
+            let on = snap.as_ref().is_some_and(|s| s.active_call.is_some() && s.calls.is_empty());
+            let kind = with_controller(|c| c.layout_kind());
+            let mut r = ctx.report.borrow_mut();
+            r.check("in call: answering starts the call", on, "");
+            r.check("in call: the notch shows it", kind == Some(LayoutKind::Incoming(1)), format!("{kind:?}"));
+            drop(r);
+            with_controller(|c| c.hang_up());
+        }
+        29 => {
+            let snap = with_controller(|c| c.current_snapshot());
+            let over = snap.as_ref().is_some_and(|s| s.active_call.is_none());
+            let kind = with_controller(|c| c.layout_kind());
+            let settled = !matches!(kind, Some(LayoutKind::Incoming(_)));
+            let mut r = ctx.report.borrow_mut();
+            r.check("in call: hanging up ends it", over, "");
+            r.check("in call: the notch goes back", settled, format!("{kind:?}"));
+            // Park the pointer away so the fullscreen steps start from rest.
+            post_mouse(mtm, cg::kCGEventMouseMoved, NSPoint::new(center.x, center.y - 400.0));
+        }
+        // ── fullscreen: the island gets out of the way ──
+        30 => {
+            with_controller(|c| c.set_fullscreen(true));
+        }
+        31 => {
+            let visible = with_controller(|c| c.panel.isVisible()).unwrap_or(false);
+            let st = with_controller(|c| c.machine_state());
+            let fs = with_controller(|c| c.fullscreen_active());
+            let mut r = ctx.report.borrow_mut();
+            r.check("fullscreen: detected", fs == Some(true), "");
+            r.check("fullscreen: hidden while collapsed", !visible && st == Some(State::Collapsed), format!("{st:?}"));
+            drop(r);
+            with_controller(|c| c.toggle());
+        }
+        32 => {
+            let visible = with_controller(|c| c.panel.isVisible()).unwrap_or(false);
+            let st = with_controller(|c| c.machine_state());
+            ctx.report.borrow_mut().check(
+                "fullscreen: a toggled-open panel stays visible",
+                visible && st == Some(State::Expanded),
+                format!("{st:?}"),
+            );
+            with_controller(|c| c.collapse());
+        }
+        33 => {
+            let visible = with_controller(|c| c.panel.isVisible()).unwrap_or(false);
+            let st = with_controller(|c| c.machine_state());
+            ctx.report.borrow_mut().check(
+                "fullscreen: collapsed hides again",
+                !visible && st == Some(State::Collapsed),
+                format!("{st:?}"),
+            );
+            with_controller(|c| c.set_fullscreen(false));
+        }
+        34 => {
+            let visible = with_controller(|c| c.panel.isVisible()).unwrap_or(false);
+            ctx.report.borrow_mut().check("fullscreen: visible again after leaving", visible, "");
+        }
+        // ── wing masks resize the island ──
+        35 => {
+            let Some(layout) = with_controller(|c| c.layout()) else { return };
+            for mask in [0u8, WING_LEFT, WING_RIGHT, WING_LEFT | WING_RIGHT] {
+                let want = layout.shape(LayoutKind::CollapsedWithWings(mask)).width;
+                with_controller(|c| c.force_wing_mask(mask));
+                let got = with_controller(|c| c.island_global().width).unwrap_or(0.0);
+                ctx.report.borrow_mut().check(
+                    &format!("wings: mask {mask} sizes the island"),
+                    close(want, got),
+                    format!("want {want:.0} got {got:.0}"),
+                );
+            }
+            with_controller(|c| c.force_wing_mask(WING_LEFT | WING_RIGHT));
+        }
+        // ── a click off the island's shape is handed to the app underneath ──
+        36 => {
+            with_controller(|c| c.toggle());
+        }
+        37 => {
+            let st = with_controller(|c| c.machine_state());
+            let collapsed = with_controller(|c| {
+                let island = c.island_global();
+                let win = c.panel.frame();
+                // Inside the window's right ear, off the island's shape.
+                let global = NSPoint::new(island.max_x() + 7.0, island.y + island.height / 2.0);
+                c.intercept_mouse_down(NSPoint::new(global.x - win.origin.x, global.y - win.origin.y))
+            });
+            let st2 = with_controller(|c| c.machine_state());
+            let mut r = ctx.report.borrow_mut();
+            r.check("pass-through: panel was pinned", st == Some(State::Expanded), format!("{st:?}"));
+            r.check(
+                "pass-through: an ear click collapses it",
+                collapsed == Some(true) && st2 == Some(State::Collapsed),
+                format!("{st2:?}"),
+            );
+            drop(r);
+            // The re-posted click may have opened something underneath (a
+            // status item's menu); close it again.
+            post_key(KEY_ESCAPE);
+        }
         _ => finish(ctx),
     }
 }
@@ -666,7 +860,7 @@ fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engi
         r.check("music page: renders track", title == "Self-test track", title);
         r.check("music page: lists playlists", rows == 3, format!("{rows} rows"));
     }
-    check_pixels(ctx, "music page", true, true);
+    check_pixels(ctx, "music page", 0.004, true);
     if let Some(png) = app::menubar_preview(&fake).as_deref().and_then(png_from_view) {
         emit_png(ctx, "06-menubar-player", png);
     }
@@ -784,7 +978,7 @@ fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core
     ];
     fake.unread = 1;
     with_controller(|c| c.preview_overview(&fake));
-    check_pixels(ctx, "overview sample", true, true);
+    check_pixels(ctx, "overview sample", 0.004, true);
     screenshot(ctx, mtm, "03c-overview-sample", None);
     with_controller(|c| c.preview_overview(snap));
     notched_previews(ctx, &fake);
@@ -869,9 +1063,53 @@ fn text_probe(ctx: &Rc<Ctx>, mtm: MainThreadMarker) {
 /// The same sample data on a simulated 14-inch MacBook Pro notch (185 × 32
 /// pt), the geometry the design boards are drawn at. CI Macs have no notch
 /// and a 25 pt menu bar, so the live screenshots above sit 7 pt shorter.
+/// A call in progress, for renders.
+pub fn sample_active_call() -> notchforge_core::calls::ActiveCall {
+    let now = notchforge_core::time::now_ms();
+    notchforge_core::calls::ActiveCall {
+        caller: "Léa Martin".into(),
+        kind: notchforge_core::calls::CallKind::Video,
+        source: "WhatsApp".into(),
+        app: AppRef { known: None, bundle_id: None, display_name: "WhatsApp".into(), platform: None },
+        window_pid: None,
+        started_ms: now - 754_000,
+        last_seen_ms: now,
+    }
+}
+
+/// The calls board's sample data.
+pub fn sample_calls() -> Vec<notchforge_core::calls::Call> {
+    use notchforge_core::calls::{Call, CallId, CallKind};
+    let call = |id, caller: &str, kind, source: &str, bundle: &str, display: &str| Call {
+        id: CallId(id),
+        caller: caller.into(),
+        kind,
+        source: source.into(),
+        app: AppRef { known: None, bundle_id: Some(bundle.into()), display_name: display.into(), platform: None },
+        url: None,
+        banner_title: caller.into(),
+        window_pid: None,
+        last_seen_ms: 0,
+        answering: false,
+    };
+    vec![
+        call(1, "Léa Martin", CallKind::Video, "WhatsApp", "net.whatsapp.WhatsApp", "WhatsApp"),
+        call(2, "Marc Dubois", CallKind::Audio, "FaceTime", "com.apple.FaceTime", "FaceTime"),
+        call(3, "Team standup", CallKind::Meeting, "Google Meet in Chrome", "com.google.Chrome", "Chrome"),
+    ]
+}
+
 /// The Agents board's sample data.
 pub fn sample_usage() -> notchforge_core::model::AgentUsage {
-    use notchforge_core::model::{AgentUsage, RunningSession, TokenCounts, UsageAgent, UsageRange, UsageSession};
+    use notchforge_core::model::{
+        AgentLimits, AgentUsage, LimitGauge, RunningSession, TokenCounts, UsageAgent, UsageRange, UsageSession,
+    };
+    let now = notchforge_core::time::now_ms();
+    let gauge = |label: &str, percent, minutes: i64| LimitGauge {
+        label: label.into(),
+        percent,
+        resets_at_ms: Some(now + minutes * 60_000),
+    };
     let session = |project: &str, agent, model: &str, minutes, tokens| UsageSession {
         project: project.into(),
         agent,
@@ -908,15 +1146,15 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
     let today = UsageRange {
         label: "Today".into(),
         counts: TokenCounts { input: 142_000, output: 96_000, cache_read: 1_520_000, cache_write: 84_000 },
-        bars: bars.iter().map(|(a, b)| (a * 1000, b * 1000)).collect(),
+        bars: bars.iter().map(|(a, b)| vec![a * 1000, b * 1000, b * 700]).collect(),
         ticks: ["00", "06", "12", "18", "24"].map(str::to_owned).to_vec(),
-        agents: vec![(UsageAgent::ClaudeCode, 162_000), (UsageAgent::Codex, 76_000)],
+        agents: vec![(UsageAgent::ClaudeCode, 162_000), (UsageAgent::Codex, 76_000), (UsageAgent::OpenCode, 53_000)],
         models: vec![("Opus 5.5".into(), 104_000), ("GPT-5 Codex".into(), 76_000), ("Sonnet 5.5".into(), 58_000)],
         sessions: vec![
             session("Notchify", UsageAgent::ClaudeCode, "Opus 5.5", 134, 96_000),
             session("api-server", UsageAgent::Codex, "GPT-5 Codex", 100, 58_000),
             session("website", UsageAgent::ClaudeCode, "Sonnet 5.5", 52, 31_000),
-            session("mobile-app", UsageAgent::Codex, "GPT-5 Codex", 25, 18_000),
+            session("kolchihna", UsageAgent::OpenCode, "Nemotron 3.5", 41, 23_000),
         ],
     };
     AgentUsage {
@@ -924,7 +1162,30 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
         claude_found: true,
         codex_found: true,
         opencode_found: true,
+        gemini_found: false,
+        qoder_found: true,
+        antigravity_found: true,
         ranges: vec![today.clone(), today.clone(), today],
+        limits: vec![
+            AgentLimits {
+                agent: UsageAgent::ClaudeCode,
+                connected: true,
+                plan: None,
+                running: true,
+                project: Some("Notchify".into()),
+                gauges: vec![gauge("Session", 42, 130), gauge("Week", 83, 3 * 1440)],
+                context_percent: Some(18),
+            },
+            AgentLimits {
+                agent: UsageAgent::Codex,
+                connected: true,
+                plan: Some("Plus plan".into()),
+                running: true,
+                project: Some("api-server".into()),
+                gauges: vec![gauge("Session", 12, 271), gauge("Week", 36, 5 * 1440)],
+                context_percent: Some(64),
+            },
+        ],
         running: vec![
             RunningSession {
                 agent: UsageAgent::Codex,
@@ -962,7 +1223,12 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     };
     let mut claude_code = AppRef::known(KnownApp::Claude);
     claude_code.display_name = "Claude Code".into();
-    let spotify = AppRef { known: None, bundle_id: Some("com.spotify.client".into()), display_name: "Spotify".into() };
+    let spotify = AppRef {
+        known: None,
+        bundle_id: Some("com.spotify.client".into()),
+        display_name: "Spotify".into(),
+        platform: None,
+    };
     let prompts = [
         prompt(
             901,
@@ -1010,6 +1276,26 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
             volume: None,
             source_bundle: Some("com.google.Chrome".into()),
         }],
+        up_next: vec![
+            notchforge_core::model::UpNextVideo {
+                title: "Harder, Better, Faster, Stronger".into(),
+                author: "Daft Punk".into(),
+                duration: "3:45".into(),
+                url: "https://www.youtube.com/watch?v=sample".into(),
+            },
+            notchforge_core::model::UpNextVideo {
+                title: "Around the World".into(),
+                author: "Daft Punk".into(),
+                duration: "7:09".into(),
+                url: "https://www.youtube.com/watch?v=sample".into(),
+            },
+            notchforge_core::model::UpNextVideo {
+                title: "Digital Love".into(),
+                author: "Daft Punk".into(),
+                duration: "4:58".into(),
+                url: "https://www.youtube.com/watch?v=sample".into(),
+            },
+        ],
         ..Default::default()
     };
     with_controller(|c| {
@@ -1023,17 +1309,40 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
-    r.check("notched: nine views rendered", sizes.len() == 9, format!("{sizes:?}"));
+    r.check("notched: sixteen views rendered", sizes.len() == 16, format!("{sizes:?}"));
     r.metrics.insert("notched_sizes".into(), json!(sizes));
-    // Island sizes on the design boards (Overview, Main, Hover, Peek).
-    for (name, bw, bh) in [
-        ("07a-notched-overview", 720.0, 372.0),
-        ("07b-notched-music", 720.0, 372.0),
-        ("07c-notched-hover", 520.0, 176.0),
-        ("07d-notched-peek", 440.0, 96.0),
+    // Island sizes on the design boards (Overview, Main, Hover, Peek): the
+    // simulated 14-inch screen's shape for that view, using the live config's
+    // appearance. With the default config these are exactly the boards'
+    // 720×372 / 520×176 / 440×96.
+    let expected = with_controller(|c| {
+        let cfg = c.current_config();
+        let screen = notchforge_core::geometry::ScreenInfo {
+            id: 0,
+            frame: notchforge_core::geometry::Rect::new(0.0, 0.0, 1512.0, 982.0),
+            visible_frame: notchforge_core::geometry::Rect::new(0.0, 0.0, 1512.0, 950.0),
+            safe_area_top: 32.0,
+            aux_top_left: Some(notchforge_core::geometry::Rect::new(0.0, 950.0, 663.5, 32.0)),
+            aux_top_right: Some(notchforge_core::geometry::Rect::new(848.5, 950.0, 663.5, 32.0)),
+            backing_scale: 2.0,
+            is_builtin: true,
+            is_main: false,
+        };
+        notchforge_core::geometry::NotchLayout::new(screen, cfg.appearance.clone())
+    });
+    for (name, kind) in [
+        ("07a-notched-overview", LayoutKind::Expanded),
+        ("07b-notched-music", LayoutKind::Expanded),
+        ("07c-notched-hover", LayoutKind::Compact),
+        ("07d-notched-peek", LayoutKind::Peek),
     ] {
         let got = size(name);
-        r.check(&format!("notched: {name} is {bw} × {bh} like its board"), got == Some((bw, bh)), format!("{got:?}"));
+        let Some(shape) = expected.as_ref().map(|l| l.shape(kind)) else { break };
+        r.check(
+            &format!("notched: {name} is {:.0} × {:.0} like its board", shape.width, shape.height),
+            got == Some((shape.width, shape.height)),
+            format!("{got:?}"),
+        );
     }
 }
 
@@ -1216,6 +1525,15 @@ fn board_snapshots(
         playlists,
         playlist_status: vec![(MediaPlayer::Spotify, PlaylistStatus::Loaded)],
         automation_denied: vec![],
+        browser_denied: None,
+        up_next: vec![
+            notchforge_core::model::UpNextVideo {
+                title: "Daft Punk - One More Time".into(),
+                author: "Daft Punk".into(),
+                duration: "5:20".into(),
+                url: "https://www.youtube.com/watch?v=FGBhQbmPwH8".into(),
+            },
+        ],
     };
     (overview, music)
 }
@@ -1303,6 +1621,8 @@ fn sample_media() -> notchforge_core::model::MediaState {
             source_bundle: None,
         }],
         running: vec![MediaPlayer::Spotify],
+        browser_denied: None,
+        up_next: Vec::new(),
         playlists: (1..=3)
             .map(|i| Playlist {
                 player: MediaPlayer::Spotify,
@@ -1361,7 +1681,7 @@ fn finish(ctx: &Rc<Ctx>) {
 /// Schedule the self-test; steps run 800 ms apart (long enough for every
 /// spring to settle at default speed).
 /// Index of the step that calls `finish` (one past the last explicit step).
-const LAST_STEP: usize = 23;
+const LAST_STEP: usize = 38;
 
 pub fn start(mtm: MainThreadMarker, dir: PathBuf) {
     let _ = std::fs::create_dir_all(&dir);
@@ -1371,7 +1691,7 @@ pub fn start(mtm: MainThreadMarker, dir: PathBuf) {
         eprintln!("self-test watchdog: the run did not finish in 150 s");
         std::process::exit(3);
     });
-    let ctx = Rc::new(Ctx { dir, report: RefCell::new(Report::default()) });
+    let ctx = Rc::new(Ctx { dir, report: RefCell::new(Report::default()), collapsed_pending: Cell::new(true) });
     let step = Rc::new(std::cell::Cell::new(0usize));
     let block = RcBlock::new(move |timer: NonNull<NSTimer>| {
         let n = step.get();

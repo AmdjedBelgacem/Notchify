@@ -10,10 +10,11 @@ use crate::ui::{
     FlippedView, Palette, Weight, label, mono_digits, rect, set_accessibility_label, set_symbol, set_text, symbol_view,
 };
 use notchforge_core::engine::Snapshot;
-use notchforge_core::geometry::{LayoutKind, NotchLayout, WING_WIDTH};
+use notchforge_core::geometry::{LayoutKind, NotchLayout, WING_LEFT, WING_RIGHT, WING_WIDTH};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSImageView, NSTextAlignment, NSTextField};
+use objc2_foundation::NSPoint;
 
 /// Per-render options from the controller.
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +23,9 @@ pub struct WingOptions {
     pub media: bool,
     /// Animate the equaliser (off with Reduce Motion).
     pub animate: bool,
+    /// `WING_LEFT` / `WING_RIGHT` mask of the wings actually shown; a wing
+    /// whose bit is off (dodged beside menu bar items) hides its content.
+    pub mask: u8,
 }
 
 const EQ_HEIGHTS: [f64; 4] = [7.0, 12.0, 9.0, 11.0];
@@ -44,7 +48,9 @@ pub struct CollapsedView {
 
 impl CollapsedView {
     pub fn new(mtm: MainThreadMarker, layout: &NotchLayout, p: &Palette) -> Self {
-        let s = layout.shape(LayoutKind::CollapsedWithWings);
+        // Always built at full wing width; the island clips wings whose mask
+        // bit is off (see `Controller::apply_frame` for the offset).
+        let s = layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
         let (w, h) = (s.width, s.height);
         let root = FlippedView::new(mtm, rect(0.0, 0.0, w, h));
         let icon = 15.0;
@@ -115,6 +121,29 @@ impl CollapsedView {
         }
     }
 
+    /// Is any playing-audio content on screen right now (cover art, browser
+    /// icon or equaliser)? Decides whether the collapsed island takes clicks
+    /// for the quick play/pause toggle.
+    pub fn media_showing(&self) -> bool {
+        !self.root.isHidden() && (!self.art_box.isHidden() || !self.eq.isHidden())
+    }
+
+    /// Is `window_point` over a wing that is showing the playing audio? The
+    /// whole wing is the target: the cover art (or browser icon) has the left
+    /// wing to itself, and the equaliser has the right one. The rest of the
+    /// collapsed island stays click-through.
+    pub fn media_hit(&self, window_point: NSPoint) -> bool {
+        if !self.media_showing() {
+            return false;
+        }
+        let local = self.root.convertPoint_fromView(window_point, None);
+        let size = self.root.frame().size;
+        let slack = 4.0;
+        let in_band = (0.0..=size.height).contains(&local.y);
+        (!self.art_box.isHidden() && local.x < WING_WIDTH + slack && in_band)
+            || (!self.eq.isHidden() && local.x >= size.width - WING_WIDTH - slack && in_band)
+    }
+
     /// Draw `img` as the wing icon through the box's layer contents (layers
     /// draw in every context, offscreen renders included); symbols that need
     /// a tint go through the image view instead.
@@ -181,17 +210,76 @@ impl CollapsedView {
     }
 
     pub fn update(&self, snap: &Snapshot, p: &Palette, opts: WingOptions) {
-        let playing = snap.media.primary().filter(|n| opts.media && n.is_playing());
+        self.update_inner(snap, p, opts);
+        // A wing that is dodged (menu bar items beside the notch) is not shown
+        // at all: no clipped content, and nothing there can take clicks.
+        if opts.mask & WING_LEFT == 0 {
+            self.art_box.setHidden(true);
+            self.art.setHidden(true);
+        }
+        if opts.mask & WING_RIGHT == 0 {
+            self.set_equalizer(false, &p.success, false);
+        }
+    }
+
+    fn update_inner(&self, snap: &Snapshot, p: &Palette, opts: WingOptions) {
+        // The most recent player track, playing or paused (the controller only
+        // lets a paused one through shortly after it was playing).
+        let current = snap.media.primary().filter(|_| opts.media);
+        let playing = current.filter(|n| n.is_playing());
         // Audio from anything else (a browser tab, a video, a call) gets the
         // same treatment: the app's icon on the left, the equaliser on the right.
         let browser = snap.audio.playing_app().filter(|_| opts.media && playing.is_none());
+        // A paused track keeps the wings for a moment so one click resumes it:
+        // dimmed cover, static bars. Whatever is actually audible wins.
+        let paused = current.filter(|n| !n.is_playing()).filter(|_| browser.is_none());
         let low = snap.battery.as_ref().is_some_and(|b| b.is_low());
+
+        // A call in progress: a phone and how long it's been.
+        if let Some(call) = snap.active_call.as_ref().filter(|_| snap.calls.is_empty()) {
+            self.art.setHidden(true);
+            self.art_box.setHidden(true);
+            self.set_equalizer(false, &p.success, false);
+            set_symbol(&self.left_icon, "phone.fill", 12.0, "On a call");
+            self.left_icon.setContentTintColor(Some(&p.success));
+            self.left_icon.setHidden(false);
+            self.left_text.setHidden(true);
+            self.right_icon.setHidden(true);
+            let clock = notchforge_core::calls::call_clock(call.started_ms, notchforge_core::time::now_ms());
+            set_text(&self.right_text, &clock);
+            set_accessibility_label(&self.right_text, &format!("On a call with {} for {clock}", call.caller));
+            self.right_text.setHidden(false);
+            return;
+        }
+
+        // Calls moved out of the way: a phone and how many are ringing.
+        if !snap.calls.is_empty() {
+            self.art.setHidden(true);
+            self.art_box.setHidden(true);
+            self.set_equalizer(false, &p.success, false);
+            set_symbol(&self.left_icon, "phone.fill", 12.0, "Calls ringing");
+            self.left_icon.setContentTintColor(Some(&p.success));
+            self.left_icon.setHidden(false);
+            self.left_text.setHidden(true);
+            self.right_icon.setHidden(true);
+            set_text(&self.right_text, &snap.calls.len().to_string());
+            set_accessibility_label(&self.right_text, &format!("{} calls ringing", snap.calls.len()));
+            self.right_text.setHidden(false);
+            return;
+        }
 
         // Left wing: low battery, else the playing track's cover, else power / tray.
         let cover = playing.filter(|_| !low).map(|n| {
             let img = n.artwork_path.as_deref().and_then(crate::icons::file_image);
             (n, img)
         });
+        let browser_wing = cover.is_none() && browser.filter(|_| !low).is_some();
+        let paused_cover = if cover.is_none() && !browser_wing { paused.filter(|_| !low) } else { None };
+        if paused_cover.is_some() {
+            self.art_box.setAlphaValue(0.55);
+        } else {
+            self.art_box.setAlphaValue(1.0);
+        }
         match &cover {
             Some((n, img)) => {
                 let tint = crate::ui::rgb8(n.player.color());
@@ -201,11 +289,21 @@ impl CollapsedView {
                 self.left_icon.setHidden(true);
                 self.left_text.setHidden(true);
             }
-            None => match browser.filter(|_| !low) {
-                Some(src) => {
-                    let icon = crate::icons::source_icon(src.bundle_id.as_deref(), src.app_path.as_deref());
-                    self.set_art(icon.as_deref(), Some(("waveform", &src.name, &p.success)));
-                    set_accessibility_label(&self.art_box, &format!("{} is playing audio", src.name));
+            None if browser_wing => {
+                let src = browser.expect("checked above");
+                let icon = crate::icons::source_icon(src.bundle_id.as_deref(), src.app_path.as_deref());
+                self.set_art(icon.as_deref(), Some(("waveform", &src.name, &p.success)));
+                set_accessibility_label(&self.art_box, &format!("{} is playing audio", src.name));
+                self.art_box.setHidden(false);
+                self.left_icon.setHidden(true);
+                self.left_text.setHidden(true);
+            }
+            None => match &paused_cover {
+                Some(n) => {
+                    let img = n.artwork_path.as_deref().and_then(crate::icons::file_image);
+                    let tint = crate::ui::rgb8(n.player.color());
+                    self.set_art(img.as_deref(), Some(("music.note", "Music", &tint)));
+                    set_accessibility_label(&self.art_box, &format!("Paused {} by {}", n.title, n.artist));
                     self.art_box.setHidden(false);
                     self.left_icon.setHidden(true);
                     self.left_text.setHidden(true);
@@ -216,9 +314,8 @@ impl CollapsedView {
                 }
             },
         }
-        let browser_wing = cover.is_none() && browser.is_some() && !low;
         let left = match &snap.battery {
-            _ if cover.is_some() || browser_wing => None,
+            _ if cover.is_some() || browser_wing || paused_cover.is_some() => None,
             Some(b) if b.present && b.charging => {
                 Some(("bolt.fill", format!("{}%", b.percent), &p.success, "Charging"))
             }
@@ -244,10 +341,18 @@ impl CollapsedView {
         }
 
         // Right wing: unread notifications (latest app icon + count), else the
-        // equaliser while music plays, else Focus.
-        let eq = snap.unread == 0 && (playing.is_some() || browser.is_some());
-        let eq_color = playing.map(|n| crate::ui::rgb8(n.player.color())).unwrap_or_else(|| p.success.clone());
-        self.set_equalizer(eq, &eq_color, opts.animate);
+        // equaliser while music plays (static and dimmed while paused), else Focus.
+        let eq = snap.unread == 0 && (playing.is_some() || browser.is_some() || paused.is_some());
+        let eq_color =
+            playing.or(paused).map(|n| crate::ui::rgb8(n.player.color())).unwrap_or_else(|| p.success.clone());
+        let eq_animates = opts.animate && paused.is_none();
+        self.set_equalizer(eq, &eq_color, eq_animates);
+        if paused.is_some() && eq {
+            self.eq.setAlphaValue(0.55);
+            set_accessibility_label(&self.eq, "Music paused");
+        } else {
+            self.eq.setAlphaValue(1.0);
+        }
         if eq {
             self.right_icon.setHidden(true);
             self.right_text.setHidden(true);

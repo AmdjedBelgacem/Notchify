@@ -37,6 +37,7 @@ sha2 = "0.10"
 base64 = "0.22"
 
 objc2 = "0.6"
+objc2-event-kit = "0.3"
 objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
 objc2-core-location = "0.3"

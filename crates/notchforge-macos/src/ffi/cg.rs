@@ -38,7 +38,31 @@ unsafe extern "C" {
     pub fn CGCancelDisplayConfiguration(config: CGDisplayConfigRef) -> CGError;
 }
 
-// ── synthetic input (used only by the self-test) ──────────────────────────
+// ── window list (public API; bounds and layers need no permission) ────────
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CGRect {
+    pub origin: CGPoint,
+    pub size: CGPoint,
+}
+
+pub const kCGNullWindowID: u32 = 0;
+pub const kCGWindowListOptionOnScreenOnly: u32 = 1;
+/// `kCGStatusWindowLevel`: where menu bar status items live. The menu bar
+/// itself (a full-width window) sits one level below, so it never matches.
+pub const kCGStatusWindowLevel: i32 = 25;
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    pub static kCGWindowLayer: CFStringRef;
+    pub static kCGWindowBounds: CFStringRef;
+    pub static kCGWindowOwnerPID: CFStringRef;
+    pub fn CGWindowListCopyWindowInfo(option: u32, relative_to_window: u32) -> CFArrayRef;
+    pub fn CGRectMakeWithDictionaryRepresentation(dict: CFDictionaryRef, rect: *mut CGRect) -> bool;
+}
+
+// ── synthetic input (used by the self-test and click pass-through) ─────────
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -51,8 +75,11 @@ pub type CGEventRef = *const c_void;
 pub const kCGHIDEventTap: u32 = 0;
 pub const kCGEventLeftMouseDown: u32 = 1;
 pub const kCGEventLeftMouseUp: u32 = 2;
+pub const kCGEventRightMouseDown: u32 = 3;
+pub const kCGEventRightMouseUp: u32 = 4;
 pub const kCGEventMouseMoved: u32 = 5;
 pub const kCGMouseButtonLeft: u32 = 0;
+pub const kCGMouseButtonRight: u32 = 1;
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {

@@ -56,6 +56,17 @@ pub struct GeneralConfig {
     pub peek_min_priority: Priority,
     /// Show the menu bar extra.
     pub show_menu_bar_icon: bool,
+    /// Hide the island completely while a fullscreen app is frontmost, so the
+    /// auto-revealed menu bar stays usable. A ringing call still shows.
+    pub hide_in_fullscreen: bool,
+    /// Show a display-only island (notch or floating pill) on every screen the
+    /// primary one isn't on.
+    pub island_on_all_screens: bool,
+    /// Screen IDs (CGDirectDisplayID) to mirror the island on, even when
+    /// [`GeneralConfig::island_on_all_screens`] is off. Find an id with
+    /// `notchforge --print-config` or the log line "mirror islands synced".
+    #[serde(default)]
+    pub mirror_screens: Vec<u32>,
 }
 
 impl Default for GeneralConfig {
@@ -68,6 +79,9 @@ impl Default for GeneralConfig {
             peek_duration_ms: 4000,
             peek_min_priority: Priority::Normal,
             show_menu_bar_icon: true,
+            hide_in_fullscreen: true,
+            island_on_all_screens: false,
+            mirror_screens: Vec::new(),
         }
     }
 }
@@ -94,6 +108,9 @@ pub struct AppearanceConfig {
     pub expanded_height: f64,
     /// Show live indicators to the left/right of the collapsed notch.
     pub show_wings: bool,
+    /// Keep a wing away from the menu bar items beside the notch: a wing whose
+    /// span is occupied is hidden instead of drawn over them.
+    pub dodge_menu_bar: bool,
     /// Respect "Increase contrast" by using brighter secondary text.
     pub high_contrast: bool,
 }
@@ -108,6 +125,7 @@ impl Default for AppearanceConfig {
             expanded_width: 720.0,
             expanded_height: 340.0,
             show_wings: true,
+            dodge_menu_bar: true,
             high_contrast: false,
         }
     }
@@ -129,6 +147,8 @@ pub struct ProvidersConfig {
     pub audio: bool,
     /// Spotify & Apple Music now playing, controls and playlists.
     pub media: bool,
+    /// Upcoming events from the connected calendar accounts (EventKit).
+    pub calendar: bool,
 }
 
 impl Default for ProvidersConfig {
@@ -143,6 +163,7 @@ impl Default for ProvidersConfig {
             focus: true,
             audio: true,
             media: true,
+            calendar: true,
         }
     }
 }
@@ -260,6 +281,12 @@ pub struct NotificationsConfig {
     /// Try to close the native banner through Accessibility once the notch
     /// shows the same notification. Fragile; off by default.
     pub suppress_native_banners: bool,
+    /// Show calls announced by a notification in the notch, with answer and
+    /// decline buttons.
+    pub incoming_calls: bool,
+    /// Offer a reply box for messaging notifications (Discord, Messages, …):
+    /// the reply is delivered through the app's own notification banner.
+    pub quick_reply: bool,
     /// How often the Notification Center DB is checked for changes.
     pub db_poll_interval_ms: u64,
     /// Keyed by [`KnownApp::key`] or by bundle identifier for other apps.
@@ -269,10 +296,16 @@ pub struct NotificationsConfig {
 
 impl Default for NotificationsConfig {
     fn default() -> Self {
-        let apps = KnownApp::ALL.iter().map(|a| (a.key().to_owned(), AppRule::default())).collect();
+        // Web platforms recognized in browser pushes get rules of their own,
+        // so they pass the unknown-app gate without `allow_other_apps`.
+        let mut apps: BTreeMap<String, AppRule> =
+            KnownApp::ALL.iter().map(|a| (a.key().to_owned(), AppRule::default())).collect();
+        apps.extend(crate::sites::SITES.iter().map(|s| (s.key.to_owned(), AppRule::default())));
         Self {
             max_items: 100,
             dedupe_window_secs: 10,
+            incoming_calls: true,
+            quick_reply: true,
             rate_limit_burst: 5,
             rate_limit_refill_secs: 3,
             group_window_secs: 300,

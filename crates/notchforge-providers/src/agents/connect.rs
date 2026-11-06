@@ -107,6 +107,84 @@ fn shell_quote(p: &Path) -> String {
     }
 }
 
+/// Where Claude Code's status line reports limits: the file it writes and the
+/// script that writes it, both in the app's data folder.
+pub const CLAUDE_STATUS_FILE: &str = "claude-status.json";
+const CLAUDE_STATUS_SCRIPT: &str = "notchforge-claude-status.sh";
+const CLAUDE_STATUS_PREVIOUS: &str = "notchforge-claude-status.previous.json";
+
+fn status_line_is_ours(v: &Value) -> bool {
+    v["statusLine"]["command"].as_str().is_some_and(|c| c.contains(CLAUDE_STATUS_SCRIPT))
+}
+
+/// Is Claude Code's status line reporting limits to the notch?
+pub fn claude_limits_status(env: &Env) -> Status {
+    match read_json(&claude_settings(env)) {
+        Ok(v) if status_line_is_ours(&v) => Status::Connected,
+        Ok(_) => Status::NotConnected,
+        Err(e) => Status::Blocked(e),
+    }
+}
+
+/// Point Claude Code's status line at a small script that saves what it is
+/// given for the notch. A status line already in place keeps running behind it
+/// and comes back on [`disconnect_claude_limits`].
+pub fn connect_claude_limits(env: &Env, data_dir: &Path) -> Result<String, String> {
+    let path = claude_settings(env);
+    let mut v = read_json(&path)?;
+    if !v.is_object() {
+        return Err(format!("{} is not a JSON object", path.display()));
+    }
+    std::fs::create_dir_all(data_dir).map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
+    let script = data_dir.join(CLAUDE_STATUS_SCRIPT);
+    let previous_file = data_dir.join(CLAUDE_STATUS_PREVIOUS);
+    if !status_line_is_ours(&v) {
+        match v.get("statusLine") {
+            Some(old) => std::fs::write(&previous_file, old.to_string())
+                .map_err(|e| format!("cannot write {}: {e}", previous_file.display()))?,
+            None => {
+                let _ = std::fs::remove_file(&previous_file);
+            }
+        }
+    }
+    let previous = read_json(&previous_file).unwrap_or_default();
+    let chained = previous["command"].as_str().map_or(String::new(), |c| format!("printf '%s' \"$input\" | {c}\n"));
+    let body = format!(
+        "#!/bin/sh\n# Written by Notchisland: saves Claude Code's status data so the notch can show its limits.\ninput=$(cat)\ndir={}\ntmp=\"$dir/.claude-status.$$\"\n(umask 077; printf '%s' \"$input\" > \"$tmp\") && mv -f \"$tmp\" \"$dir/{CLAUDE_STATUS_FILE}\"\n{chained}",
+        shell_quote(data_dir)
+    );
+    std::fs::write(&script, body).map_err(|e| format!("cannot write {}: {e}", script.display()))?;
+    v.as_object_mut().expect("object").insert(
+        "statusLine".into(),
+        json!({ "type": "command", "command": format!("/bin/sh {}", shell_quote(&script)) }),
+    );
+    write_text(&path, &(serde_json::to_string_pretty(&v).map_err(|e| e.to_string())? + "\n"))?;
+    Ok("Limits appear the next time Claude Code responds in a terminal. A custom status line hides some of its footer hints, such as \u{201c}esc to interrupt\u{201d}. Disconnect in Settings puts things back.".into())
+}
+
+/// Undo [`connect_claude_limits`], restoring any earlier status line.
+pub fn disconnect_claude_limits(env: &Env, data_dir: &Path) -> Result<(), String> {
+    let path = claude_settings(env);
+    let mut v = read_json(&path)?;
+    if status_line_is_ours(&v) {
+        let previous_file = data_dir.join(CLAUDE_STATUS_PREVIOUS);
+        let o = v.as_object_mut().expect("object");
+        match std::fs::read_to_string(&previous_file).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+            Some(old) => {
+                o.insert("statusLine".into(), old);
+            }
+            None => {
+                o.remove("statusLine");
+            }
+        }
+        write_text(&path, &(serde_json::to_string_pretty(&v).map_err(|e| e.to_string())? + "\n"))?;
+        let _ = std::fs::remove_file(previous_file);
+    }
+    let _ = std::fs::remove_file(data_dir.join(CLAUDE_STATUS_SCRIPT));
+    let _ = std::fs::remove_file(data_dir.join(CLAUDE_STATUS_FILE));
+    Ok(())
+}
+
 /// The hook command for one Claude Code event.
 fn claude_command(env: &Env, event: &str) -> String {
     let kind = if event == "SubagentStop" { " --kind task_finished" } else { "" };
@@ -384,6 +462,53 @@ mod tests {
         assert!(matches!(status(def, &e), Status::Blocked(_)));
         assert!(connect(def, &e).is_err());
         assert_eq!(std::fs::read_to_string(&path).expect("read"), "notify = [\"my-tool\"]\n");
+        let _ = std::fs::remove_dir_all(&e.home);
+    }
+
+    #[test]
+    fn claude_limits_keep_and_restore_an_existing_status_line() {
+        let e = env("limits", true);
+        let data = e.home.join("data dir");
+        let path = claude_settings(&e);
+        std::fs::create_dir_all(path.parent().expect("dir")).expect("dir");
+        std::fs::write(&path, r#"{"model":"opus","statusLine":{"type":"command","command":"my-line","padding":2}}"#)
+            .expect("write");
+        assert_eq!(claude_limits_status(&e), Status::NotConnected);
+        connect_claude_limits(&e, &data).expect("connect");
+        connect_claude_limits(&e, &data).expect("connect again keeps the original");
+        assert_eq!(claude_limits_status(&e), Status::Connected);
+        let script = std::fs::read_to_string(data.join(CLAUDE_STATUS_SCRIPT)).expect("script");
+        assert!(script.contains("| my-line"), "the earlier status line still runs");
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
+        assert_eq!(v["model"], "opus");
+        disconnect_claude_limits(&e, &data).expect("disconnect");
+        assert_eq!(claude_limits_status(&e), Status::NotConnected);
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
+        assert_eq!(v["statusLine"]["command"], "my-line");
+        assert_eq!(v["statusLine"]["padding"], 2);
+        assert!(!data.join(CLAUDE_STATUS_SCRIPT).exists());
+        let _ = std::fs::remove_dir_all(&e.home);
+    }
+
+    #[test]
+    fn claude_limits_script_saves_what_it_is_given() {
+        let e = env("limits-run", true);
+        let data = e.home.join("data");
+        connect_claude_limits(&e, &data).expect("connect");
+        let mut child = std::process::Command::new("/bin/sh")
+            .arg(data.join(CLAUDE_STATUS_SCRIPT))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn");
+        use std::io::Write;
+        child.stdin.take().expect("stdin").write_all(b"{\"session_id\":\"s\"}").expect("write");
+        assert!(child.wait().expect("wait").success());
+        assert_eq!(std::fs::read_to_string(data.join(CLAUDE_STATUS_FILE)).expect("saved"), "{\"session_id\":\"s\"}");
+        disconnect_claude_limits(&e, &data).expect("disconnect");
+        let v: Value =
+            serde_json::from_str(&std::fs::read_to_string(claude_settings(&e)).expect("read")).expect("json");
+        assert!(v.get("statusLine").is_none());
         let _ = std::fs::remove_dir_all(&e.home);
     }
 

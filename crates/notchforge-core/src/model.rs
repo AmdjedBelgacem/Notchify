@@ -139,6 +139,18 @@ pub struct NewNotification {
     pub thread: Option<String>,
     /// Deep link or file to open on activation.
     pub url: Option<String>,
+    /// Usage the agent reported along with the event (`notchforge-notify
+    /// --input/--output…`). Transport-only: the engine routes it to the usage
+    /// tracker and shows no notification.
+    #[serde(skip, default)]
+    pub tokens: Option<ReportedUsage>,
+}
+
+/// Usage an agent reported through the transports instead of writing a log.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReportedUsage {
+    pub counts: TokenCounts,
+    pub model: Option<String>,
 }
 
 /// A notification accepted by the pipeline and held in the store.
@@ -295,18 +307,55 @@ impl BatteryComponent {
     }
 }
 
-/// A coding agent whose token usage can be read.
+/// A coding agent whose token usage can be read or reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum UsageAgent {
     ClaudeCode,
     Codex,
+    OpenCode,
+    Gemini,
+    Qoder,
+    Antigravity,
 }
 
 impl UsageAgent {
+    /// Fixed order used for bar segments and lookups.
+    pub const ALL: [UsageAgent; 6] = [
+        UsageAgent::ClaudeCode,
+        UsageAgent::Codex,
+        UsageAgent::OpenCode,
+        UsageAgent::Gemini,
+        UsageAgent::Qoder,
+        UsageAgent::Antigravity,
+    ];
+
+    /// Position in [`UsageAgent::ALL`], for the per-agent bar segments.
+    pub fn slot(self) -> usize {
+        UsageAgent::ALL.iter().position(|a| *a == self).unwrap_or(0)
+    }
+
+    /// The agent a webhook/hook `source` name refers to, for reported usage.
+    pub fn from_source(source: &str) -> Option<UsageAgent> {
+        let s = source.to_ascii_lowercase();
+        Some(match s.as_str() {
+            "claude" | "claude-code" | "claudecode" => UsageAgent::ClaudeCode,
+            "chatgpt" | "codex" | "codex-cli" => UsageAgent::Codex,
+            "opencode" => UsageAgent::OpenCode,
+            "gemini" | "gemini-cli" => UsageAgent::Gemini,
+            "qoder" | "qodercli" => UsageAgent::Qoder,
+            "antigravity" => UsageAgent::Antigravity,
+            _ => return None,
+        })
+    }
+
     pub fn display_name(self) -> &'static str {
         match self {
             UsageAgent::ClaudeCode => "Claude Code",
             UsageAgent::Codex => "Codex CLI",
+            UsageAgent::OpenCode => "OpenCode",
+            UsageAgent::Gemini => "Gemini",
+            UsageAgent::Qoder => "Qoder",
+            UsageAgent::Antigravity => "Antigravity",
         }
     }
 }
@@ -365,8 +414,9 @@ pub struct UsageSession {
 pub struct UsageRange {
     pub label: String,
     pub counts: TokenCounts,
-    /// Tokens per hour or day, oldest first: (Claude Code, Codex).
-    pub bars: Vec<(u64, u64)>,
+    /// Tokens per hour or day, oldest first; the inner vector is per agent in
+    /// [`UsageAgent::ALL`] order.
+    pub bars: Vec<Vec<u64>>,
     pub ticks: Vec<String>,
     pub agents: Vec<(UsageAgent, u64)>,
     pub models: Vec<(String, u64)>,
@@ -383,7 +433,42 @@ pub struct RunningSession {
     pub context_percent: Option<u8>,
 }
 
-/// Token usage read from the coding agents' own logs.
+/// One usage limit, as a share of its window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LimitGauge {
+    /// "Session", "Week", "Month"…
+    pub label: String,
+    pub percent: u8,
+    pub resets_at_ms: Option<i64>,
+}
+
+/// An agent's limits and what its current session is doing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentLimits {
+    pub agent: UsageAgent,
+    /// Limits are being reported. Codex always logs them; Claude Code needs its
+    /// status line connected.
+    pub connected: bool,
+    pub plan: Option<String>,
+    pub running: bool,
+    pub project: Option<String>,
+    pub gauges: Vec<LimitGauge>,
+    pub context_percent: Option<u8>,
+}
+
+/// Name a limit by its window: 300 min is the session, 10080 the week.
+pub fn limit_label(window_minutes: u64) -> String {
+    match window_minutes {
+        300 => "Session".into(),
+        10_080 => "Week".into(),
+        43_200 => "Month".into(),
+        m if m >= 1440 => format!("{} days", m / 1440),
+        m => format!("{} hours", (m / 60).max(1)),
+    }
+}
+
+/// Token usage read from the coding agents' own logs (and reported through
+/// the agent webhook for tools that keep no logs).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentUsage {
     /// The first read of the logs has finished.
@@ -391,9 +476,27 @@ pub struct AgentUsage {
     pub claude_found: bool,
     pub codex_found: bool,
     pub opencode_found: bool,
+    pub gemini_found: bool,
+    pub qoder_found: bool,
+    pub antigravity_found: bool,
     /// Today, 7 days, 30 days.
     pub ranges: Vec<UsageRange>,
     pub running: Vec<RunningSession>,
+    pub limits: Vec<AgentLimits>,
+}
+
+impl AgentUsage {
+    /// Whether tokens have been seen for this agent, from any source.
+    pub fn found(&self, agent: UsageAgent) -> bool {
+        match agent {
+            UsageAgent::ClaudeCode => self.claude_found,
+            UsageAgent::Codex => self.codex_found,
+            UsageAgent::OpenCode => self.opencode_found,
+            UsageAgent::Gemini => self.gemini_found,
+            UsageAgent::Qoder => self.qoder_found,
+            UsageAgent::Antigravity => self.antigravity_found,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -917,6 +1020,42 @@ pub enum PlaylistStatus {
     Failed(String),
 }
 
+/// One upcoming calendar event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CalendarEvent {
+    pub title: String,
+    /// Unix epoch milliseconds.
+    pub starts_at_ms: i64,
+    pub ends_at_ms: i64,
+    pub all_day: bool,
+    pub calendar: String,
+    /// Calendar colour as RGB (the colour the user picked in Calendar.app).
+    pub color: Option<(u8, u8, u8)>,
+    pub location: Option<String>,
+    /// Deep link back to the event in Calendar.app.
+    pub url: Option<String>,
+}
+
+/// Calendar accounts ("connections") and upcoming events.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct CalendarState {
+    /// Connected accounts (e.g. "iCloud", "Google", "Subscribed").
+    pub accounts: Vec<String>,
+    /// Upcoming events, soonest first.
+    pub events: Vec<CalendarEvent>,
+    /// Whether Calendar access has been granted.
+    pub granted: bool,
+}
+
+/// A recommended video in YouTube's up-next list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct UpNextVideo {
+    pub title: String,
+    pub author: String,
+    pub duration: String,
+    pub url: String,
+}
+
 /// Rich media state: every running player plus playlists.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MediaState {
@@ -928,6 +1067,14 @@ pub struct MediaState {
     pub playlist_status: Vec<(MediaPlayer, PlaylistStatus)>,
     /// Players whose Automation permission was denied.
     pub automation_denied: Vec<MediaPlayer>,
+    /// A browser that is making sound but whose tabs cannot be read —
+    /// Automation was denied for it. The media page offers to ask.
+    #[serde(default)]
+    pub browser_denied: Option<String>,
+    /// YouTube's up-next recommendations for the browser track, fetched once
+    /// per video. Empty unless a YouTube video is playing.
+    #[serde(default)]
+    pub up_next: Vec<UpNextVideo>,
 }
 
 impl MediaState {
@@ -990,16 +1137,19 @@ pub enum Permission {
     Bluetooth,
     /// Apple Events to Spotify / Music (System Settings › Privacy › Automation).
     Automation,
+    /// Calendar events via EventKit (System Settings › Privacy › Calendars).
+    Calendar,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 6] = [
+    pub const ALL: [Permission; 7] = [
         Permission::Accessibility,
         Permission::FullDiskAccess,
         Permission::Location,
         Permission::Notifications,
         Permission::Bluetooth,
         Permission::Automation,
+        Permission::Calendar,
     ];
 
     pub fn title(self) -> &'static str {
@@ -1010,6 +1160,7 @@ impl Permission {
             Permission::Notifications => "Notifications",
             Permission::Bluetooth => "Bluetooth",
             Permission::Automation => "Automation (Spotify & Music)",
+            Permission::Calendar => "Calendar",
         }
     }
 
@@ -1036,6 +1187,10 @@ impl Permission {
             Permission::Automation => {
                 "Lets Notchisland ask Spotify and Apple Music what is playing, control playback \
                  and list your playlists. macOS asks once per app."
+            }
+            Permission::Calendar => {
+                "Lets Notchisland show your upcoming events from every connected calendar \
+                 account (iCloud, Google, Exchange, subscribed). Read-only."
             }
         }
     }
@@ -1208,6 +1363,17 @@ mod usage_tests {
     use super::*;
 
     #[test]
+    fn usage_agents_map_from_source_names() {
+        assert_eq!(UsageAgent::from_source("claude"), Some(UsageAgent::ClaudeCode));
+        assert_eq!(UsageAgent::from_source("chatgpt"), Some(UsageAgent::Codex));
+        assert_eq!(UsageAgent::from_source("opencode"), Some(UsageAgent::OpenCode));
+        assert_eq!(UsageAgent::from_source("Gemini"), Some(UsageAgent::Gemini));
+        assert_eq!(UsageAgent::from_source("qodercli"), Some(UsageAgent::Qoder));
+        assert_eq!(UsageAgent::from_source("antigravity"), Some(UsageAgent::Antigravity));
+        assert_eq!(UsageAgent::from_source("cursor"), None);
+    }
+
+    #[test]
     fn token_counts_read_short() {
         assert_eq!(compact_tokens(950), "950");
         assert_eq!(compact_tokens(238_400), "238K");
@@ -1216,5 +1382,14 @@ mod usage_tests {
         assert_eq!(compact_tokens(1_600_000), "1.60M");
         assert_eq!(compact_tokens(40_200_000), "40.2M");
         assert_eq!(compact_tokens(2_500_000_000), "2.50B");
+    }
+
+    #[test]
+    fn limits_are_named_by_their_window() {
+        assert_eq!(limit_label(300), "Session");
+        assert_eq!(limit_label(10_080), "Week");
+        assert_eq!(limit_label(43_200), "Month");
+        assert_eq!(limit_label(2880), "2 days");
+        assert_eq!(limit_label(120), "2 hours");
     }
 }

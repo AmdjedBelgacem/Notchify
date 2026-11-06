@@ -86,6 +86,7 @@ pub fn state(p: Permission) -> PermissionState {
         }
         Permission::Bluetooth => PermissionState::NotRequired,
         Permission::Automation => crate::media::automation_state(),
+        Permission::Calendar => notchforge_providers::calendar::authorization_state(),
     }
 }
 
@@ -107,6 +108,7 @@ fn settings_url(p: Permission) -> &'static str {
         Permission::Notifications => "x-apple.systempreferences:com.apple.preference.notifications",
         Permission::Bluetooth => "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
         Permission::Automation => "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+        Permission::Calendar => "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars",
     }
 }
 
@@ -134,6 +136,9 @@ pub fn request(p: Permission) {
         }
         Permission::Location => crate::location::request_authorization(),
         Permission::Automation => crate::media::request_automation(),
+        Permission::Calendar => {
+            let _ = notchforge_providers::calendar::on_main_thread(notchforge_providers::calendar::request_access);
+        }
         Permission::Notifications if is_bundled() => {
             let block = RcBlock::new(|granted: Bool, _err: *mut NSError| {
                 NOTIFICATION_STATE.store(if granted.as_bool() { 1 } else { 2 }, Ordering::Relaxed);

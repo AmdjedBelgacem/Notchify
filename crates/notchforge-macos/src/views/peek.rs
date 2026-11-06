@@ -33,6 +33,7 @@ pub struct PeekView {
     summary: Retained<NSTextField>,
     title: Retained<NSTextField>,
     open: Retained<NSButton>,
+    reply: Retained<NSButton>,
     /// Second answer to an authorization prompt (Deny).
     deny: Retained<NSButton>,
     cy: f64,
@@ -98,6 +99,18 @@ impl PeekView {
             &target,
             rect(w - 16.0 - ow, cy - 14.0, ow, 28.0),
         );
+        let reply = pill_button(
+            mtm,
+            "Reply",
+            None,
+            &open_font,
+            &objc2_app_kit::NSColor::whiteColor(),
+            &rgba(1.0, 1.0, 1.0, 0.14),
+            14.0,
+            &target,
+            rect(w - 16.0 - ow - 8.0 - 56.0, cy - 14.0, 56.0, 28.0),
+        );
+        reply.setHidden(true);
         let deny = pill_button(
             mtm,
             "Deny",
@@ -122,6 +135,7 @@ impl PeekView {
             summary,
             title,
             open,
+            reply,
             deny,
             cy,
             _target: target,
@@ -131,8 +145,9 @@ impl PeekView {
 
     pub fn show(&self, n: &Notification, p: &Palette) {
         // Without a real app icon the icon view draws its own brand tile
-        // (see `set_app_icon`); the outer tile only frames real icons.
-        let branded = crate::icons::app_icon(&n.app).is_none();
+        // (see `set_app_icon`); the outer tile only frames real icons. A web
+        // platform's logo counts as branded even before its favicon arrives.
+        let branded = crate::icons::app_icon(&n.app).is_none() || n.app.platform.is_some();
         if let Some(l) = self.tile.layer() {
             let c = if branded { rgba(0.0, 0.0, 0.0, 0.0) } else { rgba(1.0, 1.0, 1.0, 0.08) };
             without_animation(|| l.setBackgroundColor(Some(&c.CGColor())));
@@ -175,11 +190,16 @@ impl PeekView {
     /// ordinary one, "Allow" + "Deny" for an agent asking for access, "Cancel"
     /// for a sign-in waiting on the browser.
     fn layout_buttons(&self, n: &Notification, p: &Palette) {
+        let quick_reply = crate::app::with_config(|c| c.notifications.quick_reply).unwrap_or(true);
         let w = self.root.frame().size.width;
         let target = n.auth_target();
+        let replyable = quick_reply
+            && matches!(n.kind, NotificationKind::Message)
+            && n.app.category() == notchforge_core::apps::AppCategory::Messaging;
         let (first, second) = match &target {
             Some(AuthTarget::Agent(_)) => ("Allow", Some("Deny")),
             Some(AuthTarget::Spotify) => ("Cancel", None),
+            None if replyable => ("Reply", Some("Open")),
             None => ("Open", None),
         };
         let f = font(12.5, Weight::Semibold);
@@ -197,12 +217,22 @@ impl PeekView {
         match second {
             Some(t) => {
                 let sw = measure(t);
-                style_pill(&self.deny, t, None, &f, &white, &quiet, 14.0);
-                left -= 8.0 + sw;
-                self.deny.setFrame(rect(left, self.cy - 14.0, sw, 28.0));
-                self.deny.setHidden(false);
+                if replyable {
+                    style_pill(&self.reply, t, None, &f, &white, &quiet, 14.0);
+                    left -= 8.0 + sw;
+                    self.reply.setFrame(rect(left, self.cy - 14.0, sw, 28.0));
+                    self.reply.setHidden(false);
+                } else {
+                    style_pill(&self.deny, t, None, &f, &white, &quiet, 14.0);
+                    left -= 8.0 + sw;
+                    self.deny.setFrame(rect(left, self.cy - 14.0, sw, 28.0));
+                    self.deny.setHidden(false);
+                }
             }
-            None => self.deny.setHidden(true),
+            None => {
+                self.deny.setHidden(true);
+                self.reply.setHidden(true);
+            }
         }
         // Text keeps clear of the buttons (labels are widened by their inset).
         let tx = 64.0;
@@ -211,9 +241,9 @@ impl PeekView {
         self.title.setFrame(rect(tx - inset, self.cy - 1.0, tw + 2.0 * inset, 18.0));
     }
 
-    /// Which button is under `window_point`: `Some(true)` the main one (Open /
-    /// Allow / Cancel), `Some(false)` the second (Deny).
-    pub fn button_hit(&self, window_point: NSPoint) -> Option<bool> {
+    /// Which button is under `window_point`: `Main` (Open / Allow / Cancel /
+    /// Reply), `Secondary` (Deny), or `Reply`.
+    pub fn button_hit(&self, window_point: NSPoint) -> Option<PeekButton> {
         if self.root.isHidden() {
             return None;
         }
@@ -226,23 +256,42 @@ impl PeekView {
             (0.0..=size.width).contains(&local.x) && (0.0..=size.height).contains(&local.y)
         };
         if inside(&self.open) {
-            Some(true)
+            Some(PeekButton::Main)
         } else if inside(&self.deny) {
-            Some(false)
+            Some(PeekButton::Secondary)
+        } else if inside(&self.reply) {
+            Some(PeekButton::Reply)
         } else {
             None
         }
     }
 
-    /// Press a button: open the notification, or answer its question.
-    pub fn press(&self, primary: bool) {
-        let Some(n) = self.current.borrow().clone() else { return };
-        match n.auth_target() {
-            Some(target) => {
-                crate::app::with_controller(|c| c.answer_auth(&target, primary));
+    /// Press a button: open the notification, answer its question, or start a
+    /// reply. Returns whether the peek should collapse afterwards.
+    pub fn press(&self, kind: PeekButton) -> bool {
+        let Some(n) = self.current.borrow().clone() else { return true };
+        match (kind, n.auth_target()) {
+            (PeekButton::Reply, None) => {
+                crate::app::with_controller(|c| c.start_reply(n.id));
+                false // the panel pins open for typing
             }
-            None if primary => open_notification(&n),
-            None => {}
+            (_, Some(target)) => {
+                crate::app::with_controller(|c| c.answer_auth(&target, kind == PeekButton::Main));
+                true
+            }
+            (PeekButton::Main, None) => {
+                open_notification(&n);
+                true
+            }
+            _ => true,
         }
     }
+}
+
+/// Which of the peek banner's buttons was pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeekButton {
+    Main,
+    Secondary,
+    Reply,
 }

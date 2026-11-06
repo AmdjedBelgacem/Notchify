@@ -38,9 +38,13 @@
     <string>Notchisland uses your approximate location only to show local weather in the notch.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Notchisland uses your approximate location only to show local weather in the notch.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Notchisland shows your upcoming events from every connected calendar account on the notch. Read-only.</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Notchisland shows your upcoming events from every connected calendar account on the notch. Read-only.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Notchisland shows the battery level of your connected accessories. It reads them from the system and does not connect to devices.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Notchisland asks Spotify and Apple Music what is playing so it can show the track, artwork and playlists in the notch, and sends them play, pause, skip and playlist commands you choose.</string>
+    <string>Notchisland asks Spotify and Apple Music what is playing, and brings a browser's calling tab forward when you answer, so it can show the track, artwork and playlists in the notch, and sends them play, pause, skip and playlist commands you choose.</string>
 </dict>
 </plist>

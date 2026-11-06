@@ -110,7 +110,12 @@ pub fn ended<'a>(before: &'a HashMap<i32, Running>, now: &[Running]) -> Vec<&'a 
 fn notification(r: &Running) -> NewNotification {
     let app = match KnownApp::from_key(r.key) {
         Some(k) if k != KnownApp::GenericAgent => AppRef::known(k),
-        _ => AppRef { known: Some(KnownApp::GenericAgent), bundle_id: None, display_name: r.name.to_owned() },
+        _ => AppRef {
+            known: Some(KnownApp::GenericAgent),
+            bundle_id: None,
+            display_name: r.name.to_owned(),
+            platform: None,
+        },
     };
     let mins = r.seconds / 60;
     let took = if mins >= 1 { format!("after {mins} min") } else { format!("after {} s", r.seconds) };
@@ -118,6 +123,7 @@ fn notification(r: &Running) -> NewNotification {
         app,
         origin: Origin::Internal,
         kind: NotificationKind::TaskFinished,
+        tokens: None,
         priority: None,
         title: format!("{} finished", r.name),
         subtitle: None,

@@ -12,9 +12,23 @@
 //! that shape and turns it into a well-titled notification.
 
 use notchforge_core::apps::{AppRef, KnownApp};
-use notchforge_core::model::{NewNotification, NotificationKind, Origin, Priority};
+use notchforge_core::model::{NewNotification, NotificationKind, Origin, Priority, ReportedUsage};
 use notchforge_core::time::now_ms;
 use serde::Deserialize;
+
+/// Token counts an agent reports along with an event (`"tokens": {"input": …,
+/// "output": …}` or the alias `"usage"`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub struct ReportedTokens {
+    #[serde(default, alias = "input_tokens", alias = "inputTokens")]
+    pub input: u64,
+    #[serde(default, alias = "output_tokens", alias = "outputTokens")]
+    pub output: u64,
+    #[serde(default, alias = "cache_read", alias = "cacheRead")]
+    pub cache_read: u64,
+    #[serde(default, alias = "cache_write", alias = "cacheWrite")]
+    pub cache_write: u64,
+}
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 pub struct AgentPayload {
@@ -35,6 +49,11 @@ pub struct AgentPayload {
     pub url: Option<String>,
     /// Unix seconds or milliseconds.
     pub timestamp: Option<i64>,
+    /// Reported token usage (telemetry; see `NewNotification::tokens`).
+    #[serde(alias = "usage")]
+    pub tokens: Option<ReportedTokens>,
+    /// The model the tokens were spent on.
+    pub model: Option<String>,
 
     // ── Claude Code hook input ──
     pub hook_event_name: Option<String>,
@@ -92,7 +111,12 @@ impl AgentPayload {
             });
         let app = match KnownApp::from_key(&source) {
             Some(k) => AppRef::known(k),
-            None => AppRef { known: Some(KnownApp::GenericAgent), bundle_id: None, display_name: source.clone() },
+            None => AppRef {
+                known: Some(KnownApp::GenericAgent),
+                bundle_id: None,
+                display_name: source.clone(),
+                platform: None,
+            },
         };
 
         let hook = non_empty(self.hook_event_name);
@@ -142,6 +166,15 @@ impl AgentPayload {
             timestamp_ms,
             thread: non_empty(self.thread),
             url: non_empty(self.url),
+            tokens: self.tokens.map(|t| ReportedUsage {
+                counts: notchforge_core::model::TokenCounts {
+                    input: t.input,
+                    output: t.output,
+                    cache_read: t.cache_read,
+                    cache_write: t.cache_write,
+                },
+                model: non_empty(self.model),
+            }),
         }
     }
 }
@@ -159,6 +192,31 @@ pub fn parse_events(json: &[u8], origin: Origin, overrides: &Overrides) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_reported_tokens() {
+        let events = parse_events(
+            br#"{"source":"gemini","kind":"info","title":"turn","tokens":{"input":1200,"output":340},"model":"gemini-3-flash"}"#,
+            Origin::AgentWebhook,
+            &Overrides::default(),
+        )
+        .unwrap();
+        assert_eq!(events.len(), 1);
+        let usage = events[0].tokens.as_ref().expect("tokens parsed");
+        assert_eq!(usage.counts.input, 1200);
+        assert_eq!(usage.counts.output, 340);
+        assert_eq!(usage.model.as_deref(), Some("gemini-3-flash"));
+
+        // The "usage" alias and camelCase keys work too.
+        let events = parse_events(
+            br#"{"source":"qoder","usage":{"inputTokens":10,"cacheRead":5}}"#,
+            Origin::AgentSocket,
+            &Overrides::default(),
+        )
+        .unwrap();
+        let usage = events[0].tokens.as_ref().expect("alias parsed");
+        assert_eq!((usage.counts.input, usage.counts.cache_read), (10, 5));
+    }
 
     #[test]
     fn minimal_event() {

@@ -16,6 +16,7 @@
 //! Cursor, Zed, Qoder…) are additionally picked up by the Notification Center
 //! watcher and attributed through [`KnownApp`](notchforge_core::apps::KnownApp).
 
+pub mod antigravity;
 pub mod connect;
 pub mod http;
 pub mod inbox;

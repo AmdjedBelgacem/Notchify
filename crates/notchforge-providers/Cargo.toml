@@ -23,6 +23,12 @@ base64 = { workspace = true }
 # On macOS link the system libsqlite3 (always present, no C toolchain needed);
 # elsewhere bundle SQLite so headless development builds work everywhere.
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = { workspace = true }
+dispatch2 = { workspace = true }
+objc2 = { workspace = true }
+objc2-app-kit = { workspace = true }
+objc2-event-kit = { workspace = true }
+objc2-foundation = { workspace = true }
 rusqlite = { workspace = true }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]

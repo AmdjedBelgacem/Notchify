@@ -3,4 +3,5 @@
 //! symbol is missing the feature is reported as unavailable and the UI hides
 //! the control — NotchForge never crashes because of these.
 
+pub mod cmio;
 pub mod display_services;

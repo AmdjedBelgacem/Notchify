@@ -121,6 +121,9 @@ pub struct MediaPage {
     _targets: Targets,
     row_targets: Targets,
     source_targets: Targets,
+    /// The "allow tab access" overlay shown on the browser card when the
+    /// browser's Automation is off; removed and rebuilt per render.
+    allow_overlay: RefCell<Option<Retained<NSButton>>>,
     state: Shared,
     tint: Retained<objc2_quartz_core::CAGradientLayer>,
 
@@ -151,6 +154,7 @@ pub struct MediaPage {
     sources_width: f64,
 
     seg_spotify: Retained<NSButton>,
+    seg_up_next: Retained<NSButton>,
     seg_music: Retained<NSButton>,
     list_scroll: Retained<NSScrollView>,
     list_doc: Retained<FlippedView>,
@@ -217,7 +221,8 @@ impl MediaPage {
 
         let top_y = nh + 6.0;
         let ph = h - top_y - PAD;
-        let lw = ((w - 2.0 * PAD - 10.0) * 420.0 / 682.0).floor();
+        // The Overview's columns: the player takes two, the playlists one.
+        let lw = (w - 2.0 * PAD - 2.0 * 10.0) / 3.0 * 2.0 + 10.0;
         let rx = PAD + lw + 10.0;
         let rw = w - PAD - rx;
 
@@ -229,7 +234,7 @@ impl MediaPage {
         tint.setEndPoint(NSPoint::new(1.0, 1.0));
         tint.setOpacity(0.0);
         if let Some(l) = player.layer() {
-            l.setCornerRadius(24.0);
+            l.setCornerRadius(20.0);
             l.setMasksToBounds(true);
             l.addSublayer(&tint);
         }
@@ -500,17 +505,12 @@ impl MediaPage {
         // ── playlists tile ──
         let card = super::expanded::glass_tile(mtm, rect(rx, top_y, rw, ph));
         if let Some(l) = card.layer() {
-            l.setCornerRadius(24.0);
+            l.setCornerRadius(20.0);
             l.setMasksToBounds(true);
         }
-        card.addSubview(&label(
-            mtm,
-            "Playlists",
-            &font(15.0, Weight::Semibold),
-            &p.primary,
-            rect(14.0, 15.0, rw - 140.0, 19.0),
-        ));
-        let seg_track = shape_view(mtm, rect(rw - 10.0 - 122.0, 10.0, 122.0, 28.0), &white(0.12), 14.0);
+        // Three sources across the tile's width: there's no room for a title beside them.
+        let seg_w = (rw - 20.0 - 4.0) / 3.0;
+        let seg_track = shape_view(mtm, rect(10.0, 10.0, rw - 20.0, 28.0), &white(0.12), 14.0);
         let pick = |player: MediaPlayer| {
             let st = state.clone();
             move |_: Option<&AnyObject>| {
@@ -532,7 +532,7 @@ impl MediaPage {
             &white(0.28),
             12.0,
             &t,
-            rect(2.0, 2.0, 64.0, 24.0),
+            rect(2.0, 2.0, seg_w, 24.0),
         );
         let t = targets.add(mtm, pick(MediaPlayer::Music));
         let seg_music = pill_button(
@@ -544,10 +544,23 @@ impl MediaPage {
             &white(0.0),
             12.0,
             &t,
-            rect(66.0, 2.0, 54.0, 24.0),
+            rect(2.0 + seg_w, 2.0, seg_w, 24.0),
+        );
+        let t = targets.add(mtm, pick(MediaPlayer::Browser));
+        let seg_up_next = pill_button(
+            mtm,
+            "Up next",
+            None,
+            &font(12.0, Weight::Semibold),
+            &p.primary,
+            &white(0.0),
+            12.0,
+            &t,
+            rect(2.0 + 2.0 * seg_w, 2.0, seg_w, 24.0),
         );
         seg_track.addSubview(&seg_spotify);
         seg_track.addSubview(&seg_music);
+        seg_track.addSubview(&seg_up_next);
         card.addSubview(&seg_track);
 
         let lh = ph - 48.0 - 6.0;
@@ -601,6 +614,7 @@ impl MediaPage {
             _targets: targets,
             row_targets: Targets::default(),
             source_targets: Targets::default(),
+            allow_overlay: RefCell::new(None),
             state,
             tint,
             art,
@@ -627,6 +641,7 @@ impl MediaPage {
             sources,
             sources_width,
             seg_spotify,
+            seg_up_next,
             seg_music,
             list_scroll,
             list_doc,
@@ -720,6 +735,10 @@ impl MediaPage {
 
     fn render_featured(&self, snap: &Snapshot, featured: &Featured) {
         let p = &self.p;
+        // The affordance is rebuilt on every render; drop the old one first.
+        if let Some(old) = self.allow_overlay.borrow_mut().take() {
+            old.removeFromSuperview();
+        }
         let (has_controls, has_progress) = match featured {
             Featured::Player(pl) => {
                 let n = snap.media.player(*pl);
@@ -731,7 +750,12 @@ impl MediaPage {
                 let short = match (pl, n) {
                     (MediaPlayer::Spotify, _) => "Spotify",
                     (MediaPlayer::Music, _) => "Music",
-                    (MediaPlayer::Browser, Some(n)) => n.source_name(),
+                    // The source website ("YouTube", a host) beats the
+                    // browser's name — that is what is being watched.
+                    (MediaPlayer::Browser, Some(n)) => {
+                        let site = n.artist.as_str();
+                        if site.is_empty() || site == "Playing audio" { n.source_name() } else { site }
+                    }
                     (MediaPlayer::Browser, None) => "Browser",
                 };
                 set_text(&self.badge, &format!("{short}{state}"));
@@ -739,6 +763,35 @@ impl MediaPage {
                 let artist = n.map(|n| if n.artist.is_empty() { n.subtitle() } else { n.artist.clone() });
                 set_text(&self.subtitle, &artist.unwrap_or_default());
                 set_text(&self.album, n.map_or("", |n| if n.artist.is_empty() { "" } else { n.album.as_str() }));
+                // The browser is audible but its tabs are off limits: offer
+                // the Automation prompt right on the card.
+                if let Some(np) = n {
+                    let denied = np.player == MediaPlayer::Browser
+                        && snap.media.browser_denied.as_deref().is_some_and(|b| np.source_bundle.as_deref() == Some(b));
+                    if denied {
+                        set_text(&self.subtitle, "Allow tab access to see the site and title");
+                        set_accessibility_label(&self.title, "Browser tabs are private; allow access to see them");
+                        let bundle = np.source_bundle.clone().unwrap_or_default();
+                        let target = self.source_targets.add(self.mtm, move |_| {
+                            crate::media::connect_browser(bundle.clone());
+                        });
+                        // SAFETY: the title's superview outlives the overlay.
+                        let sup = unsafe { self.title.superview() };
+                        if let Some(sup) = sup {
+                            let mut f = self.title.frame();
+                            let s = self.subtitle.frame();
+                            let (min_y, max_y) = (f.origin.y.min(s.origin.y), f.origin.y + f.size.height);
+                            let max_y = max_y.max(s.origin.y + s.size.height);
+                            f.origin.x = f.origin.x.min(s.origin.x);
+                            f.origin.y = min_y - 2.0;
+                            f.size.width = f.size.width.max(s.size.width);
+                            f.size.height = max_y - min_y + 4.0;
+                            let ov = crate::ui::click_overlay(self.mtm, &target, f, "Allow tab access");
+                            sup.addSubview(&ov);
+                            *self.allow_overlay.borrow_mut() = Some(ov);
+                        }
+                    }
+                }
                 let art = n.and_then(|n| n.artwork_path.clone());
                 if self.state.borrow().art_path != art || art.is_none() {
                     let img = art.as_deref().and_then(icons::file_image);
@@ -934,6 +987,15 @@ impl MediaPage {
         let player = self.list_player(media);
         seg_style(&self.seg_spotify, "Spotify", player == MediaPlayer::Spotify);
         seg_style(&self.seg_music, "Music", player == MediaPlayer::Music);
+        seg_style(&self.seg_up_next, "Up next", player == MediaPlayer::Browser);
+        self.seg_up_next.setEnabled(!media.up_next.is_empty());
+
+        // The Up next list replaces the playlist table while a YouTube video
+        // is the featured track.
+        if player == MediaPlayer::Browser {
+            self.render_up_next(media);
+            return;
+        }
 
         let status = media.playlist_status(player);
         let lists: Vec<&Playlist> = media.playlists_for(player).collect();
@@ -1082,6 +1144,87 @@ impl MediaPage {
             });
             row.addSubview(&click_overlay(self.mtm, &t, rect(0.0, 0.0, w, row_h), &format!("Play playlist {name}")));
             set_accessibility_label(&row, &format!("{}, {}", pl.name, detail.join(", ")));
+            self.list_doc.addSubview(&row);
+        }
+        self.list_doc.scrollPoint(NSPoint::new(0.0, 0.0));
+    }
+
+    /// YouTube's up-next list, in the playlists tile: click a row to open the
+    /// video.
+    fn render_up_next(&self, media: &MediaState) {
+        let mtm = self.mtm;
+        let p = &self.p;
+        let videos = &media.up_next;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for v in videos {
+            v.url.hash(&mut h);
+            v.title.hash(&mut h);
+        }
+        let key = h.finish();
+        if self.state.borrow().playlists_key == key {
+            return;
+        }
+        self.state.borrow_mut().playlists_key = key;
+        self.row_targets.clear();
+        remove_all_subviews(&self.list_doc);
+        self.list_message.setHidden(true);
+        self.list_action.setHidden(true);
+        self.list_scroll.setHidden(videos.is_empty());
+        if videos.is_empty() {
+            set_text(&self.list_message, "No recommendations found.");
+            self.list_message.setHidden(false);
+            return;
+        }
+        let w = self.list_width;
+        let visible_h = self.list_scroll.frame().size.height;
+        let row_h = if videos.len() as f64 >= VISIBLE_ROWS {
+            visible_h / VISIBLE_ROWS
+        } else {
+            (visible_h / videos.len() as f64).min(MAX_ROW_H)
+        };
+        let doc_h = (videos.len() as f64 * row_h).max(visible_h);
+        self.list_doc.setFrame(rect(0.0, 0.0, w, doc_h));
+        for (i, v) in videos.iter().enumerate() {
+            let row = shape_view(self.mtm, rect(0.0, i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
+            let cy = (row_h - 40.0) / 2.0;
+            let cover = shape_view(mtm, rect(8.0, cy, 40.0, 40.0), &rgb8(MediaPlayer::Browser.color()), 8.0);
+            cover.addSubview(&symbol_view(
+                mtm,
+                "play.rectangle.fill",
+                16.0,
+                &rgba(1.0, 1.0, 1.0, 0.92),
+                rect(10.0, 10.0, 20.0, 20.0),
+                &v.title,
+            ));
+            row.addSubview(&cover);
+            let ty = (row_h - 33.0) / 2.0;
+            row.addSubview(&label(
+                mtm,
+                &v.title,
+                &font(13.5, Weight::Medium),
+                &p.primary,
+                rect(58.0, ty, w - 66.0, 18.0),
+            ));
+            let detail = if v.duration.is_empty() {
+                v.author.clone()
+            } else if v.author.is_empty() {
+                v.duration.clone()
+            } else {
+                format!("{} · {}", v.author, v.duration)
+            };
+            row.addSubview(&label(
+                mtm,
+                &detail,
+                &font(12.0, Weight::Regular),
+                &rgba(1.0, 1.0, 1.0, 0.74),
+                rect(58.0, ty + 18.0, w - 66.0, 15.0),
+            ));
+            let url = v.url.clone();
+            let t = self.row_targets.add(mtm, move |_| {
+                crate::sharing::open_url(&url);
+            });
+            row.addSubview(&click_overlay(mtm, &t, rect(0.0, 0.0, w, row_h), &format!("Open {}", v.title)));
+            set_accessibility_label(&row, &format!("{}, {}", v.title, v.author));
             self.list_doc.addSubview(&row);
         }
         self.list_doc.scrollPoint(NSPoint::new(0.0, 0.0));

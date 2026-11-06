@@ -17,10 +17,11 @@
 use crate::ffi::ax::*;
 use crate::ffi::cf::{self, CFArrayGetCount, CFArrayGetValueAtIndex, CFTypeRef, Owned};
 use notchforge_core::apps::{AppRef, KnownApp};
+use notchforge_core::geometry::Rect;
 use notchforge_core::model::{NewNotification, Notification, NotificationKind, Origin};
 use notchforge_core::provider::ProviderEvent;
 use notchforge_core::time::now_ms;
-use objc2_app_kit::NSRunningApplication;
+use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_foundation::NSString;
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -119,7 +120,7 @@ pub fn banner_to_notification(texts: &[String], descriptions: &[String]) -> Opti
         .or_else(|| KnownApp::from_web_text(&all));
     let app = match known {
         Some(k) => AppRef::known(k),
-        None => AppRef { known: None, bundle_id: None, display_name: "Notification".into() },
+        None => AppRef { known: None, bundle_id: None, display_name: "Notification".into(), platform: None },
     };
     let kind = match app.category() {
         notchforge_core::apps::AppCategory::Agent => notchforge_providers::usernoted::infer_agent_kind(&all),
@@ -137,6 +138,7 @@ pub fn banner_to_notification(texts: &[String], descriptions: &[String]) -> Opti
         timestamp_ms: now_ms(),
         thread: None,
         url: None,
+        tokens: None,
     })
 }
 
@@ -250,6 +252,564 @@ pub fn dismiss_banner(n: &Notification) {
             });
         }
     }
+}
+
+/// What a walk through one app's windows found.
+#[derive(Debug, Default)]
+pub struct CallWindow {
+    /// A window offers both an answer and a decline button.
+    pub ringing: bool,
+    /// Both buttons are there, but nothing near them mentions a call.
+    pub answer_and_decline: bool,
+    /// A window offers a way to end a call, so one is in progress.
+    pub hang_up: bool,
+    pub texts: Vec<String>,
+    /// What the window looks like, for diagnostics. Text only from small
+    /// windows and from buttons about calls, so messages stay out of it.
+    pub report: Vec<String>,
+}
+
+/// Elements a window may have and still count as small, like a call popup.
+const SMALL_WINDOW: usize = 30;
+const WALK_BUDGET: usize = 4000;
+/// Web and Electron interfaces nest far deeper than native ones.
+const DEEP_WALK: usize = 64;
+/// How far up from a button to look for who is calling.
+const CALLER_LEVELS: usize = 6;
+/// How far up from a button wording about a call still counts.
+const CALL_WORDING_LEVELS: usize = 5;
+
+/// Chromium and Electron apps only build their accessibility tree when asked.
+unsafe fn wake_web_accessibility(app: CFTypeRef) {
+    for attribute in ["AXManualAccessibility", "AXEnhancedUserInterface"] {
+        if let Some(key) = cf::cfstring(attribute) {
+            unsafe { AXUIElementSetAttributeValue(app, key.as_ptr(), kCFBooleanTrue) };
+        }
+    }
+}
+
+/// Visit a subtree depth-first, last child first: a call's overlay is usually
+/// added after the rest of a page, so this reaches it soonest.
+unsafe fn walk_newest_first(el: CFTypeRef, depth: usize, f: &mut dyn FnMut(CFTypeRef) -> bool) -> bool {
+    if depth > DEEP_WALK {
+        return true;
+    }
+    if !f(el) {
+        return false;
+    }
+    if let Some(children) = unsafe { copy_attr(el, "AXChildren") } {
+        for i in (0..unsafe { CFArrayGetCount(children.as_ptr()) }).rev() {
+            let child = unsafe { CFArrayGetValueAtIndex(children.as_ptr(), i) };
+            if !unsafe { walk_newest_first(child, depth + 1, f) } {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+unsafe fn button_name(e: CFTypeRef) -> String {
+    ["AXTitle", "AXDescription"]
+        .iter()
+        .filter_map(|a| unsafe { attr_string(e, a) })
+        .find(|n| !n.trim().is_empty())
+        .unwrap_or_default()
+}
+
+/// Could this role be a button? Web pages also use links and plain groups.
+fn can_be_pressed(role: Option<&str>) -> bool {
+    matches!(role, Some("AXButton" | "AXLink" | "AXGroup"))
+}
+
+/// Is this short and a control for a call? Only these are named from large
+/// windows: a chat's rows are also buttons, and their names hold messages.
+fn is_call_button(name: &str) -> bool {
+    use notchforge_core::calls::{ANSWER_WORDS, DECLINE_WORDS, HANG_UP_WORDS, LEAVE_WORDS, action_matches};
+    const CONTROLS: &[&str] = &["mute", "microphone", "camera", "speaker", "end ", "micro", "caméra", "terminer"];
+    name.chars().count() <= 24
+        && [ANSWER_WORDS, DECLINE_WORDS, HANG_UP_WORDS, LEAVE_WORDS, CONTROLS].iter().any(|w| action_matches(name, w))
+}
+
+/// The texts around a button: its nearest ancestor that says anything other
+/// than the call's own wording, which is where the caller's name would be.
+unsafe fn texts_around(button: CFTypeRef) -> Vec<String> {
+    let mut current = unsafe { copy_attr(button, "AXParent") };
+    for _ in 0..CALLER_LEVELS {
+        let Some(el) = current else { break };
+        if unsafe { attr_string(el.as_ptr(), "AXRole") }.as_deref() == Some("AXWindow") {
+            break;
+        }
+        let (found, _) = unsafe { texts(el.as_ptr()) };
+        if found.iter().any(|t| !notchforge_core::calls::is_call_wording(t)) {
+            return found;
+        }
+        current = unsafe { copy_attr(el.as_ptr(), "AXParent") };
+    }
+    Vec::new()
+}
+
+/// Does anything around a button talk about a call?
+unsafe fn call_mentioned_around(button: CFTypeRef) -> bool {
+    use notchforge_core::calls::mentions_call;
+    let mut current = unsafe { copy_attr(button, "AXParent") };
+    // Close by only: higher up, a whole conversation's text comes into it.
+    for _ in 0..CALL_WORDING_LEVELS {
+        let Some(el) = current else { break };
+        if unsafe { attr_string(el.as_ptr(), "AXRole") }.as_deref() == Some("AXWindow") {
+            break;
+        }
+        let (found, _) = unsafe { texts(el.as_ptr()) };
+        if found.iter().any(|t| mentions_call(t)) {
+            return true;
+        }
+        current = unsafe { copy_attr(el.as_ptr(), "AXParent") };
+    }
+    false
+}
+
+/// How many windows the app with this pid has, if they can be read.
+pub fn window_count(pid: i32) -> Option<usize> {
+    // SAFETY: AX calls on objects we own or borrow from owned arrays.
+    unsafe {
+        if AXIsProcessTrusted() == 0 {
+            return None;
+        }
+        let app = Owned::from_create(AXUIElementCreateApplication(pid))?;
+        let windows = copy_attr(app.as_ptr(), "AXWindows")?;
+        Some(CFArrayGetCount(windows.as_ptr()) as usize)
+    }
+}
+
+/// The titles of an app's windows. A browser's show its current tab.
+pub fn window_titles(pid: i32) -> Vec<String> {
+    let mut out = Vec::new();
+    // SAFETY: AX calls on objects we own or borrow from owned arrays.
+    unsafe {
+        if AXIsProcessTrusted() == 0 {
+            return out;
+        }
+        let Some(app) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return out };
+        let Some(windows) = copy_attr(app.as_ptr(), "AXWindows") else { return out };
+        for i in 0..CFArrayGetCount(windows.as_ptr()) {
+            if let Some(t) = attr_string(CFArrayGetValueAtIndex(windows.as_ptr(), i), "AXTitle") {
+                out.push(t);
+            }
+        }
+    }
+    out
+}
+
+/// Is the app with this pid showing answer and decline buttons?
+pub fn inspect_call_window(pid: i32, web_app: bool) -> CallWindow {
+    use notchforge_core::calls::{ANSWER_WORDS, DECLINE_WORDS, HANG_UP_WORDS, action_matches};
+    let mut out = CallWindow::default();
+    // SAFETY: AX calls on objects we own or borrow from owned arrays. An
+    // element kept past the walk is retained.
+    unsafe {
+        if AXIsProcessTrusted() == 0 {
+            out.report.push("Accessibility is not granted".to_owned());
+            return out;
+        }
+        let Some(app) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return out };
+        if web_app {
+            wake_web_accessibility(app.as_ptr());
+        }
+        let Some(windows) = copy_attr(app.as_ptr(), "AXWindows") else {
+            out.report.push("no windows readable".to_owned());
+            return out;
+        };
+        let count = CFArrayGetCount(windows.as_ptr());
+        out.report.push(format!("{count} windows"));
+        let mut budget = WALK_BUDGET;
+        for i in 0..count {
+            let win = CFArrayGetValueAtIndex(windows.as_ptr(), i);
+            let (mut answer, mut decline, mut elements) = (false, false, 0usize);
+            let mut buttons: Vec<String> = Vec::new();
+            let mut call_buttons: Vec<String> = Vec::new();
+            let mut window_texts: Vec<String> = Vec::new();
+            let mut ringing_words: Vec<String> = Vec::new();
+            let mut answer_el: Option<Owned> = None;
+            walk_newest_first(win, 0, &mut |e| {
+                elements += 1;
+                budget = budget.saturating_sub(1);
+                let role = attr_string(e, "AXRole");
+                match role.as_deref() {
+                    r if can_be_pressed(r) => {
+                        let name = button_name(e);
+                        // Long names are a chat's rows, which can mention anything.
+                        let named_for_call = name.chars().count() <= 24;
+                        if named_for_call && action_matches(&name, ANSWER_WORDS) && answer_el.is_none() {
+                            answer = true;
+                            answer_el = Owned::from_create(CFRetain(e));
+                        }
+                        decline |= named_for_call && action_matches(&name, DECLINE_WORDS);
+                        if named_for_call && action_matches(&name, HANG_UP_WORDS) {
+                            if !out.hang_up {
+                                out.report.push(format!("hang-up button {name:?}"));
+                            }
+                            out.hang_up = true;
+                        }
+                        if r == Some("AXButton") && !name.is_empty() && buttons.len() < 12 {
+                            buttons.push(name.clone());
+                        }
+                        if is_call_button(&name) && call_buttons.len() < 8 {
+                            call_buttons.push(name);
+                        }
+                    }
+                    Some("AXStaticText") => {
+                        if let Some(v) = attr_string(e, "AXValue").filter(|v| !v.trim().is_empty()) {
+                            if notchforge_core::calls::says_ringing_on_page(&v) && ringing_words.len() < 4 {
+                                ringing_words.push(v.clone());
+                            }
+                            if elements <= SMALL_WINDOW {
+                                window_texts.push(v);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                budget > 0 && !(answer && decline)
+            });
+            let title = attr_string(win, "AXTitle").unwrap_or_default();
+            let title_says_call = notchforge_core::calls::mentions_call(&title);
+            // Some apps show no readable buttons, but their title says it all.
+            if notchforge_core::calls::title_says_ringing(&title) && !(answer && decline) {
+                out.ringing = true;
+                out.report.push(format!("window {i} is ringing by its title, {elements} elements, no buttons"));
+                out.texts.extend(window_texts);
+                break;
+            }
+            let is_call = answer
+                && decline
+                && (title_says_call
+                    || call_buttons.iter().any(|b| {
+                        // Not a chat header's own "Video call" button.
+                        notchforge_core::calls::mentions_call(b)
+                            && (action_matches(b, ANSWER_WORDS) || action_matches(b, DECLINE_WORDS))
+                    })
+                    || answer_el.as_ref().is_some_and(|el| call_mentioned_around(el.as_ptr())));
+            if answer && decline && !is_call {
+                out.answer_and_decline = true;
+                out.report.push(format!("window {i}: answer and decline, but nothing about a call"));
+                continue;
+            }
+            if is_call {
+                out.ringing = true;
+                if title_says_call {
+                    out.texts.push(title.clone());
+                }
+                if let Some(el) = &answer_el {
+                    out.texts.extend(texts_around(el.as_ptr()));
+                }
+                out.texts.extend(window_texts);
+                out.report.push(format!("window {i} is ringing: buttons {call_buttons:?} text {:?}", out.texts));
+                break;
+            }
+            if elements <= SMALL_WINDOW {
+                out.report.push(format!(
+                    "window {i}: {elements} elements, title {title:?} buttons {buttons:?} text {window_texts:?}"
+                ));
+            } else {
+                out.report.push(format!(
+                    "window {i}: {elements} elements, call buttons {call_buttons:?}, ringing words {ringing_words:?}"
+                ));
+            }
+            if budget == 0 {
+                out.report.push("stopped early: too many elements".to_owned());
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Press the button matching `words` in a window of the app with this pid.
+pub fn press_window_button(pid: i32, words: &[&str]) -> bool {
+    let mut pressed = false;
+    // SAFETY: AX calls on objects we own or borrow from owned arrays.
+    unsafe {
+        if AXIsProcessTrusted() == 0 {
+            return false;
+        }
+        let Some(app) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return false };
+        let Some(windows) = copy_attr(app.as_ptr(), "AXWindows") else { return false };
+        let Some(press) = cf::cfstring("AXPress") else { return false };
+        let mut budget = WALK_BUDGET;
+        for i in 0..CFArrayGetCount(windows.as_ptr()) {
+            let win = CFArrayGetValueAtIndex(windows.as_ptr(), i);
+            walk_newest_first(win, 0, &mut |e| {
+                budget = budget.saturating_sub(1);
+                if !can_be_pressed(attr_string(e, "AXRole").as_deref()) {
+                    return budget > 0;
+                }
+                let name = button_name(e);
+                if name.chars().count() > 24 || !notchforge_core::calls::action_matches(&name, words) {
+                    return budget > 0;
+                }
+                let result = AXUIElementPerformAction(e, press.as_ptr());
+                pressed = result == kAXErrorSuccess || result == kAXErrorCannotComplete;
+                !pressed && budget > 0
+            });
+            if pressed {
+                break;
+            }
+        }
+    }
+    pressed
+}
+
+/// Open the native banner titled `title`, as a click on it would. A browser's
+/// call notification answers this way ("Click to answer").
+pub fn open_banner(title: &str) -> bool {
+    let mut opened = false;
+    // SAFETY: AX calls on objects we own or borrow from owned arrays.
+    unsafe {
+        if AXIsProcessTrusted() == 0 {
+            return false;
+        }
+        let Some(pid) = nc_pid() else { return false };
+        let Some(app) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return false };
+        let Some(windows) = copy_attr(app.as_ptr(), "AXWindows") else { return false };
+        let Some(press) = cf::cfstring("AXPress") else { return false };
+        for i in 0..CFArrayGetCount(windows.as_ptr()) {
+            let win = CFArrayGetValueAtIndex(windows.as_ptr(), i);
+            let (t, _) = texts(win);
+            if !t.iter().any(|s| s == title) {
+                continue;
+            }
+            walk(win, 0, &mut |e| {
+                // The banner itself, not one of the buttons on it.
+                if attr_string(e, "AXRole").as_deref() == Some("AXButton") {
+                    return true;
+                }
+                let mut names: CFTypeRef = std::ptr::null();
+                if AXUIElementCopyActionNames(e, &mut names) != kAXErrorSuccess {
+                    return true;
+                }
+                let Some(names) = Owned::from_create(names) else { return true };
+                for j in 0..CFArrayGetCount(names.as_ptr()) {
+                    let action = CFArrayGetValueAtIndex(names.as_ptr(), j);
+                    if cf::as_string(action).is_some_and(|n| n.contains("AXPress")) {
+                        opened = AXUIElementPerformAction(e, press.as_ptr()) == kAXErrorSuccess;
+                        return !opened;
+                    }
+                }
+                true
+            });
+            if opened {
+                break;
+            }
+        }
+    }
+    opened
+}
+
+/// Press the button or action on the native banner titled `title` whose name
+/// matches `words`. Returns whether one was found and pressed.
+pub fn press_banner_button(title: &str, words: &[&str]) -> bool {
+    let mut pressed = false;
+    // SAFETY: AX calls on objects we own or borrow from owned arrays.
+    unsafe {
+        if AXIsProcessTrusted() == 0 {
+            return false;
+        }
+        let Some(pid) = nc_pid() else { return false };
+        let Some(app) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return false };
+        let Some(windows) = copy_attr(app.as_ptr(), "AXWindows") else { return false };
+        for i in 0..CFArrayGetCount(windows.as_ptr()) {
+            let win = CFArrayGetValueAtIndex(windows.as_ptr(), i);
+            let (t, _) = texts(win);
+            if !t.iter().any(|s| s == title) {
+                continue;
+            }
+            walk(win, 0, &mut |e| {
+                // A real button, named by its title or description.
+                let named = ["AXTitle", "AXDescription"]
+                    .iter()
+                    .filter_map(|attr| attr_string(e, attr))
+                    .any(|n| notchforge_core::calls::action_matches(&n, words));
+                let role = attr_string(e, "AXRole").unwrap_or_default();
+                let mut names: CFTypeRef = std::ptr::null();
+                if AXUIElementCopyActionNames(e, &mut names) != kAXErrorSuccess {
+                    return true;
+                }
+                let Some(names) = Owned::from_create(names) else { return true };
+                for j in 0..CFArrayGetCount(names.as_ptr()) {
+                    let action = CFArrayGetValueAtIndex(names.as_ptr(), j);
+                    let Some(name) = cf::as_string(action) else { continue };
+                    // Banners list their buttons as named custom actions.
+                    let custom = notchforge_core::calls::action_matches(&name, words);
+                    if custom || (named && role == "AXButton" && name.contains("AXPress")) {
+                        AXUIElementPerformAction(e, action);
+                        pressed = true;
+                        return false;
+                    }
+                }
+                true
+            });
+            if pressed {
+                break;
+            }
+        }
+    }
+    pressed
+}
+
+// ── menu bar occupancy (wing dodging, notch placement) ──────────────────────
+
+/// Is Accessibility granted? Wing dodging and notch placement read the menu
+/// bar through it; without it nothing can be checked and the callers fail
+/// safe (wings hidden, pill centred).
+pub fn is_trusted() -> bool {
+    // SAFETY: a plain AX call.
+    unsafe { AXIsProcessTrusted() != 0 }
+}
+
+/// The menu bar item frames of the app owning `pid`'s menu, in AppKit
+/// coordinates on the screen with the menu bar. The frontmost app's menu bar
+/// covers the app menus left of the notch; the Control Center process owns the
+/// status items on its right.
+pub fn menu_bar_item_rects(pid: i32, primary_h: f64) -> Vec<Rect> {
+    if pid == 0 || !is_trusted() || pid == std::process::id() as i32 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    // SAFETY: AX calls on objects we own or borrow from owned arrays.
+    unsafe {
+        let Some(app_el) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return out };
+        let Some(menubar) = copy_attr(app_el.as_ptr(), "AXMenuBar") else { return out };
+        let Some(items) = copy_attr(menubar.as_ptr(), "AXChildren") else { return out };
+        for i in 0..CFArrayGetCount(items.as_ptr()) {
+            let item = CFArrayGetValueAtIndex(items.as_ptr(), i);
+            let (Some((x, y)), Some((w, h))) =
+                (ax_value(item, "AXPosition", kAXValueCGPointType), ax_value(item, "AXSize", kAXValueCGSizeType))
+            else {
+                continue;
+            };
+            // AX coordinates are top-left origin, like CG.
+            if w > 0.0 && h > 0.0 {
+                out.push(Rect::new(x, primary_h - y - h, w, h));
+            }
+        }
+    }
+    out
+}
+
+/// The frontmost app's menu items (the app menus left of the notch).
+pub fn app_menu_rects(primary_h: f64) -> Vec<Rect> {
+    match NSWorkspace::sharedWorkspace().frontmostApplication() {
+        Some(app) => menu_bar_item_rects(app.processIdentifier(), primary_h),
+        None => Vec::new(),
+    }
+}
+
+/// System status items (Wi-Fi, battery, clock side). On current macOS they
+/// render inside the menu bar window, so the window list can't see them —
+/// they are exposed by the Control Center process instead.
+pub fn status_item_rects(primary_h: f64) -> Vec<Rect> {
+    let cc = NSWorkspace::sharedWorkspace()
+        .runningApplications()
+        .iter()
+        .find(|a| {
+            let id = a.bundleIdentifier();
+            id.as_deref().is_some_and(|s| s.to_string() == "com.apple.controlcenter")
+        })
+        .map(|a| a.processIdentifier())
+        .unwrap_or(0);
+    menu_bar_item_rects(cc, primary_h)
+}
+
+/// Press the "Reply" button on the banner whose texts include `title`, which
+/// expands the app's inline reply field (macOS keeps the banner on screen
+/// while that field is open). `false` when there is no such banner or button.
+pub fn press_banner_reply(title: &str) -> bool {
+    press_banner_button(title, notchforge_core::calls::REPLY_WORDS)
+}
+
+/// Deliver a reply typed in the notch: find the banner with its reply field
+/// already expanded (see [`press_banner_reply`]), type `text` into it, focus
+/// it and confirm. The originating app sends the message through its own UI —
+/// there is no public API to deliver a reply directly.
+pub fn fill_banner_reply(title: &str, text: &str) -> bool {
+    let mut delivered = false;
+    // SAFETY: AX calls on objects we own or borrow from owned arrays.
+    unsafe {
+        if AXIsProcessTrusted() == 0 {
+            return false;
+        }
+        let Some(pid) = nc_pid() else { return false };
+        let Some(app) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return false };
+        let Some(windows) = copy_attr(app.as_ptr(), "AXWindows") else { return false };
+        for i in 0..CFArrayGetCount(windows.as_ptr()) {
+            let win = CFArrayGetValueAtIndex(windows.as_ptr(), i);
+            let (t, _) = texts(win);
+            if !t.iter().any(|s| s == title) {
+                continue;
+            }
+            // The reply field: a text area inside the matched banner.
+            if walk_text_area(win, 0, text) {
+                delivered = true;
+                break;
+            }
+        }
+    }
+    delivered
+}
+
+/// unsafe: AX tree walk; sets the first unfilled text area's value, focuses
+/// it and performs AXConfirm when the app offers it.
+unsafe fn walk_text_area(el: CFTypeRef, depth: usize, text: &str) -> bool {
+    // SAFETY: the whole walk touches only AX objects we own or borrow from
+    // owned arrays, within this call's lifetime.
+    unsafe {
+    if depth > MAX_DEPTH {
+        return false;
+    }
+    if attr_string(el, "AXRole").as_deref() == Some("AXTextArea") {
+        let filled = attr_string(el, "AXValue").is_some_and(|v| !v.trim().is_empty());
+        if !filled {
+            let Some(value) = cf::cfstring(text) else { return false };
+            let focused = cf::cfstring("AXFocused");
+            if let Some(focused) = &focused {
+                AXUIElementSetAttributeValue(el, focused.as_ptr(), kCFBooleanTrue);
+            }
+            AXUIElementSetAttributeValue(el, value.as_ptr(), kCFBooleanTrue);
+            // Some apps confirm the field directly; others need a Return key,
+            // which the caller posts after focusing.
+            let mut names: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyActionNames(el, &mut names) == kAXErrorSuccess {
+                if let Some(names) = Owned::from_create(names) {
+                    for j in 0..CFArrayGetCount(names.as_ptr()) {
+                        let action = CFArrayGetValueAtIndex(names.as_ptr(), j);
+                        if cf::as_string(action).as_deref() == Some("AXConfirm") {
+                            AXUIElementPerformAction(el, action);
+                            break;
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+    }
+    if let Some(children) = copy_attr(el, "AXChildren") {
+        for i in 0..CFArrayGetCount(children.as_ptr()) {
+            let child = CFArrayGetValueAtIndex(children.as_ptr(), i);
+            if walk_text_area(child, depth + 1, text) {
+                return true;
+            }
+        }
+    }
+    false
+    }
+}
+
+/// An `AXValue` attribute (position or size) as two floats.
+unsafe fn ax_value(el: CFTypeRef, name: &str, kind: u32) -> Option<(f64, f64)> {
+    let v = unsafe { copy_attr(el, name) }?;
+    let mut out = crate::ffi::cg::CGPoint { x: 0.0, y: 0.0 };
+    // SAFETY: out is a CGPoint, the right backing store for both value kinds.
+    let ok = unsafe { AXValueGetValue(v.as_ptr(), kind, &mut out as *mut crate::ffi::cg::CGPoint as *mut c_void) };
+    (ok != 0).then_some((out.x, out.y))
 }
 
 #[cfg(test)]

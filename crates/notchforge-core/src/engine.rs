@@ -7,11 +7,15 @@
 //! UI updates, never a hundred.
 
 use crate::apps::AppRef;
+use crate::calls::{
+    ACTIVE_GONE_MS, ActiveCall, Call, CallId, CallKind, ENDED_QUIET_MS, RING_TIMEOUT_MS, Recognised, UNKNOWN_CALLER,
+    WINDOW_GONE_MS, call_app_name, looks_call_like, recognise, same_call,
+};
 use crate::config::{Config, Paths};
 use crate::model::{
-    AUTH_THREAD_AGENT, AUTH_THREAD_SPOTIFY, AgentUsage, AudioState, BatteryStatus, DeviceBattery, FocusState,
-    MediaPlayer, MediaState, NewNotification, Notification, NotificationId, NotificationKind, Origin, PlaylistStatus,
-    Priority, ProviderStatus, TrayItem, TrayItemId, Weather,
+    AUTH_THREAD_AGENT, AUTH_THREAD_SPOTIFY, AgentLimits, AgentUsage, AudioState, BatteryStatus, CalendarState,
+    DeviceBattery, FocusState, MediaPlayer, MediaState, NewNotification, Notification, NotificationId, NotificationKind, Origin,
+    PlaylistStatus, Priority, ProviderStatus, TrayItem, TrayItemId, UsageAgent, Weather,
 };
 use crate::pipeline::{Outcome, Pipeline, PipelineFlags};
 use crate::provider::{ProviderCommand, ProviderEvent, Shutdown};
@@ -59,6 +63,37 @@ pub enum Command {
     },
     /// Forget every remembered Allow / Deny, so agents are asked again.
     ForgetAgentDecisions,
+    /// A call was answered or declined: stop showing it.
+    EndCall(CallId),
+    /// Show this call first.
+    PromoteCall(CallId),
+    /// Calls that stopped ringing become missed calls.
+    ExpireCalls,
+    /// A ringing call was picked up from the notch: keep showing it.
+    CallAnswered(CallId),
+    /// Answer was pressed; it's picked up once the app's button can be pressed.
+    CallAnswering(CallId),
+    /// The app's own answer button was pressed, in this process.
+    CallAnsweredIn(CallId, i32),
+    /// An app shows a hang-up button: a call ringing in it was picked up there,
+    /// and a call in progress is still going.
+    WindowInCall {
+        pid: i32,
+    },
+    /// The app with the call in progress is still making sound.
+    ActiveCallSound,
+    /// The call in progress is over.
+    EndActiveCall,
+    /// Ring a sample call, so the call view can be tried.
+    TestCall,
+    /// An app is ringing in its own window, or still is.
+    WindowCall {
+        pid: i32,
+        bundle_id: String,
+        source: String,
+        caller: String,
+        kind: CallKind,
+    },
 }
 
 /// Immutable view of the state handed to the UI.
@@ -69,10 +104,15 @@ pub struct Snapshot {
     pub battery: Option<BatteryStatus>,
     pub devices: Vec<DeviceBattery>,
     pub weather: Option<Weather>,
+    pub calendar: CalendarState,
     pub focus: FocusState,
     pub audio: AudioState,
     pub media: MediaState,
     pub usage: AgentUsage,
+    /// Ringing now, the one shown first at the front.
+    pub calls: Vec<Call>,
+    /// The call you picked up.
+    pub active_call: Option<ActiveCall>,
     /// Ranked: priority, then recency.
     pub notifications: Vec<Notification>,
     pub latest: Option<Notification>,
@@ -91,6 +131,8 @@ impl Snapshot {
     /// Like [`Snapshot::wants_wings`], optionally ignoring playing media.
     pub fn wants_wings_with(&self, media: bool) -> bool {
         self.unread > 0
+            || !self.calls.is_empty()
+            || self.active_call.is_some()
             || !self.tray.is_empty()
             || (media && (self.media.is_playing() || self.audio.is_playing()))
             || self.battery.as_ref().is_some_and(|b| b.charging || b.is_low())
@@ -119,6 +161,11 @@ struct AppState {
     audio: AudioState,
     media: MediaState,
     usage: AgentUsage,
+    calls: Vec<Call>,
+    active_call: Option<ActiveCall>,
+    next_call: u64,
+    /// When each recent call ended, so late copies of it don't ring again.
+    ended_calls: BTreeMap<String, i64>,
     pipeline: Pipeline,
     tray: Tray,
     providers: BTreeMap<&'static str, ProviderStatus>,
@@ -129,6 +176,27 @@ struct AppState {
     trust: TrustStore,
     /// Notifications from agents still waiting for a decision, by rule key.
     held: BTreeMap<String, Vec<NewNotification>>,
+    /// Antigravity's quota tile, owned by its own provider (the usage
+    /// provider's snapshots don't carry it).
+    antigravity_limits: Option<AgentLimits>,
+    /// Calendar accounts and upcoming events, owned by the calendar provider.
+    calendar: CalendarState,
+}
+
+/// Temporary, while call detection is being tuned against real apps: note that
+/// a calling app sent something, with its wording only if it mentions a call.
+fn note_for_call_diagnostics(n: &NewNotification, recognised: bool) {
+    let bundle = n.app.bundle_id.as_deref().unwrap_or("");
+    if call_app_name(bundle).is_none() && !crate::apps::is_browser(bundle) {
+        tracing::info!(bundle, "call diagnostics: notification from another app");
+        return;
+    }
+    let text = format!("{} | {} | {}", n.title, n.subtitle.as_deref().unwrap_or(""), n.body);
+    if looks_call_like(&text) {
+        tracing::info!(bundle, recognised, %text, "call diagnostics: notification");
+    } else {
+        tracing::info!(bundle, recognised, "call diagnostics: notification, no call wording");
+    }
 }
 
 /// Cheap handle for sending commands from any thread.
@@ -247,10 +315,24 @@ impl Engine {
             battery: s.battery.clone(),
             devices: s.devices.clone(),
             weather: s.weather.clone(),
+            calendar: s.calendar.clone(),
             focus: s.focus.clone(),
             audio: s.audio.clone(),
             media: s.media.clone(),
-            usage: s.usage.clone(),
+            usage: {
+                {
+                    let mut usage = s.usage.clone();
+                    usage.limits.retain(|l| l.agent != UsageAgent::Antigravity);
+                    if let Some(a) = &s.antigravity_limits {
+                        {
+                            usage.limits.push(a.clone());
+                        }
+                    }
+                    usage
+                }
+            },
+            calls: s.calls.clone(),
+            active_call: s.active_call.clone(),
             notifications: s.pipeline.ranked(),
             latest: s.pipeline.latest().cloned(),
             unread: s.pipeline.unread_count(),
@@ -293,6 +375,16 @@ impl Engine {
             ProviderEvent::Audio(a) => {
                 let changed = self.state.audio != a;
                 self.state.audio = a;
+                changed
+            }
+            ProviderEvent::Limits(l) => {
+                let changed = self.state.antigravity_limits.as_ref() != Some(&l);
+                self.state.antigravity_limits = Some(l);
+                changed
+            }
+            ProviderEvent::Calendar(c) => {
+                let changed = self.state.calendar != c;
+                self.state.calendar = c;
                 changed
             }
             ProviderEvent::Usage(u) => {
@@ -379,6 +471,62 @@ impl Engine {
                 false
             }
             Command::Authorize { key, allow } => self.authorize(&key, allow),
+            Command::EndCall(id) => self.end_call(id),
+            Command::PromoteCall(id) => {
+                let Some(i) = self.state.calls.iter().position(|c| c.id == id) else { return false };
+                self.state.calls[..=i].rotate_right(1);
+                true
+            }
+            Command::ExpireCalls => self.expire_calls(now_ms()),
+            Command::CallAnswered(id) => self.pick_up(id, now_ms()),
+            Command::CallAnswering(id) => match self.state.calls.iter_mut().find(|c| c.id == id) {
+                Some(c) => {
+                    c.answering = true;
+                    c.last_seen_ms = now_ms();
+                    true
+                }
+                None => false,
+            },
+            Command::CallAnsweredIn(id, pid) => {
+                if let Some(c) = self.state.calls.iter_mut().find(|c| c.id == id) {
+                    c.window_pid = Some(pid);
+                }
+                self.pick_up(id, now_ms())
+            }
+            Command::WindowInCall { pid } => {
+                let now = now_ms();
+                if let Some(a) = self.state.active_call.as_mut().filter(|a| a.window_pid == Some(pid)) {
+                    a.last_seen_ms = now;
+                    return false;
+                }
+                match self.state.calls.iter().find(|c| c.window_pid == Some(pid)).map(|c| c.id) {
+                    Some(id) => self.pick_up(id, now),
+                    None => false,
+                }
+            }
+            Command::ActiveCallSound => {
+                if let Some(a) = self.state.active_call.as_mut() {
+                    a.last_seen_ms = now_ms();
+                }
+                false
+            }
+            Command::EndActiveCall => self.state.active_call.take().is_some(),
+            Command::TestCall => {
+                let app = AppRef { known: None, bundle_id: None, display_name: "Notchisland".into(), platform: None };
+                let seed =
+                    Recognised { caller: "Test Caller".into(), kind: CallKind::Audio, source: "Notchisland".into() };
+                // Asked for on purpose, so it isn't a late copy of the last test.
+                self.state.ended_calls.clear();
+                self.ring(seed, app, None, String::new(), None, now_ms())
+            }
+            Command::WindowCall { pid, bundle_id, source, caller, kind } => {
+                if !self.config().notifications.incoming_calls {
+                    return false;
+                }
+                let app =
+                    AppRef { known: None, bundle_id: Some(bundle_id), display_name: source.clone(), platform: None };
+                self.ring(Recognised { caller, kind, source }, app, None, String::new(), Some(pid), now_ms())
+            }
             Command::ForgetAgentDecisions => {
                 self.state.trust.clear();
                 self.persist_trust();
@@ -424,6 +572,7 @@ impl Engine {
             timestamp_ms: now_ms(),
             thread: Some(thread),
             url: None,
+            tokens: None,
         };
         self.ingest_now(prompt);
         true
@@ -453,8 +602,12 @@ impl Engine {
     /// how it ended.
     fn spotify_prompt(&mut self, was_signing_in: bool) {
         let now_signing_in = self.spotify_signing_in();
-        let spotify =
-            AppRef { known: None, bundle_id: Some("com.spotify.client".into()), display_name: "Spotify".into() };
+        let spotify = AppRef {
+            known: None,
+            bundle_id: Some("com.spotify.client".into()),
+            display_name: "Spotify".into(),
+            platform: None,
+        };
         let note = |kind, priority, title: &str, body: String, thread: Option<String>| NewNotification {
             app: spotify.clone(),
             origin: Origin::Internal,
@@ -466,6 +619,7 @@ impl Engine {
             timestamp_ms: now_ms(),
             thread,
             url: None,
+            tokens: None,
         };
         if now_signing_in && !was_signing_in {
             self.ingest_now(note(
@@ -497,10 +651,155 @@ impl Engine {
 
     /// Entry point for every incoming notification: agents may need consent
     /// first, and nothing external may pose as an authorization prompt.
+    /// Start ringing, or note that a call already ringing is still going.
+    fn ring(
+        &mut self,
+        seed: Recognised,
+        app: AppRef,
+        url: Option<String>,
+        banner_title: String,
+        window_pid: Option<i32>,
+        now: i64,
+    ) -> bool {
+        let call = Call {
+            id: CallId(self.state.next_call),
+            caller: seed.caller,
+            kind: seed.kind,
+            source: seed.source,
+            app,
+            url,
+            banner_title,
+            window_pid,
+            last_seen_ms: now,
+            answering: false,
+        };
+        let key = call.key();
+        if self.state.ended_calls.iter().any(|(k, at)| now - at < ENDED_QUIET_MS && same_call(k, &key)) {
+            return false;
+        }
+        if let Some(c) = self.state.calls.iter_mut().find(|c| same_call(&c.key(), &key)) {
+            c.last_seen_ms = now;
+            // The notification and the window are the same call; keep the buttons.
+            c.window_pid = c.window_pid.or(window_pid);
+            if c.caller == UNKNOWN_CALLER && call.caller != UNKNOWN_CALLER {
+                c.caller = call.caller;
+                return true;
+            }
+            return false;
+        }
+        self.state.next_call += 1;
+        self.state.calls.push(call);
+        true
+    }
+
+    /// A ringing call was picked up: it stops ringing and starts its clock.
+    fn pick_up(&mut self, id: CallId, now: i64) -> bool {
+        let Some(call) = self.state.calls.iter().find(|c| c.id == id).cloned() else { return false };
+        self.end_call(id);
+        self.state.active_call = Some(ActiveCall {
+            caller: call.caller,
+            kind: call.kind,
+            source: call.source,
+            app: call.app,
+            window_pid: call.window_pid,
+            started_ms: now,
+            last_seen_ms: now,
+        });
+        true
+    }
+
+    fn end_call(&mut self, id: CallId) -> bool {
+        let Some(i) = self.state.calls.iter().position(|c| c.id == id) else { return false };
+        let call = self.state.calls.remove(i);
+        let now = now_ms();
+        self.state.ended_calls.retain(|_, at| now - *at < ENDED_QUIET_MS);
+        self.state.ended_calls.insert(call.key(), now);
+        true
+    }
+
+    /// Calls nothing has confirmed for a while stopped ringing unanswered.
+    fn expire_calls(&mut self, now: i64) -> bool {
+        // A notification's call keeps ringing while its tab is out of view.
+        let gone: Vec<Call> = self
+            .state
+            .calls
+            .iter()
+            .filter(|c| {
+                let watched = c.window_pid.is_some() && (c.answering || c.banner_title.is_empty());
+                now - c.last_seen_ms >= if watched { WINDOW_GONE_MS } else { RING_TIMEOUT_MS }
+            })
+            .cloned()
+            .collect();
+        for call in &gone {
+            // Its buttons went while the app kept making sound: it was picked up
+            // there. A browser may just be playing something in another tab.
+            let picked_up = call.window_pid.is_some()
+                && call.app.bundle_id.as_deref().is_some_and(|b| {
+                    (call.answering || !crate::apps::is_browser(b))
+                        && self.state.audio.sources.iter().any(|s| s.bundle_id.as_deref() == Some(b))
+                });
+            if picked_up {
+                self.pick_up(call.id, now);
+                continue;
+            }
+            self.end_call(call.id);
+            self.ingest_now(NewNotification {
+                app: call.app.clone(),
+                origin: Origin::Internal,
+                kind: NotificationKind::Info,
+                priority: Some(Priority::High),
+                title: "Missed call".into(),
+                subtitle: None,
+                body: format!("{} · {}", call.caller, call.source),
+                timestamp_ms: now,
+                thread: None,
+                url: call.url.clone(),
+                tokens: None,
+            });
+        }
+        // A sample call has no app to watch, so it lasts until it's hung up.
+        let call_over = self
+            .state
+            .active_call
+            .as_ref()
+            .is_some_and(|a| a.app.bundle_id.is_some() && now - a.last_seen_ms >= ACTIVE_GONE_MS);
+        if call_over {
+            self.state.active_call = None;
+        }
+        !gone.is_empty() || call_over
+    }
+
     fn ingest(&mut self, n: NewNotification) -> bool {
+        // Token usage reported along with an event is telemetry, not a message
+        // the notch should show: route it to the usage provider instead.
+        if let Some(usage) = &n.tokens {
+            if let Some(agent) = UsageAgent::from_source(&n.app.display_name) {
+                tracing::info!(agent = agent.display_name(), model = ?usage.model, counts_input = usage.counts.input, counts_output = usage.counts.output, "usage reported by an agent");
+                let _ = self.provider_commands.send(ProviderCommand::Usage {
+                    agent,
+                    model: usage.model.clone(),
+                    session: n.thread.clone(),
+                    counts: usage.counts,
+                    at_ms: n.timestamp_ms,
+                });
+                return false;
+            }
+            tracing::debug!(source = %n.app.display_name, "usage reported for an unknown agent; ignoring");
+            return false;
+        }
         if n.kind == NotificationKind::Authorization && n.origin != Origin::Internal {
             tracing::warn!(origin = ?n.origin, "dropped a forged authorization prompt");
             return false;
+        }
+        if matches!(n.origin, Origin::NotificationCenterDb | Origin::AccessibilityBanner)
+            && self.config().notifications.incoming_calls
+        {
+            let seed = recognise(&n.app, &n.title, n.subtitle.as_deref(), &n.body);
+            note_for_call_diagnostics(&n, seed.is_some());
+            if let Some(seed) = seed {
+                let (app, url, title) = (n.app, n.url, n.title);
+                return self.ring(seed, app, url, title, None, now_ms());
+            }
         }
         let from_agent = matches!(n.origin, Origin::AgentWebhook | Origin::AgentSocket | Origin::AgentInbox);
         if from_agent && self.config().agents.require_approval {
@@ -542,7 +841,7 @@ impl Engine {
 
     fn internal(&mut self, title: String, body: String, priority: Priority) {
         let n = NewNotification {
-            app: AppRef { known: None, bundle_id: None, display_name: "Notchisland".into() },
+            app: AppRef { known: None, bundle_id: None, display_name: "Notchisland".into(), platform: None },
             origin: Origin::Internal,
             kind: NotificationKind::Info,
             priority: Some(priority),
@@ -552,6 +851,7 @@ impl Engine {
             timestamp_ms: now_ms(),
             thread: None,
             url: None,
+            tokens: None,
         };
         self.ingest(n);
     }
@@ -644,6 +944,7 @@ mod tests {
             timestamp_ms: now_ms(),
             thread: None,
             url: None,
+            tokens: None,
         }
     }
 
@@ -842,6 +1143,55 @@ mod tests {
     }
 
     #[test]
+    fn reported_tokens_reach_the_tracker_and_show_nothing() {
+        // Own the command receiver so the broadcast can be inspected.
+        let mut cfg = Config::default();
+        cfg.agents.require_approval = false;
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("nf-engine-usage-{}-{n}", now_ms()));
+        let paths = Arc::new(Paths::rooted(&dir));
+        let (cfg_tx, _rx) = watch::channel(Arc::new(cfg));
+        let rec = Arc::new(Recorder::default());
+        let (_ev_tx, ev_rx) = mpsc::channel(1024);
+        let (cmd_tx, mut cmd_rx) = tokio::sync::broadcast::channel(crate::provider::COMMAND_CAPACITY);
+        let (mut e, _h) = Engine::new(cfg_tx, paths, rec.clone(), Arc::new(Notify::new()), cmd_tx, ev_rx);
+        let note = NewNotification {
+            app: AppRef {
+                known: Some(KnownApp::GenericAgent),
+                bundle_id: None,
+                display_name: "gemini".into(),
+                platform: None,
+            },
+            origin: Origin::AgentWebhook,
+            kind: NotificationKind::Info,
+            priority: None,
+            title: "turn".into(),
+            subtitle: None,
+            body: String::new(),
+            timestamp_ms: now_ms(),
+            thread: Some("sess-9".into()),
+            url: None,
+            tokens: Some(crate::model::ReportedUsage {
+                counts: crate::model::TokenCounts { input: 1200, output: 340, ..Default::default() },
+                model: Some("gemini-3-flash".into()),
+            }),
+        };
+        e.apply_event(ProviderEvent::Notification(note));
+        assert_eq!(e.snapshot().notifications.len(), 0, "usage is telemetry, not a message");
+        let cmd = cmd_rx.try_recv().expect("the usage command was broadcast");
+        match cmd {
+            crate::provider::ProviderCommand::Usage { agent, model, session, counts, .. } => {
+                assert_eq!(agent, UsageAgent::Gemini);
+                assert_eq!(model.as_deref(), Some("gemini-3-flash"));
+                assert_eq!(session.as_deref(), Some("sess-9"));
+                assert_eq!(counts.input, 1200);
+            }
+            other => panic!("expected a Usage command, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn denying_drops_the_held_notifications_and_stays_quiet() {
         let (mut e, _h, _rec, _tx) = ask_engine();
         e.apply_event(ProviderEvent::Notification(agent_note("one")));
@@ -920,5 +1270,239 @@ mod tests {
         assert_eq!(snap.notifications.len(), 1);
         assert_eq!(snap.notifications[0].kind, NotificationKind::Error);
         assert_eq!(snap.notifications[0].body, "access_denied");
+    }
+
+    fn call_note(title: &str, body: &str) -> NewNotification {
+        NewNotification {
+            app: AppRef {
+                known: None,
+                bundle_id: Some("net.whatsapp.WhatsApp".into()),
+                display_name: "WhatsApp".into(),
+                platform: None,
+            },
+            origin: Origin::NotificationCenterDb,
+            kind: NotificationKind::Message,
+            priority: None,
+            title: title.into(),
+            subtitle: None,
+            body: body.into(),
+            timestamp_ms: now_ms(),
+            thread: None,
+            url: None,
+            tokens: None,
+        }
+    }
+
+    #[test]
+    fn a_call_rings_instead_of_notifying() {
+        let (mut e, _h, _r, _tx) = engine();
+        assert!(e.apply_event(ProviderEvent::Notification(call_note("Léa", "Incoming video call"))));
+        let snap = e.snapshot();
+        assert_eq!(snap.calls.len(), 1);
+        assert_eq!(snap.calls[0].caller, "Léa");
+        assert!(snap.notifications.is_empty());
+        assert!(snap.wants_wings());
+        // Its second copy isn't a second call.
+        e.apply_event(ProviderEvent::Notification(call_note("Léa", "Incoming video call")));
+        assert_eq!(e.snapshot().calls.len(), 1);
+        // An ordinary message is still a message.
+        e.apply_event(ProviderEvent::Notification(call_note("Léa", "call me later")));
+        assert_eq!(e.snapshot().notifications.len(), 1);
+    }
+
+    #[test]
+    fn several_calls_stack_and_can_be_reordered() {
+        let (mut e, _h, _r, _tx) = engine();
+        for who in ["A", "B", "C"] {
+            e.apply_event(ProviderEvent::Notification(call_note(who, "Incoming call")));
+        }
+        let ids: Vec<_> = e.snapshot().calls.iter().map(|c| c.id).collect();
+        e.apply_command(Command::PromoteCall(ids[2]));
+        let order: Vec<_> = e.snapshot().calls.iter().map(|c| c.caller.clone()).collect();
+        assert_eq!(order, ["C", "A", "B"]);
+        e.apply_command(Command::EndCall(ids[2]));
+        assert_eq!(e.snapshot().calls.len(), 2);
+        // A late copy of the ended call doesn't ring again.
+        e.apply_event(ProviderEvent::Notification(call_note("C", "Incoming call")));
+        assert_eq!(e.snapshot().calls.len(), 2);
+    }
+
+    #[test]
+    fn an_unanswered_call_becomes_a_missed_call() {
+        let (mut e, _h, _r, _tx) = engine();
+        e.apply_event(ProviderEvent::Notification(call_note("Léa", "Incoming call")));
+        assert!(!e.expire_calls(now_ms() + 1000), "still ringing");
+        assert!(e.expire_calls(now_ms() + RING_TIMEOUT_MS + 1000));
+        let snap = e.snapshot();
+        assert!(snap.calls.is_empty());
+        assert_eq!(snap.notifications[0].title, "Missed call");
+        assert!(snap.notifications[0].body.contains("Léa"));
+    }
+
+    #[test]
+    fn a_ringing_window_is_a_call_until_its_buttons_go() {
+        let (mut e, _h, _r, _tx) = engine();
+        let ring = || Command::WindowCall {
+            pid: 42,
+            bundle_id: "us.zoom.xos".into(),
+            source: "Zoom".into(),
+            caller: "Sam".into(),
+            kind: CallKind::Video,
+        };
+        e.apply_command(ring());
+        e.apply_command(ring());
+        let snap = e.snapshot();
+        assert_eq!(snap.calls.len(), 1);
+        assert_eq!(snap.calls[0].window_pid, Some(42));
+        assert!(!e.expire_calls(now_ms() + 1000), "still ringing");
+        assert!(e.expire_calls(now_ms() + WINDOW_GONE_MS + 1000), "the window went away");
+        assert_eq!(e.snapshot().notifications[0].title, "Missed call");
+    }
+
+    #[test]
+    fn answering_starts_a_call_that_ends_when_its_signs_stop() {
+        let (mut e, _h, _r, _tx) = engine();
+        let ring = Command::WindowCall {
+            pid: 7,
+            bundle_id: "com.hnc.Discord".into(),
+            source: "Discord".into(),
+            caller: "Sam".into(),
+            kind: CallKind::Audio,
+        };
+        e.apply_command(ring);
+        let id = e.snapshot().calls[0].id;
+        e.apply_command(Command::CallAnswered(id));
+        let snap = e.snapshot();
+        assert!(snap.calls.is_empty(), "it stopped ringing");
+        assert_eq!(snap.active_call.as_ref().map(|a| a.caller.as_str()), Some("Sam"));
+        assert!(snap.wants_wings());
+        assert!(snap.notifications.is_empty(), "an answered call isn't missed");
+        // Its hang-up button keeps it going; without any sign, it ends.
+        e.apply_command(Command::WindowInCall { pid: 7 });
+        assert!(!e.expire_calls(now_ms() + 1000));
+        assert!(e.expire_calls(now_ms() + ACTIVE_GONE_MS + 1000));
+        assert!(e.snapshot().active_call.is_none());
+    }
+
+    #[test]
+    fn a_call_picked_up_in_the_app_is_not_missed() {
+        let (mut e, _h, _r, _tx) = engine();
+        e.apply_command(Command::WindowCall {
+            pid: 9,
+            bundle_id: "net.whatsapp.WhatsApp".into(),
+            source: "WhatsApp".into(),
+            caller: "Léa".into(),
+            kind: CallKind::Audio,
+        });
+        e.apply_command(Command::WindowInCall { pid: 9 });
+        let snap = e.snapshot();
+        assert!(snap.calls.is_empty());
+        assert!(snap.active_call.is_some());
+        assert!(snap.notifications.is_empty());
+    }
+
+    fn sound_from(e: &mut Engine, bundle: &str) {
+        e.state.audio.sources = vec![crate::model::AudioSource {
+            pid: 1,
+            name: "App".into(),
+            bundle_id: Some(bundle.into()),
+            app_path: None,
+            device_uids: Vec::new(),
+        }];
+    }
+
+    fn window_call(pid: i32, bundle: &str, caller: &str) -> Command {
+        Command::WindowCall {
+            pid,
+            bundle_id: bundle.into(),
+            source: "Messenger in Dia".into(),
+            caller: caller.into(),
+            kind: CallKind::Audio,
+        }
+    }
+
+    #[test]
+    fn answering_out_of_view_is_not_picked_up_until_the_button_is_pressed() {
+        let (mut e, _h, _r, _tx) = engine();
+        e.apply_command(window_call(7, "company.thebrowser.dia", "Léa"));
+        let id = e.snapshot().calls[0].id;
+        e.apply_command(Command::CallAnswering(id));
+        let snap = e.snapshot();
+        assert!(snap.active_call.is_none(), "still ringing");
+        assert!(snap.calls[0].answering);
+        e.apply_command(Command::CallAnsweredIn(id, 9));
+        let snap = e.snapshot();
+        assert!(snap.calls.is_empty());
+        assert_eq!(snap.active_call.expect("in a call").window_pid, Some(9));
+    }
+
+    #[test]
+    fn a_caller_who_cant_be_read_is_not_a_second_call() {
+        let (mut e, _h, _r, _tx) = engine();
+        let dia = "company.thebrowser.dia";
+        e.apply_command(window_call(7, dia, UNKNOWN_CALLER));
+        assert!(e.apply_command(window_call(7, dia, "Léa")), "learned the name");
+        e.apply_command(window_call(7, dia, UNKNOWN_CALLER));
+        let snap = e.snapshot();
+        assert_eq!(snap.calls.len(), 1);
+        assert_eq!(snap.calls[0].caller, "Léa");
+        // Declined, it doesn't come back while its buttons are still fading.
+        e.apply_command(Command::EndCall(snap.calls[0].id));
+        assert!(!e.apply_command(window_call(7, dia, UNKNOWN_CALLER)));
+        assert!(e.snapshot().calls.is_empty());
+    }
+
+    #[test]
+    fn buttons_gone_with_sound_on_is_a_call_picked_up_in_the_app() {
+        let (mut e, _h, _r, _tx) = engine();
+        e.apply_command(window_call(7, "com.hnc.Discord", "Léa"));
+        sound_from(&mut e, "com.hnc.Discord");
+        e.expire_calls(now_ms() + WINDOW_GONE_MS + 1000);
+        let snap = e.snapshot();
+        assert!(snap.active_call.is_some());
+        assert!(snap.notifications.is_empty());
+    }
+
+    #[test]
+    fn a_browser_making_sound_only_counts_once_answer_was_pressed() {
+        let dia = "company.thebrowser.dia";
+        let (mut e, _h, _r, _tx) = engine();
+        e.apply_command(window_call(7, dia, "Léa"));
+        sound_from(&mut e, dia);
+        e.expire_calls(now_ms() + WINDOW_GONE_MS + 1000);
+        let snap = e.snapshot();
+        assert!(snap.active_call.is_none(), "may be a video in another tab");
+        assert_eq!(snap.notifications[0].title, "Missed call");
+
+        let (mut e, _h, _r, _tx) = engine();
+        e.apply_command(window_call(7, dia, "Léa"));
+        let id = e.snapshot().calls[0].id;
+        e.apply_command(Command::CallAnswering(id));
+        sound_from(&mut e, dia);
+        e.expire_calls(now_ms() + WINDOW_GONE_MS + 1000);
+        assert!(e.snapshot().active_call.is_some());
+    }
+
+    #[test]
+    fn hanging_up_ends_the_call() {
+        let (mut e, _h, _r, _tx) = engine();
+        e.apply_command(Command::TestCall);
+        let id = e.snapshot().calls[0].id;
+        e.apply_command(Command::CallAnswered(id));
+        assert!(!e.expire_calls(now_ms() + ACTIVE_GONE_MS + 1000), "a sample call waits to be hung up");
+        assert!(e.apply_command(Command::EndActiveCall));
+        assert!(e.snapshot().active_call.is_none());
+    }
+
+    #[test]
+    fn calls_can_be_switched_off() {
+        let (mut e, _h, _r, _tx) = engine();
+        let mut cfg = (*e.config()).clone();
+        cfg.notifications.incoming_calls = false;
+        e.apply_command(Command::UpdateConfig(Box::new(cfg)));
+        e.apply_event(ProviderEvent::Notification(call_note("Léa", "Incoming call")));
+        let snap = e.snapshot();
+        assert!(snap.calls.is_empty());
+        assert_eq!(snap.notifications.len(), 1);
     }
 }

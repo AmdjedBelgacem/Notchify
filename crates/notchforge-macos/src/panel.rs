@@ -146,6 +146,11 @@ define_class!(
             with_controller(|c| c.root_mouse_down(p));
         }
 
+        #[unsafe(method(rightMouseDown:))]
+        fn right_mouse_down(&self, event: &NSEvent) {
+            with_controller(|c| c.right_mouse_down(event.locationInWindow()));
+        }
+
         #[unsafe(method(mouseMoved:))]
         fn mouse_moved(&self, _event: &NSEvent) {
             with_controller(|c| c.pointer_moved(NSEvent::mouseLocation()));

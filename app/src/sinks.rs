@@ -36,6 +36,16 @@ impl UiSink for LogSink {
             playlists = s.media.playlists.len(),
             playlist_status = ?s.media.playlist_status,
             running_players = ?s.media.running,
+            usage = ?s
+                .usage
+                .ranges
+                .iter()
+                .map(|r| {
+                    let per_agent =
+                        r.agents.iter().map(|(a, t)| format!("{} {}", a.display_name(), notchforge_core::model::compact_tokens(*t))).collect::<Vec<_>>().join(", ");
+                    format!("{}: {}", r.label, if per_agent.is_empty() { "none".to_owned() } else { per_agent })
+                })
+                .collect::<Vec<_>>(),
             providers = ?s.providers,
             "snapshot"
         );

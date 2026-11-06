@@ -74,6 +74,10 @@ impl Rect {
     pub fn is_empty(&self) -> bool {
         self.width <= 0.0 || self.height <= 0.0
     }
+    /// Whether the two rects share any area.
+    pub fn intersects(&self, other: &Rect) -> bool {
+        self.x < other.max_x() && other.x < self.max_x() && self.y < other.max_y() && other.y < self.max_y()
+    }
 }
 
 /// What the macOS layer knows about one display.
@@ -108,14 +112,29 @@ impl ScreenInfo {
 /// The notch (real or synthetic) on a given screen.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Notch {
-    /// Global rect of the camera housing (or synthetic pill).
+    /// Global rect of the camera housing (or the floating pill).
     pub rect: Rect,
     /// `false` for the synthetic pill on non-notched displays.
     pub physical: bool,
+    /// A pill that floats below the top edge, iPhone Dynamic Island style,
+    /// instead of merging with the bezel.
+    pub floating: bool,
 }
 
-/// Width of the synthetic pill shown on screens without a notch.
-pub const SYNTHETIC_NOTCH_WIDTH: f64 = 196.0;
+/// Width of the floating notch shown on screens without a hardware one.
+pub const FLOATING_PILL_WIDTH: f64 = 90.0;
+/// Breathing room kept between the floating pill and any menu bar item.
+pub const PILL_MARGIN: f64 = 12.0;
+
+/// The floating pill's size and offset for a screen: small enough to live
+/// entirely inside the menu bar (so it never overlaps an app window) and
+/// vertically centred in that strip.
+pub fn floating_pill(screen: &ScreenInfo) -> (f64, f64, f64) {
+    let bar = screen.menu_bar_height();
+    let height = (bar - 8.0).clamp(16.0, 26.0);
+    let gap = ((bar - height) / 2.0).round().max(2.0);
+    (FLOATING_PILL_WIDTH.min(screen.frame.width * 0.4), height, gap)
+}
 
 pub fn detect_notch(screen: &ScreenInfo) -> Notch {
     if let (true, Some(left), Some(right)) = (screen.has_notch(), screen.aux_top_left, screen.aux_top_right) {
@@ -123,14 +142,20 @@ pub fn detect_notch(screen: &ScreenInfo) -> Notch {
         let width = right.x - x;
         if width > 40.0 {
             let height = screen.safe_area_top;
-            return Notch { rect: Rect::new(x, screen.frame.max_y() - height, width, height), physical: true };
+            return Notch {
+                rect: Rect::new(x, screen.frame.max_y() - height, width, height),
+                physical: true,
+                floating: false,
+            };
         }
     }
-    let height = screen.menu_bar_height();
-    let width = SYNTHETIC_NOTCH_WIDTH.min(screen.frame.width * 0.5);
+    // No hardware notch: an iPhone-style capsule floating in the menu bar
+    // strip, small enough to never overlap the app windows below it.
+    let (width, height, gap) = floating_pill(screen);
     Notch {
-        rect: Rect::new(screen.frame.mid_x() - width / 2.0, screen.frame.max_y() - height, width, height),
+        rect: Rect::new(screen.frame.mid_x() - width / 2.0, screen.frame.max_y() - gap - height, width, height),
         physical: false,
+        floating: true,
     }
 }
 
@@ -150,18 +175,27 @@ pub fn choose_screen(screens: &[ScreenInfo], choice: ScreenChoice, mouse: Option
     Some(picked.unwrap_or(main))
 }
 
+/// Wing-mask bit: the left wing (menu-bar side left of the notch) is shown.
+pub const WING_LEFT: u8 = 1;
+/// Wing-mask bit: the right wing is shown.
+pub const WING_RIGHT: u8 = 2;
+
 /// The visual states the island can be in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LayoutKind {
     Collapsed,
-    /// Collapsed with live indicators either side of the notch.
-    CollapsedWithWings,
+    /// Collapsed with live indicators beside the notch; the payload is a
+    /// [`WING_LEFT`] / [`WING_RIGHT`] mask, so one wing can hide while the
+    /// other shows (a wing is skipped when it would cover menu bar items).
+    CollapsedWithWings(u8),
     /// A notification banner dropping out of the notch.
     Peek,
     /// Hover state.
     Compact,
     /// Pinned full panel.
     Expanded,
+    /// Calls ringing: how many are shown.
+    Incoming(u8),
 }
 
 /// Visual parameters of the island for one layout.
@@ -191,6 +225,11 @@ pub fn notch_ear_radius(corner_radius: f64) -> f64 {
     (corner_radius * 0.5).clamp(6.0, NOTCH_EAR_MAX)
 }
 
+/// The most calls shown at once; further ones are counted beside the notch.
+pub const MAX_VISIBLE_CALLS: usize = 3;
+/// A waiting call's row and the gap below it.
+pub const CALL_ROW_STEP: f64 = 54.0;
+
 /// How far an island of `height` has turned from black to glass (0–1). `span`
 /// is the height the current or last opening travels above the notch. The
 /// black holds for the first 40 % of the travel, so the body springs out solid
@@ -209,23 +248,33 @@ pub struct NotchLayout {
     pub screen: ScreenInfo,
     pub notch: Notch,
     pub appearance: AppearanceConfig,
+    /// Sideways offset of the whole island, for the floating notch's smart
+    /// placement (dodging menu bar items). Animated by the controller.
+    pub x_offset: f64,
 }
 
 impl NotchLayout {
     pub fn new(screen: ScreenInfo, appearance: AppearanceConfig) -> Self {
         let notch = detect_notch(&screen);
-        Self { screen, notch, appearance }
+        Self { screen, notch, appearance, x_offset: 0.0 }
+    }
+
+    /// How far the island's top sits below the screen's top edge: the floating
+    /// capsule hangs, everything else merges with the bezel.
+    pub fn top_gap(&self) -> f64 {
+        if self.notch.floating { (self.screen.frame.max_y() - self.notch.rect.max_y()).max(0.0) } else { 0.0 }
     }
 
     pub fn shape(&self, kind: LayoutKind) -> IslandShape {
         let n = self.notch.rect;
         let a = &self.appearance;
         // Radius of the hardware notch's lower corners is roughly a third of its height.
-        let base_radius = (n.height * 0.38).clamp(6.0, 14.0);
+        let base_radius = if self.notch.floating { n.height / 2.0 } else { (n.height * 0.38).clamp(6.0, 14.0) };
         match kind {
             LayoutKind::Collapsed => IslandShape { width: n.width, height: n.height, corner_radius: base_radius },
-            LayoutKind::CollapsedWithWings => {
-                IslandShape { width: n.width + 2.0 * WING_WIDTH, height: n.height, corner_radius: base_radius }
+            LayoutKind::CollapsedWithWings(mask) => {
+                let wings = u8::from(mask & WING_LEFT != 0) as f64 + u8::from(mask & WING_RIGHT != 0) as f64;
+                IslandShape { width: n.width + wings * WING_WIDTH, height: n.height, corner_radius: base_radius }
             }
             LayoutKind::Peek => IslandShape {
                 width: (n.width + 2.0 * WING_WIDTH + 80.0).max(440.0).min(a.compact_width),
@@ -242,6 +291,15 @@ impl NotchLayout {
                 height: n.height + a.expanded_height,
                 corner_radius: 28.0,
             },
+            LayoutKind::Incoming(shown) => {
+                let waiting = (shown.max(1) as usize).min(MAX_VISIBLE_CALLS) - 1;
+                let rows = if waiting > 0 { waiting as f64 * CALL_ROW_STEP + 6.0 } else { 0.0 };
+                IslandShape {
+                    width: (n.width + 2.0 * WING_WIDTH + 120.0).max(500.0),
+                    height: n.height + 84.0 + rows,
+                    corner_radius: 26.0,
+                }
+            }
         }
     }
 
@@ -258,11 +316,12 @@ impl NotchLayout {
     }
 
     /// Island rect in *window-local* coordinates for a given width/height,
-    /// horizontally centred on the notch and pinned to the top edge.
+    /// horizontally centred on the notch (plus the floating pill's smart
+    /// offset) and pinned below the top gap.
     pub fn island_in_window(&self, width: f64, height: f64) -> Rect {
         let win = self.window_frame();
-        let cx = self.notch.rect.mid_x() - win.x;
-        Rect::new(cx - width / 2.0, win.height - height, width, height)
+        let cx = self.notch.rect.mid_x() + self.x_offset - win.x;
+        Rect::new(cx - width / 2.0, win.height - self.top_gap() - height, width, height)
     }
 
     /// Island rect in global coordinates.
@@ -272,22 +331,66 @@ impl NotchLayout {
         Rect::new(local.x + win.x, local.y + win.y, local.width, local.height)
     }
 
-    /// Zone that arms hover while collapsed: the notch, a little wider, plus a
-    /// strip reaching the very top pixel row (the pointer can sit *at* the edge).
+    /// Zone that arms hover while collapsed: the notch (or pill), a little
+    /// wider, plus a strip reaching the very top pixel row (the pointer can
+    /// sit *at* the edge; for the floating pill that strip spans the gap).
     pub fn activation_zone(&self) -> Rect {
-        self.notch.rect.outset(18.0, 18.0, 6.0, 1.0)
+        self.notch.rect.outset(18.0, 18.0, 6.0, self.top_gap() + 2.0)
     }
 
     /// Zone the pointer must leave before the hover state starts collapsing.
     pub fn retention_zone(&self, kind: LayoutKind) -> Rect {
         let s = self.shape(kind);
-        self.island_global(s.width, s.height).outset(14.0, 14.0, 14.0, 1.0)
+        self.island_global(s.width, s.height).outset(14.0, 14.0, 14.0, self.top_gap() + 2.0)
     }
 
     /// Larger zone used while dragging files, so the drop target is easy to hit.
     pub fn drag_zone(&self) -> Rect {
-        self.notch.rect.outset(120.0, 120.0, 60.0, 1.0)
+        self.notch.rect.outset(120.0, 120.0, 60.0, self.top_gap() + 2.0)
     }
+}
+
+/// The gaps left in a strip `width` wide after removing `occupied` x-ranges.
+/// Pure, for the floating notch's smart placement.
+pub fn free_spans(width: f64, occupied: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    let mut occ: Vec<(f64, f64)> = occupied.iter().copied().filter(|(a, b)| *b > 0.0 && *a < width).collect();
+    occ.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = Vec::new();
+    let mut cursor = 0.0;
+    for (a, b) in occ {
+        if a > cursor {
+            out.push((cursor, a.min(width)));
+        }
+        cursor = cursor.max(b);
+        if cursor >= width {
+            return out;
+        }
+    }
+    if cursor < width {
+        out.push((cursor, width));
+    }
+    out
+}
+
+/// Where a floating pill of `pill_width` should sit inside a strip
+/// `screen_width` wide: centred, unless a menu bar item is in the way — then
+/// the free span closest to the centre that fits it, with [`PILL_MARGIN`] of
+/// breathing room around each item. Returns the pill's left edge.
+pub fn pill_x(screen_width: f64, pill_width: f64, occupied: &[(f64, f64)]) -> f64 {
+    let centre = screen_width / 2.0;
+    let inflated: Vec<(f64, f64)> = occupied.iter().map(|(a, b)| (a - PILL_MARGIN, b + PILL_MARGIN)).collect();
+    free_spans(screen_width, &inflated)
+        .into_iter()
+        .filter(|(a, b)| b - a >= pill_width)
+        .min_by(|a, b| {
+            let dist = |span: &(f64, f64)| {
+                let x = (centre - pill_width / 2.0).clamp(span.0, span.1 - pill_width);
+                (x + pill_width / 2.0 - centre).abs()
+            };
+            dist(a).total_cmp(&dist(b))
+        })
+        .map(|(a, b)| (centre - pill_width / 2.0).clamp(a, b - pill_width))
+        .unwrap_or(centre - pill_width / 2.0)
 }
 
 #[cfg(test)]
@@ -335,9 +438,53 @@ mod tests {
     fn synthesizes_pill_without_notch() {
         let n = detect_notch(&external());
         assert!(!n.physical);
-        assert_eq!(n.rect.height, 25.0);
+        let (w, h, gap) = floating_pill(&external());
+        assert!(n.floating);
+        assert_eq!(n.rect.height, h);
         assert_eq!(n.rect.mid_x(), 1512.0 + 1280.0);
-        assert_eq!(n.rect.max_y(), 1440.0);
+        assert_eq!(n.rect.max_y(), 1440.0 - gap);
+        assert_eq!(n.rect.width, w);
+        // The pill lives inside the menu bar: it never reaches app windows.
+        assert!(n.rect.y >= 1440.0 - external().menu_bar_height());
+    }
+
+    #[test]
+    fn floating_zones_reach_the_top_edge() {
+        let layout = NotchLayout::new(external(), AppearanceConfig::default());
+        assert!(layout.top_gap() > 0.0);
+        let z = layout.activation_zone();
+        assert!(z.contains_inclusive(Point { x: layout.notch.rect.mid_x(), y: 1440.0 }), "pointer at the very top");
+        let shape = layout.shape(LayoutKind::Collapsed);
+        let island = layout.island_global(shape.width, shape.height);
+        let (_, _, gap) = floating_pill(&external());
+        assert!(close(island.max_y(), 1440.0 - gap), "the capsule hangs below the top");
+        assert!(close(island.width, floating_pill(&external()).0));
+    }
+
+    #[test]
+    fn free_spans_leave_the_gaps() {
+        assert_eq!(free_spans(1000.0, &[]), vec![(0.0, 1000.0)]);
+        assert_eq!(free_spans(1000.0, &[(400.0, 600.0)]), vec![(0.0, 400.0), (600.0, 1000.0)]);
+        assert_eq!(free_spans(1000.0, &[(0.0, 200.0), (150.0, 500.0), (900.0, 1200.0)]), vec![(500.0, 900.0)]);
+        assert_eq!(free_spans(100.0, &[(0.0, 100.0)]), vec![]);
+    }
+
+    #[test]
+    fn the_pill_sits_centred_unless_blocked() {
+        // A clear menu bar: centred.
+        assert!(close(pill_x(1512.0, 204.0, &[]), 756.0 - 102.0));
+        // Items crowd the centre: the pill glides to the nearest fitting gap.
+        let x = pill_x(1512.0, 204.0, &[(400.0, 1000.0)]);
+        assert!(x <= 400.0 - PILL_MARGIN - 204.0 + 0.5 || x >= 1000.0 + PILL_MARGIN - 0.5, "x = {x}");
+        // A wall of items on one side pushes it fully to the free side.
+        let x = pill_x(1512.0, 204.0, &[(600.0, 1512.0)]);
+        assert!(close(x, 600.0 - PILL_MARGIN - 204.0), "x = {x}");
+        // Everything occupied: fall back to centred (covering is the last resort).
+        assert!(close(pill_x(300.0, 204.0, &[(0.0, 300.0)]), 48.0));
+    }
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 0.5
     }
 
     #[test]
@@ -382,7 +529,12 @@ mod tests {
     #[test]
     fn shapes_grow_monotonically() {
         let layout = NotchLayout::new(mbp14(), AppearanceConfig::default());
-        let kinds = [LayoutKind::Collapsed, LayoutKind::CollapsedWithWings, LayoutKind::Compact, LayoutKind::Expanded];
+        let kinds = [
+            LayoutKind::Collapsed,
+            LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT),
+            LayoutKind::Compact,
+            LayoutKind::Expanded,
+        ];
         for pair in kinds.windows(2) {
             let (a, b) = (layout.shape(pair[0]), layout.shape(pair[1]));
             assert!(b.width >= a.width && b.height >= a.height, "{:?} -> {:?}", pair[0], pair[1]);
@@ -390,6 +542,21 @@ mod tests {
         let win = layout.window_frame();
         let e = layout.shape(LayoutKind::Expanded);
         assert!(win.width >= e.width && win.height >= e.height);
+    }
+
+    #[test]
+    fn wings_widen_the_island_per_side() {
+        let layout = NotchLayout::new(mbp14(), AppearanceConfig::default());
+        let n = layout.notch.rect.width;
+        assert_eq!(layout.shape(LayoutKind::CollapsedWithWings(0)), layout.shape(LayoutKind::Collapsed));
+        assert_eq!(layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT)).width, n + WING_WIDTH);
+        assert_eq!(layout.shape(LayoutKind::CollapsedWithWings(WING_RIGHT)).width, n + WING_WIDTH);
+        assert_eq!(layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT)).width, n + 2.0 * WING_WIDTH);
+        assert_eq!(
+            layout.shape(LayoutKind::CollapsedWithWings(0xFF)).width,
+            n + 2.0 * WING_WIDTH,
+            "unknown bits are ignored"
+        );
     }
 
     #[test]
@@ -409,6 +576,16 @@ mod tests {
         let layout = NotchLayout::new(s, AppearanceConfig::default());
         let win = layout.window_frame();
         assert!(win.x >= 0.0);
+    }
+
+    #[test]
+    fn the_call_view_grows_with_each_waiting_call() {
+        let layout = NotchLayout::new(mbp14(), AppearanceConfig::default());
+        let nh = layout.notch.rect.height;
+        assert_eq!(layout.shape(LayoutKind::Incoming(1)).height, nh + 84.0);
+        assert_eq!(layout.shape(LayoutKind::Incoming(2)).height, nh + 84.0 + 60.0);
+        assert_eq!(layout.shape(LayoutKind::Incoming(3)).height, nh + 84.0 + 114.0);
+        assert_eq!(layout.shape(LayoutKind::Incoming(9)), layout.shape(LayoutKind::Incoming(3)));
     }
 
     #[test]

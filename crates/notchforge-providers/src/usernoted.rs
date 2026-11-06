@@ -16,6 +16,7 @@
 //! WAL every `db_poll_interval_ms` — two syscalls per second at idle.
 
 use notchforge_core::apps::{AppCategory, AppRef};
+use notchforge_core::config::Paths;
 use notchforge_core::model::{NewNotification, NotificationKind, Origin, Permission, ProviderStatus};
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
@@ -106,6 +107,20 @@ pub fn infer_agent_kind(text: &str) -> NotificationKind {
     }
 }
 
+/// The favicon of a web platform, cached next to the media artwork. Cheap and
+/// idempotent; used by the background fetch that follows each attributed push.
+async fn ensure_site_icon(http: &reqwest::Client, paths: &Paths, key: &str) -> Option<PathBuf> {
+    let site = notchforge_core::sites::site(key)?;
+    let dir = paths.artwork_dir();
+    let _ = tokio::fs::create_dir_all(&dir).await;
+    let dest = dir.join(format!("site-{}.jpg", site.key));
+    if dest.exists() {
+        return Some(dest);
+    }
+    let url = format!("https://www.google.com/s2/favicons?domain={}&sz=128", site.hosts[0]);
+    crate::media::download(http, &url, &dest).await
+}
+
 pub fn to_notification(
     bundle_id: &str,
     rec: DecodedRecord,
@@ -122,6 +137,7 @@ pub fn to_notification(
         app,
         origin: Origin::NotificationCenterDb,
         kind,
+        tokens: None,
         priority: None,
         title: rec.title,
         subtitle: rec.subtitle,
@@ -241,6 +257,12 @@ impl Provider for UsernotedProvider {
             let mut db = tokio::task::spawn_blocking(move || open(&p)).await.map_err(ProviderError::other)??;
             tracing::info!(path = %path.display(), last_id = db.last_id, "watching Notification Center DB");
             ctx.set_status(ProviderStatus::Running).await;
+            // For platform favicons (browser pushes attributed to a web site).
+            let http = reqwest::Client::builder()
+                .timeout(Duration::from_secs(15))
+                .user_agent(concat!("NotchForge/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .map_err(ProviderError::other)?;
 
             let mut seen = mtimes(&path);
             loop {
@@ -267,6 +289,17 @@ impl Provider for UsernotedProvider {
                     }
                     let Some(rec) = decode_record(&data) else { continue };
                     let n = to_notification(&bundle, rec, &aliases);
+                    // The platform's logo (for browser pushes attributed to a
+                    // web site) is fetched in the background; the next render
+                    // picks it up. Failure is silent — the browser icon or a
+                    // brand tile shows instead.
+                    if let Some(key) = n.app.platform {
+                        let http = http.clone();
+                        let paths = ctx.paths.clone();
+                        tokio::spawn(async move {
+                            ensure_site_icon(&http, &paths, key).await;
+                        });
+                    }
                     if !ctx.emit(ProviderEvent::Notification(n)).await {
                         return Ok(());
                     }

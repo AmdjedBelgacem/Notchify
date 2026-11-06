@@ -197,11 +197,11 @@ const TYPE_WILDCARD: u32 = u32::from_be_bytes(*b"****");
 const ERR_AE_EVENT_NOT_PERMITTED: i32 = -1743;
 const ERR_AE_WOULD_REQUIRE_CONSENT: i32 = -1744;
 
-/// Raw status of Automation for `player`. With `ask`, macOS shows its prompt
-/// and the call **blocks** until the user answers, so never ask on the main
-/// thread.
-fn automation_status(player: MediaPlayer, ask: bool) -> i32 {
-    let id = player.bundle_id();
+/// Raw status of Automation for a bundle id. With `ask`, macOS shows its
+/// prompt and the call **blocks** until the user answers, so never ask on the
+/// main thread.
+fn automation_status_for(bundle_id: &str, ask: bool) -> i32 {
+    let id = bundle_id;
     let mut desc = AEDesc { descriptor_type: 0, data_handle: std::ptr::null_mut() };
     // SAFETY: valid buffer/length; `desc` is disposed below.
     unsafe {
@@ -212,6 +212,10 @@ fn automation_status(player: MediaPlayer, ask: bool) -> i32 {
         AEDisposeDesc(&mut desc);
         status
     }
+}
+
+fn automation_status(player: MediaPlayer, ask: bool) -> i32 {
+    automation_status_for(player.bundle_id(), ask)
 }
 
 /// Combined Automation state for the running players, computed from scratch.
@@ -272,6 +276,16 @@ pub fn automation_state() -> PermissionState {
         });
     }
     decode(AUTOMATION.load(Ordering::Acquire))
+}
+
+/// Ask for Automation for a browser so its tabs can be read (macOS shows the
+/// consent prompt; the browser is running — it is making sound). Background
+/// thread: the ask blocks until the user answers.
+pub fn connect_browser(bundle_id: String) {
+    std::thread::spawn(move || {
+        automation_status_for(&bundle_id, true);
+        dispatch2::DispatchQueue::main().exec_async(|| send(ProviderCommand::MediaChanged(None)));
+    });
 }
 
 /// Open Music, give it a moment to start, then ask for Automation so macOS

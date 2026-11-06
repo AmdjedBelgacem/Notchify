@@ -102,6 +102,7 @@ pub const kAudioProcessPropertyPID: u32 = fourcc(b"ppid");
 pub const kAudioProcessPropertyBundleID: u32 = fourcc(b"pbid");
 pub const kAudioProcessPropertyDevices: u32 = fourcc(b"pdv#");
 pub const kAudioProcessPropertyIsRunningOutput: u32 = fourcc(b"piro");
+pub const kAudioProcessPropertyIsRunningInput: u32 = fourcc(b"piri");
 
 pub const fn addr(selector: u32, scope: u32) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress { selector, scope, element: kAudioObjectPropertyElementMain }
@@ -327,6 +328,60 @@ pub fn remove_listener(object: AudioObjectID, address: AudioObjectPropertyAddres
     }
 }
 
+/// Is any process recording (the microphone is in use)? macOS shows its
+/// mic indicator beside the notch while this is true.
+pub fn microphone_in_use() -> bool {
+    fn global(selector: u32) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress {
+            selector,
+            scope: kAudioObjectPropertyScopeGlobal,
+            element: kAudioObjectPropertyElementMain,
+        }
+    }
+    // SAFETY: standard CoreAudio property queries with checked sizes.
+    unsafe {
+        let list_addr = global(kAudioHardwarePropertyProcessObjectList);
+        let mut size = 0u32;
+        if AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &list_addr, 0, std::ptr::null(), &mut size) != 0
+            || size == 0
+        {
+            return false;
+        }
+        let mut processes = vec![0u32; size as usize / 4];
+        let mut written = size;
+        if AudioObjectGetPropertyData(
+            kAudioObjectSystemObject,
+            &list_addr,
+            0,
+            std::ptr::null(),
+            &mut written,
+            processes.as_mut_ptr() as _,
+        ) != 0
+        {
+            return false;
+        }
+        processes.truncate(written as usize / 4);
+        let run_addr = global(kAudioProcessPropertyIsRunningInput);
+        for p in processes {
+            let mut bytes = 0u32;
+            if AudioObjectGetPropertyDataSize(p, &run_addr, 0, std::ptr::null(), &mut bytes) != 0 || bytes == 0 {
+                continue;
+            }
+            let mut buf = vec![0u8; bytes as usize];
+            let mut written = bytes;
+            if AudioObjectGetPropertyData(p, &run_addr, 0, std::ptr::null(), &mut written, buf.as_mut_ptr() as _)
+                != 0
+            {
+                continue;
+            }
+            if buf.iter().any(|&b| b != 0) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,3 +397,4 @@ mod tests {
         assert_eq!(std::mem::size_of::<AudioStreamBasicDescription>(), 40);
     }
 }
+

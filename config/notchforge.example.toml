@@ -18,6 +18,16 @@ collapse_delay_ms = 350
 peek_duration_ms = 4000
 # Minimum priority that peeks: "low" | "normal" | "high" | "critical"
 peek_min_priority = "normal"
+# Hide the island completely while a fullscreen app is frontmost, so the
+# auto-revealed menu bar stays usable. A ringing call still shows.
+hide_in_fullscreen = true
+# A display-only copy of the collapsed island on each other screen — a real
+# notch where the display has one, an iPhone-style floating capsule where it
+# doesn't (it glides out of the way of menu bar items).
+island_on_all_screens = false
+# Or mirror on specific screens only, by display id (from the log line
+# "mirror islands synced"). Leave empty to keep the island on one screen only.
+# mirror_screens = [1]
 
 [appearance]
 # "system" follows Accessibility › Reduce motion; "always" | "never"
@@ -31,6 +41,10 @@ expanded_width = 720.0
 expanded_height = 340.0
 # Live indicators either side of the notch (charging, unread, tray).
 show_wings = true
+# A wing whose span beside the notch is occupied by menu bar items is hidden
+# instead of drawn over them. Fail-safe: without Accessibility permission the
+# spans cannot be checked, so the wings stay hidden altogether.
+dodge_menu_bar = true
 high_contrast = false
 
 [providers]
@@ -43,6 +57,7 @@ accessibility_banners = false  # fallback banner reader, needs Accessibility
 focus = true                   # Focus/DND state, needs Full Disk Access
 audio = true                   # output devices, capabilities, apps playing audio (CoreAudio)
 media = true                   # Spotify & Apple Music player + playlists, needs Automation
+calendar = true                # upcoming events from your connected calendar accounts (EventKit)
 
 [weather]
 # "auto" uses CoreLocation (needs Location permission); or a place name.
@@ -74,10 +89,13 @@ require_approval = true
 watch_sessions = true
 # Read token counts from Claude Code and Codex CLI session logs for the Agents
 # page. Only counts, models, times and project names are kept, on this Mac.
+# Claude Code's limits also need its status line connected in Settings.
 token_usage = true
 
 [notifications]
 max_items = 100
+# Ring in the notch when a notification announces a call (from an app or browser).
+incoming_calls = true
 # Identical (app, title, body) within this window is dropped.
 dedupe_window_secs = 10
 # Per-app token bucket; overflow is folded into the latest entry, not lost.
@@ -95,7 +113,10 @@ db_poll_interval_ms = 1000
 
 # Per-app rules. Keys: claude, chatgpt, cursor, zed, opencode, qoder, agent,
 # whatsapp, discord, instagram, facebook, messages, slack, telegram, signal —
-# or any bundle identifier (e.g. "com.apple.mail").
+# or any bundle identifier (e.g. "com.apple.mail").# Answer messaging notifications from the notch: a Reply box opens and the
+# reply is delivered through the app's own notification banner (keep banners
+# enabled for the apps you want to answer; the banner must be on screen).
+quick_reply = true
 [notifications.apps.discord]
 enabled = true
 # priority = "low"

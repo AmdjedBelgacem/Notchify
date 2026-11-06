@@ -26,14 +26,16 @@ impl SpringParams {
         Self { stiffness, damping, mass: 1.0 }
     }
 
-    /// Opening: slightly bouncy, feels alive.
+    /// Opening: quick with a barely-there settle — fast to appear, smooth on
+    /// arrival.
     pub fn open() -> Self {
-        Self::with_response(0.38, 0.82)
+        Self::with_response(0.26, 0.92)
     }
 
-    /// Closing: no overshoot so the island never pokes below the notch.
+    /// Closing: no overshoot so the island never pokes below the notch, and
+    /// quick enough to feel snappy.
     pub fn close() -> Self {
-        Self::with_response(0.26, 1.0)
+        Self::with_response(0.19, 1.0)
     }
 
     /// Scale "speed" (stiffness) keeping the damping fraction constant.
@@ -181,11 +183,12 @@ mod tests {
     }
 
     #[test]
-    fn open_spring_overshoots_slightly_and_settles() {
+    fn open_spring_barely_overshoots_and_settles() {
         let mut s = Spring::new(0.0, SpringParams::open());
         s.set_target(100.0, SpringParams::open());
         let max = run(&mut s, 2.0, 120.0);
-        assert!(max > 100.0 && max < 106.0, "max {max}");
+        // Near-critically damped: at most a hair of overshoot, never a bounce.
+        assert!(max <= 103.0, "max {max}");
         assert!(s.is_settled());
     }
 

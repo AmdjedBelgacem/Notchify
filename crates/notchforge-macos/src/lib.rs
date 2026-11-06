@@ -9,6 +9,8 @@ pub mod app;
 #[cfg(target_os = "macos")]
 pub mod bridge;
 #[cfg(target_os = "macos")]
+pub mod call_watch;
+#[cfg(target_os = "macos")]
 pub mod controller;
 #[cfg(target_os = "macos")]
 pub mod controls;
@@ -29,6 +31,8 @@ pub mod media;
 #[cfg(target_os = "macos")]
 pub mod menubar;
 #[cfg(target_os = "macos")]
+pub mod mirrors;
+#[cfg(target_os = "macos")]
 pub mod panel;
 #[cfg(target_os = "macos")]
 pub mod permissions;
@@ -46,3 +50,5 @@ pub mod sharing;
 pub mod ui;
 #[cfg(target_os = "macos")]
 pub mod views;
+#[cfg(target_os = "macos")]
+pub mod windows;

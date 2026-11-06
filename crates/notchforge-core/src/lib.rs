@@ -17,6 +17,7 @@
 //! [`engine::Command`]s.
 
 pub mod apps;
+pub mod calls;
 pub mod config;
 pub mod engine;
 pub mod error;
@@ -25,6 +26,7 @@ pub mod machine;
 pub mod model;
 pub mod pipeline;
 pub mod provider;
+pub mod sites;
 pub mod spring;
 pub mod time;
 pub mod tray;

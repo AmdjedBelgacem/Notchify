@@ -71,8 +71,9 @@ pub enum Event {
     Toggle,
     /// Force collapse (screen change, sleep, settings opened).
     Reset,
-    /// Live indicators appeared or disappeared (affects collapsed layout).
-    WingsChanged(bool),
+    /// Live indicators appeared or disappeared beside the notch; the payload
+    /// is a `WING_LEFT` / `WING_RIGHT` mask (affects the collapsed layout).
+    WingsChanged(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -111,12 +112,13 @@ impl Default for Timings {
 pub struct NotchMachine {
     state: State,
     timings: Timings,
-    wings: bool,
+    /// `WING_LEFT` / `WING_RIGHT` mask of the collapsed wings.
+    wings: u8,
 }
 
 impl NotchMachine {
     pub fn new(timings: Timings) -> Self {
-        Self { state: State::Collapsed, timings, wings: false }
+        Self { state: State::Collapsed, timings, wings: 0 }
     }
 
     pub fn state(&self) -> State {
@@ -142,7 +144,7 @@ impl NotchMachine {
     }
 
     fn collapsed_layout(&self) -> LayoutKind {
-        if self.wings { LayoutKind::CollapsedWithWings } else { LayoutKind::Collapsed }
+        if self.wings != 0 { LayoutKind::CollapsedWithWings(self.wings) } else { LayoutKind::Collapsed }
     }
 
     fn go(&mut self, to: State, fx: &mut Vec<Effect>) {
@@ -180,9 +182,9 @@ impl NotchMachine {
         match (self.state, event) {
             // ── global events ────────────────────────────────────────────
             (_, E::Reset) => self.collapse(&mut fx),
-            (_, E::WingsChanged(on)) => {
+            (_, E::WingsChanged(mask)) => {
                 let before = self.layout();
-                self.wings = on;
+                self.wings = mask & (crate::geometry::WING_LEFT | crate::geometry::WING_RIGHT);
                 let after = self.layout();
                 if before != after {
                     fx.push(Effect::SetLayout(after));
@@ -396,13 +398,31 @@ mod tests {
     #[test]
     fn wings_change_collapsed_layout_only() {
         let mut m = m();
-        let fx = m.handle(Event::WingsChanged(true));
-        assert_eq!(layouts(&fx), vec![LayoutKind::CollapsedWithWings]);
+        let fx = m.handle(Event::WingsChanged(crate::geometry::WING_LEFT | crate::geometry::WING_RIGHT));
+        assert_eq!(
+            layouts(&fx),
+            vec![LayoutKind::CollapsedWithWings(crate::geometry::WING_LEFT | crate::geometry::WING_RIGHT)]
+        );
         m.handle(Event::Click);
-        let fx = m.handle(Event::WingsChanged(false));
+        let fx = m.handle(Event::WingsChanged(0));
         assert!(layouts(&fx).is_empty());
         let fx = m.handle(Event::Escape);
         assert_eq!(layouts(&fx), vec![LayoutKind::Collapsed]);
+    }
+
+    #[test]
+    fn a_hidden_wing_shrinks_the_island_and_none_hides_it() {
+        use crate::geometry::{WING_LEFT, WING_RIGHT};
+        let mut m = m();
+        // Both wings on, then only the right one survives.
+        m.handle(Event::WingsChanged(WING_LEFT | WING_RIGHT));
+        let fx = m.handle(Event::WingsChanged(WING_RIGHT));
+        assert_eq!(layouts(&fx), vec![LayoutKind::CollapsedWithWings(WING_RIGHT)]);
+        assert_eq!(m.layout(), LayoutKind::CollapsedWithWings(WING_RIGHT));
+        // Dropping the last wing folds back to the plain notch.
+        let fx = m.handle(Event::WingsChanged(0));
+        assert_eq!(layouts(&fx), vec![LayoutKind::Collapsed]);
+        assert_eq!(m.state(), State::Collapsed);
     }
 
     #[test]

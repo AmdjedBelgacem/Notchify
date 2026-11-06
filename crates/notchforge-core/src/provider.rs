@@ -74,6 +74,11 @@ impl ProviderError {
 /// Everything a provider can report.
 #[derive(Debug, Clone)]
 pub enum ProviderEvent {
+    /// An agent's limits/usage tile data, from a provider that owns that agent
+    /// (the usage provider owns Claude Code and Codex; Antigravity's owns its).
+    Limits(crate::model::AgentLimits),
+    /// Calendar accounts and upcoming events.
+    Calendar(crate::model::CalendarState),
     Notification(NewNotification),
     Battery(BatteryStatus),
     Devices(Vec<DeviceBattery>),
@@ -82,7 +87,10 @@ pub enum ProviderEvent {
     Audio(AudioState),
     Media(MediaState),
     Usage(AgentUsage),
-    Status { provider: &'static str, status: ProviderStatus },
+    Status {
+        provider: &'static str,
+        status: ProviderStatus,
+    },
 }
 
 /// Requests routed from the UI (through the engine) to running providers.
@@ -103,6 +111,15 @@ pub enum ProviderCommand {
     SpotifyCancel,
     /// Forget the stored Spotify token.
     SpotifyDisconnect,
+    /// Tokens an agent reported through the transports (webhook, socket,
+    /// inbox or the notify CLI) instead of writing a log of its own.
+    Usage {
+        agent: crate::model::UsageAgent,
+        model: Option<String>,
+        session: Option<String>,
+        counts: crate::model::TokenCounts,
+        at_ms: i64,
+    },
 }
 
 /// Capacity of the provider command broadcast; commands are rare and tiny.

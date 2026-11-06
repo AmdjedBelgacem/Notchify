@@ -45,28 +45,10 @@ pub const BROWSERS: &[Browser] = &[
     Browser { bundle_id: "app.zen-browser.zen", name: "Zen", family: Family::Opaque },
 ];
 
-/// Sites that are, in practice, music or video players: (host suffix, service).
-const SERVICES: &[(&str, &str)] = &[
-    ("music.youtube.com", "YouTube Music"),
-    ("youtube.com", "YouTube"),
-    ("youtu.be", "YouTube"),
-    ("soundcloud.com", "SoundCloud"),
-    ("open.spotify.com", "Spotify Web"),
-    ("music.apple.com", "Apple Music Web"),
-    ("deezer.com", "Deezer"),
-    ("tidal.com", "Tidal"),
-    ("bandcamp.com", "Bandcamp"),
-    ("mixcloud.com", "Mixcloud"),
-    ("twitch.tv", "Twitch"),
-    ("netflix.com", "Netflix"),
-    ("primevideo.com", "Prime Video"),
-    ("disneyplus.com", "Disney+"),
-    ("vimeo.com", "Vimeo"),
-    ("pandora.com", "Pandora"),
-    ("audiomack.com", "Audiomack"),
-    ("podcasts.google.com", "Google Podcasts"),
-    ("overcast.fm", "Overcast"),
-];
+/// The media service a URL belongs to, via the core site registry.
+pub fn service(url: &str) -> Option<&'static str> {
+    notchforge_core::sites::site_for_host(host(url)).filter(|s| s.media).map(|s| s.name)
+}
 
 /// The browser (if any) among the apps currently producing audio.
 pub fn find(sources: &[AudioSource]) -> Option<(&'static Browser, &AudioSource)> {
@@ -143,21 +125,35 @@ pub fn parse_tabs(out: &str) -> Vec<Tab> {
         .collect()
 }
 
-fn host(url: &str) -> &str {
+/// The host of a URL, without `www.` (empty for a title-only tab).
+pub fn host(url: &str) -> &str {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
     rest.split(['/', '?', '#']).next().unwrap_or("").trim_start_matches("www.")
 }
 
-/// The media service a URL belongs to.
-pub fn service(url: &str) -> Option<&'static str> {
-    let h = host(url);
-    SERVICES.iter().find(|(s, _)| h == *s || h.ends_with(&format!(".{s}"))).map(|(_, n)| *n)
+/// True for a URL that points at a specific video (a watch page), as opposed
+/// to a media site's home or feed — feed autoplay makes *every* media site
+/// look like it's the one playing.
+pub fn is_watch_url(url: &str) -> bool {
+    youtube_id(url).is_some()
+        || url.contains("/watch")
+        || url.contains("/shorts/")
+        || url.contains("/videos/")
+        || url.contains("/reel/")
+        || url.contains("/tv/")
 }
 
-/// Choose the tab that is most likely the one making sound: the active tab if
-/// it is on a media site, else the first media tab, else the active tab.
+/// Choose the tab that is most likely the one making sound: a watch page
+/// (a specific video) beats a mere media-site tab — feed autoplay makes home
+/// pages look audible — then the active media tab, else the active tab.
 pub fn pick(tabs: &[Tab]) -> Option<&Tab> {
     let active = tabs.first()?;
+    if is_watch_url(&active.url) {
+        return Some(active);
+    }
+    if let Some(t) = tabs.iter().skip(1).find(|t| is_watch_url(&t.url)) {
+        return Some(t);
+    }
     if service(&active.url).is_some() {
         return Some(active);
     }
@@ -222,14 +218,43 @@ pub fn youtube_id(url: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Build the now-playing entry for a browser that is making sound.
+/// Build the now-playing entry for a browser that is making sound. `tab` may
+/// be title-only (empty URL) when it came from the Accessibility fallback.
 pub fn now_playing(b: &Browser, tab: Option<&Tab>, state: PlaybackState, now_ms: i64) -> NowPlaying {
     let (title, artist, track_id) = match tab {
         Some(t) => {
             let svc = service(&t.url);
-            let title = clean_title(&t.title, svc);
+            let mut title = clean_title(&t.title, svc);
+            // Browsers append their own name to window titles ("GitHub - Dia"),
+            // which is all the Accessibility fallback sees.
+            for sep in [" - ", " – ", " | ", " · "] {
+                if let Some((head, tail)) = title.rsplit_once(sep) {
+                    if tail.eq_ignore_ascii_case(b.name) {
+                        title = head.trim().to_owned();
+                        break;
+                    }
+                }
+            }
+            // "YouTube" titled "YouTube" would read twice on the card.
+            let title = match svc {
+                Some(site) if title.eq_ignore_ascii_case(site) => format!("Playing from {site}"),
+                _ => title,
+            };
             let title = if title.is_empty() { b.name.to_owned() } else { title };
-            (title, svc.map_or_else(|| host(&t.url).to_owned(), str::to_owned), Some(t.url.clone()))
+            let artist = match svc {
+                Some(name) => name.to_owned(),
+                None => {
+                    let h = host(&t.url);
+                    if h.is_empty() {
+                        // Title-only: name the site if the title gives it away.
+                        notchforge_core::sites::site_from_text(&t.title)
+                            .map_or_else(|| "Playing audio".to_owned(), |s| s.name.to_owned())
+                    } else {
+                        h.to_owned()
+                    }
+                }
+            };
+            (title, artist, (!t.url.is_empty()).then(|| t.url.clone()))
         }
         None => (b.name.to_owned(), "Playing audio".to_owned(), None),
     };
@@ -286,6 +311,18 @@ mod tests {
         assert_eq!(youtube_id(&t.url).as_deref(), Some("FGBhQbmPwH8"));
         // With no media tab, the active tab is used.
         assert_eq!(pick(&tabs[..1]).map(|t| t.title.as_str()), Some("Inbox (4)"));
+    }
+
+    #[test]
+    fn a_watch_page_beats_a_feed_homepage() {
+        // Facebook's feed is the active tab (autoplaying video), but the
+        // YouTube watch tab is the one the user put a video on.
+        let tabs = parse_tabs(
+            "(1) Facebook\u{1f}https://www.facebook.com/\n             Daft Punk - One More Time - YouTube\u{1f}https://www.youtube.com/watch?v=FGBhQbmPwH8\n",
+        );
+        let t = pick(&tabs).expect("tab");
+        assert_eq!(service(&t.url), Some("YouTube"));
+        assert_eq!(youtube_id(&t.url).as_deref(), Some("FGBhQbmPwH8"));
     }
 
     #[test]

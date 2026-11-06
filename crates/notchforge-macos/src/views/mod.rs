@@ -5,6 +5,7 @@
 //! without any per-frame relayout. Views are rebuilt only when the screen
 //! geometry or appearance changes.
 
+pub mod call;
 pub mod collapsed;
 pub mod compact;
 pub mod expanded;
@@ -30,6 +31,7 @@ pub struct Views {
     pub peek: peek::PeekView,
     pub compact: compact::CompactView,
     pub expanded: expanded::ExpandedView,
+    pub call: call::CallView,
 }
 
 impl Views {
@@ -41,21 +43,23 @@ impl Views {
             collapsed: collapsed::CollapsedView::new(mtm, layout, &palette),
             peek: peek::PeekView::new(mtm, layout, &palette),
             compact: compact::CompactView::new(mtm, layout, &palette),
+            call: call::CallView::new(mtm, layout, &palette),
             expanded,
         }
     }
 
     pub fn container(&self, kind: LayoutKind) -> &Retained<FlippedView> {
         match kind {
-            LayoutKind::Collapsed | LayoutKind::CollapsedWithWings => &self.collapsed.root,
+            LayoutKind::Collapsed | LayoutKind::CollapsedWithWings(_) => &self.collapsed.root,
             LayoutKind::Peek => &self.peek.root,
             LayoutKind::Compact => &self.compact.root,
             LayoutKind::Expanded => &self.expanded.root,
+            LayoutKind::Incoming(_) => &self.call.root,
         }
     }
 
-    pub fn all(&self) -> [&Retained<FlippedView>; 4] {
-        [&self.collapsed.root, &self.peek.root, &self.compact.root, &self.expanded.root]
+    pub fn all(&self) -> [&Retained<FlippedView>; 5] {
+        [&self.collapsed.root, &self.peek.root, &self.compact.root, &self.expanded.root, &self.call.root]
     }
 }
 
@@ -98,7 +102,20 @@ pub fn clear_app_tile(v: &NSImageView) {
 pub fn set_app_icon(v: &NSImageView, app: &AppRef) {
     v.setWantsLayer(true);
     let layer = v.layer();
-    match crate::icons::app_icon(app) {
+    // A browser push attributed to a web platform shows that platform's logo
+    // — never the browser's icon. Until the favicon has been fetched, the
+    // brand tile below stands in.
+    let platform = app.platform.and_then(notchforge_core::sites::site);
+    if let Some(img) = platform.and_then(|s| crate::icons::site_image(s.key)) {
+        clear_app_tile(v);
+        v.setImage(Some(&img));
+        v.setContentTintColor(None);
+        v.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
+        crate::ui::set_accessibility_label(v, &app.display_name);
+        return;
+    }
+    let real = if platform.is_some() { None } else { crate::icons::app_icon(app) };
+    match real {
         Some(img) => {
             v.setImage(Some(&img));
             v.setContentTintColor(None);

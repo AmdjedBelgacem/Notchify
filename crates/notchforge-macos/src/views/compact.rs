@@ -19,7 +19,7 @@ use crate::ui::{
 };
 use notchforge_core::engine::Snapshot;
 use notchforge_core::geometry::{LayoutKind, NotchLayout};
-use notchforge_core::model::{NotificationKind, Priority};
+use notchforge_core::model::{MediaPlayer, NotificationKind, Priority};
 use notchforge_core::time::{now_ms, relative};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -42,6 +42,13 @@ pub struct CompactView {
     progress_fill: Retained<FlippedView>,
     eq_host: Retained<FlippedView>,
     showing_media: std::cell::Cell<bool>,
+    /// Ends a call in progress, shown on the lead card during one.
+    hang_up: Retained<objc2_app_kit::NSButton>,
+    title_width: f64,
+    /// Where the card's art and text sit, and how big the art is.
+    art_frame: objc2_foundation::NSRect,
+    text_x: f64,
+    _targets: crate::ui::Targets,
     // Weather.
     weather_card: Retained<FlippedView>,
     weather_icon: Retained<NSImageView>,
@@ -54,6 +61,9 @@ pub struct CompactView {
     battery_pct: Retained<NSTextField>,
     battery_detail: Retained<NSTextField>,
 }
+
+/// The lead card's art during a call.
+const CALL_ART: f64 = 40.0;
 
 impl CompactView {
     pub fn new(mtm: MainThreadMarker, layout: &NotchLayout, p: &Palette) -> Self {
@@ -104,6 +114,22 @@ impl CompactView {
         for v in [&*art_box as &NSView, &lead_kicker, &lead_title, &lead_sub, &lead_body, &progress_track, &eq_host] {
             lead.addSubview(v);
         }
+        let targets = crate::ui::Targets::default();
+        let t = targets.add(mtm, |_| {
+            crate::app::with_controller(|c| c.hang_up());
+        });
+        let hang_up = crate::ui::symbol_button(
+            mtm,
+            "phone.down.fill",
+            14.0,
+            "Hang up",
+            &objc2_app_kit::NSColor::whiteColor(),
+            &t,
+            rect(lw - 12.0 - 36.0, (ch - 36.0) / 2.0, 36.0, 36.0),
+        );
+        crate::ui::make_card(&hang_up, &rgba(0.851, 0.176, 0.125, 1.0), 18.0);
+        hang_up.setHidden(true);
+        lead.addSubview(&hang_up);
 
         // ── weather (1 column) ──
         let wx = pad + lw + gap;
@@ -173,6 +199,11 @@ impl CompactView {
             progress_fill,
             eq_host,
             showing_media: std::cell::Cell::new(false),
+            hang_up,
+            title_width: tw,
+            art_frame: rect(12.0, (ch - art_side) / 2.0, art_side, art_side),
+            text_x: tx,
+            _targets: targets,
             weather_card,
             weather_icon,
             weather_temp,
@@ -217,6 +248,23 @@ impl CompactView {
         }
     }
 
+    /// Lead card: the call in progress, with a way to end it.
+    fn render_call(&self, call: &notchforge_core::calls::ActiveCall) {
+        let green = rgba(0.435, 0.89, 0.549, 1.0);
+        self.art.setImage(crate::ui::symbol_image("phone.fill", 18.0, "On a call").as_deref());
+        self.art.setContentTintColor(Some(&green));
+        self.set_wash(Some((0.141, 0.541, 0.239)));
+        self.lead_kicker.setAttributedStringValue(&attributed("On call", &font(11.0, Weight::Semibold), &green));
+        set_text(&self.lead_title, &call.caller);
+        let clock = notchforge_core::calls::call_clock(call.started_ms, now_ms());
+        set_text(&self.lead_sub, &format!("{clock} · {}", call.source));
+        self.lead_sub.setHidden(false);
+        self.lead_body.setHidden(true);
+        self.progress_track.setHidden(true);
+        self.set_equalizer(None);
+        set_accessibility_label(&self.lead, &format!("On a call with {} on {}", call.caller, call.source));
+    }
+
     /// Lead card: what's playing. Returns whether something was shown.
     fn render_media(&self, snap: &Snapshot, p: &Palette) -> bool {
         use super::media::{Featured, featured};
@@ -242,11 +290,14 @@ impl CompactView {
                     b as f64 / 255.0,
                 ));
                 self.set_wash(Some(tint));
-                self.lead_kicker.setAttributedStringValue(&attributed(
-                    n.source_name(),
-                    &font(11.0, Weight::Semibold),
-                    &brand,
-                ));
+                // The source website ("YouTube", a host) beats the browser's
+                // name — that is what is being watched.
+                let kicker = if pl == MediaPlayer::Browser && !n.artist.is_empty() && n.artist != "Playing audio" {
+                    n.artist.clone()
+                } else {
+                    n.source_name().to_owned()
+                };
+                self.lead_kicker.setAttributedStringValue(&attributed(&kicker, &font(11.0, Weight::Semibold), &brand));
                 set_text(&self.lead_title, &n.title);
                 set_text(&self.lead_sub, if n.artist.is_empty() { &n.album } else { &n.artist });
                 self.lead_sub.setHidden(false);
@@ -349,13 +400,38 @@ impl CompactView {
 
     pub fn update(&self, snap: &Snapshot, p: &Palette) {
         // Lead: unread notifications win; otherwise what's playing.
-        let media = snap.unread == 0 && {
+        // A call in progress comes before either.
+        let in_call = snap.active_call.is_some();
+        self.hang_up.setHidden(!in_call);
+        // Leave room for the hang-up button during a call.
+        // During a call the art shrinks, so the name and source have room too.
+        let art = self.art_frame;
+        let small = CALL_ART;
+        let (art_box, art_view, text_x) = if in_call {
+            let y = art.origin.y + (art.size.height - small) / 2.0;
+            (rect(art.origin.x, y, small, small), rect(0.0, 0.0, small, small), art.origin.x + small + 10.0)
+        } else {
+            (art, rect(0.0, 0.0, art.size.width, art.size.height), self.text_x)
+        };
+        self.art_box.setFrame(art_box);
+        self.art.setFrame(art_view);
+        let right_edge = self.text_x + self.title_width - if in_call { 42.0 } else { 0.0 };
+        for v in [&self.lead_kicker, &self.lead_title, &self.lead_sub] {
+            let f = v.frame();
+            v.setFrame(rect(text_x, f.origin.y, right_edge - text_x, f.size.height));
+        }
+        if let Some(call) = &snap.active_call {
+            crate::ui::remove_all_subviews(&self.art_box);
+            self.art_box.addSubview(&self.art);
+            self.render_call(call);
+        }
+        let media = !in_call && snap.unread == 0 && {
             crate::ui::remove_all_subviews(&self.art_box);
             self.art_box.addSubview(&self.art);
             self.render_media(snap, p)
         };
         self.showing_media.set(media);
-        if !media {
+        if !media && !in_call {
             self.render_notification(snap, p);
         }
 

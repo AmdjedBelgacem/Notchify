@@ -7,6 +7,7 @@
 
 pub mod agents;
 pub mod audio;
+pub mod calendar;
 pub mod battery;
 pub mod bluetooth;
 pub mod focus;
@@ -42,6 +43,8 @@ unit_default!(
     agents::InboxAgentProvider,
     agents::AgentWatchProvider,
     agents::AgentUsageProvider,
+    agents::antigravity::AntigravityProvider,
+    calendar::CalendarProvider,
     usernoted::UsernotedProvider,
     focus::FocusProvider,
     audio::AudioProvider,
@@ -69,6 +72,8 @@ pub fn registry() -> Vec<ProviderSpec> {
         ),
         spec::<agents::AgentWatchProvider>(|c| c.providers.agents && c.agents.watch_sessions, |_| String::new()),
         spec::<agents::AgentUsageProvider>(|c| c.providers.agents && c.agents.token_usage, |_| String::new()),
+        spec::<agents::antigravity::AntigravityProvider>(|c| c.providers.agents, |_| String::new()),
+        spec::<calendar::CalendarProvider>(|c| c.providers.calendar, |_| String::new()),
         spec::<usernoted::UsernotedProvider>(|c| c.providers.notification_center, |_| String::new()),
         spec::<focus::FocusProvider>(|c| c.providers.focus, |_| String::new()),
         spec::<audio::AudioProvider>(|c| c.providers.audio, |_| String::new()),

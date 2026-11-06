@@ -35,6 +35,9 @@ pub fn app_icon(app: &AppRef) -> Option<Retained<NSImage>> {
 }
 
 pub fn fallback_symbol(app: &AppRef) -> &'static str {
+    if let Some(site) = app.platform.and_then(notchforge_core::sites::site) {
+        return site.symbol;
+    }
     app.known.map_or("app.badge", KnownApp::symbol)
 }
 
@@ -45,6 +48,9 @@ pub fn accent(app: &AppRef) -> (u8, u8, u8) {
 /// Background of an app's tile when its real icon is unavailable (the
 /// design boards' colours; dark-mark apps get their dark brand colour).
 pub fn tile_color(app: &AppRef) -> (u8, u8, u8) {
+    if let Some(site) = app.platform.and_then(notchforge_core::sites::site) {
+        return site.accent;
+    }
     match app.known {
         Some(KnownApp::Cursor) => (28, 28, 30),
         Some(KnownApp::Slack) => (74, 21, 75),
@@ -81,6 +87,13 @@ pub fn path_icon(path: &str) -> Retained<NSImage> {
 /// Best icon for an audio source: bundle id, then app path.
 pub fn source_icon(bundle_id: Option<&str>, app_path: Option<&str>) -> Option<Retained<NSImage>> {
     bundle_id.and_then(bundle_icon).or_else(|| app_path.map(path_icon))
+}
+
+/// The cached logo of a web platform, once its favicon has been fetched
+/// (`site-<key>.jpg` in the artwork cache). `None` while it hasn't landed.
+pub fn site_image(key: &str) -> Option<Retained<NSImage>> {
+    let path = crate::app::data_dir()?.join(format!("site-{key}.jpg"));
+    file_image(&path)
 }
 
 /// Image loaded from a file (cover art), with a small LRU so re-renders and

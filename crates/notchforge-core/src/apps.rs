@@ -6,6 +6,7 @@
 //! those to a [`KnownApp`] so the UI can give each source a stable icon, colour
 //! and category, and so per-app filter rules have a canonical key.
 
+use crate::sites;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -240,14 +241,20 @@ impl fmt::Display for KnownApp {
 }
 
 /// Browser bundle identifiers whose notifications should be attributed by
-/// content (see [`KnownApp::from_web_text`]).
+/// content (see [`KnownApp::from_web_text`] and [`sites::site_from_text`]).
 pub const BROWSER_BUNDLE_IDS: &[&str] = &[
     "com.apple.Safari",
+    "com.apple.SafariTechnologyPreview",
     "com.google.Chrome",
+    "com.google.Chrome.canary",
     "com.brave.Browser",
     "company.thebrowser.Browser",
+    "company.thebrowser.dia",
     "org.mozilla.firefox",
+    "app.zen-browser.zen",
     "com.microsoft.edgemac",
+    "com.vivaldi.Vivaldi",
+    "com.operasoftware.Opera",
 ];
 
 pub fn is_browser(bundle_id: &str) -> bool {
@@ -261,6 +268,11 @@ pub struct AppRef {
     pub known: Option<KnownApp>,
     pub bundle_id: Option<String>,
     pub display_name: String,
+    /// A web platform the notification was attributed to (a browser push
+    /// recognized by its text). Its `key` names the group, filter rule and
+    /// cached logo; `sites::site(key)` looks it up.
+    #[serde(skip, default)]
+    pub platform: Option<&'static str>,
 }
 
 impl AppRef {
@@ -269,7 +281,13 @@ impl AppRef {
             known: Some(app),
             bundle_id: app.bundle_ids().first().map(|s| (*s).to_owned()),
             display_name: app.display_name().to_owned(),
+            platform: None,
         }
+    }
+
+    /// A notification attributed to a web platform (browser web push).
+    pub fn web(site: &'static sites::WebSite) -> Self {
+        Self { known: None, bundle_id: None, display_name: site.name.to_owned(), platform: Some(site.key) }
     }
 
     /// Resolve from a bundle id plus (optional) visible text used for
@@ -281,20 +299,34 @@ impl AppRef {
             .map(|(_, k)| *k)
             .or_else(|| KnownApp::from_bundle_id(bundle_id))
             .or_else(|| if is_browser(bundle_id) { KnownApp::from_web_text(text_hint) } else { None });
+        // A browser push from a site that has no app: name the platform.
+        let platform = if known.is_none() && is_browser(bundle_id) {
+            sites::site_from_text(text_hint).map(|s| s.key)
+        } else {
+            None
+        };
         let display_name = match known {
             Some(k) => k.display_name().to_owned(),
-            None => humanize_bundle_id(bundle_id),
+            None => match platform.and_then(sites::site) {
+                Some(s) => s.name.to_owned(),
+                None => humanize_bundle_id(bundle_id),
+            },
         };
-        Self { known, bundle_id: Some(bundle_id.to_owned()), display_name }
+        Self { known, bundle_id: Some(bundle_id.to_owned()), display_name, platform }
     }
 
-    /// Canonical key for filter rules: the known-app key, else the bundle id,
-    /// else the display name.
+    /// Canonical key for filter rules: the known-app key, else the web
+    /// platform key, else the bundle id, else the display name.
     pub fn rule_key(&self) -> String {
-        match (self.known, &self.bundle_id) {
-            (Some(k), _) => k.key().to_owned(),
-            (None, Some(b)) => b.clone(),
-            (None, None) => self.display_name.clone(),
+        if let Some(k) = self.known {
+            return k.key().to_owned();
+        }
+        if let Some(p) = self.platform {
+            return p.to_owned();
+        }
+        match &self.bundle_id {
+            Some(b) => b.clone(),
+            None => self.display_name.clone(),
         }
     }
 
@@ -342,5 +374,36 @@ mod tests {
         assert_eq!(r.known, Some(KnownApp::Qoder));
         assert_eq!(r.rule_key(), "qoder");
         assert_eq!(r.category(), AppCategory::Agent);
+    }
+
+    #[test]
+    fn browser_pushes_from_web_platforms_get_the_site() {
+        let r = AppRef::resolve("company.thebrowser.dia", "New subscriber · youtube.com", &[]);
+        assert_eq!(r.known, None);
+        assert_eq!(r.platform, Some("youtube"));
+        assert_eq!(r.display_name, "YouTube");
+        assert_eq!(r.rule_key(), "youtube");
+
+        let r = AppRef::resolve("com.google.Chrome", "New email · Gmail", &[]);
+        assert_eq!(r.platform, Some("gmail"));
+        assert_eq!(r.display_name, "Gmail");
+
+        // A non-site browser push stays the browser.
+        let r = AppRef::resolve("com.google.Chrome", "Deployment finished", &[]);
+        assert_eq!(r.platform, None);
+        assert_eq!(r.display_name, "Chrome");
+        assert_eq!(r.rule_key(), "com.google.Chrome");
+
+        // Sites never hijack notifications from non-browsers.
+        let r = AppRef::resolve("com.example.app", "YouTube digest", &[]);
+        assert_eq!(r.platform, None);
+    }
+
+    #[test]
+    fn site_platforms_have_default_rules() {
+        let cfg = crate::config::Config::default();
+        assert!(cfg.notifications.rule("youtube").is_some());
+        assert!(cfg.notifications.rule("gmail").is_some());
+        assert!(cfg.notifications.rule("github").is_some());
     }
 }

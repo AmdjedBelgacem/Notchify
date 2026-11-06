@@ -7,10 +7,11 @@
 //! stopped, because the logs can run to gigabytes.
 
 use notchforge_core::model::{
-    AgentUsage, ProviderStatus, RunningSession, TokenCounts, UsageAgent, UsageRange, UsageSession,
+    AgentLimits, AgentUsage, LimitGauge, ProviderStatus, RunningSession, TokenCounts, UsageAgent, UsageRange,
+    UsageSession, limit_label,
 };
 use notchforge_core::provider::{
-    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
+    BoxFuture, Provider, ProviderCommand, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -28,7 +29,9 @@ const HOUR_MS: i64 = 3_600_000;
 const KEEP_DAYS: i64 = 31;
 /// A session that logged tokens this recently counts as running.
 const RUNNING_MS: i64 = 180_000;
-const TOP_SESSIONS: usize = 4;
+const TOP_SESSIONS: usize = 3;
+/// Claude Code's status data says which session it came from for this long.
+const STATUS_FRESH_MS: i64 = 600_000;
 
 /// Parse an RFC 3339 UTC time like `2026-11-01T18:03:22.326Z` to Unix ms.
 pub fn parse_time(s: &str) -> Option<i64> {
@@ -70,6 +73,22 @@ pub fn model_label(id: &str) -> String {
     }
 }
 
+/// Claude Code's logs don't say how large a session's context window is. Opus
+/// runs with the 1M window, and anything past 200K must have it too; otherwise
+/// assume the default. Its status line reports the exact figure when connected.
+fn claude_window(model: &str, used: u64) -> u64 {
+    if model.contains("opus") || used > 200_000 { 1_000_000 } else { 200_000 }
+}
+
+/// Time spent working: gaps longer than this between messages are idle.
+const IDLE_GAP_MS: i64 = 15 * 60_000;
+
+/// Minutes of activity across message times, which must be sorted.
+pub fn active_minutes(times: &[i64]) -> u32 {
+    let ms: i64 = times.windows(2).map(|w| w[1] - w[0]).filter(|gap| *gap <= IDLE_GAP_MS).sum();
+    (ms / 60_000) as u32
+}
+
 fn project_name(cwd: &str) -> String {
     Path::new(cwd).file_name().and_then(|n| n.to_str()).unwrap_or(cwd).to_owned()
 }
@@ -80,6 +99,9 @@ struct ClaudeLine {
     cwd: Option<String>,
     #[serde(rename = "sessionId")]
     session_id: Option<String>,
+    /// A sub-agent's message: it has its own context, not the session's.
+    #[serde(rename = "isSidechain", default)]
+    is_sidechain: bool,
     message: Option<ClaudeMessage>,
 }
 
@@ -124,10 +146,64 @@ type SessionTally<'a> = (u64, UsageAgent, HashMap<&'a str, u64>);
 #[derive(Default)]
 struct SessionInfo {
     project: String,
-    first_ms: i64,
     last_ms: i64,
-    /// (tokens in use, window), where the agent logs it.
+    /// (tokens in use, window) as of `context_ms`.
     context: Option<(u64, u64)>,
+    context_ms: i64,
+}
+
+/// A Codex rate limit entry, or `None` where it has no such window.
+fn codex_gauge(v: &serde_json::Value) -> Option<LimitGauge> {
+    let percent = v.get("used_percent")?.as_f64()?;
+    Some(LimitGauge {
+        label: limit_label(v.get("window_minutes")?.as_u64()?),
+        percent: percent.round().clamp(0.0, 100.0) as u8,
+        resets_at_ms: v.get("resets_at").and_then(|r| r.as_i64()).map(|s| s * 1000),
+    })
+}
+
+/// The latest limits Codex logged.
+#[derive(Default, Clone)]
+struct CodexLimits {
+    ts_ms: i64,
+    plan: Option<String>,
+    gauges: Vec<LimitGauge>,
+}
+
+/// What Claude Code's status line last reported, read from its saved JSON.
+#[derive(Debug, Default, PartialEq)]
+pub struct ClaudeStatus {
+    pub gauges: Vec<LimitGauge>,
+    pub context_percent: Option<u8>,
+    pub project: Option<String>,
+}
+
+/// Parse the status line's JSON. A window whose reset time has passed is gone.
+pub fn parse_claude_status(text: &str, now_ms: i64) -> Option<ClaudeStatus> {
+    let v: serde_json::Value = serde_json::from_str(text).ok()?;
+    let window = |key: &str, label: &str| -> Option<LimitGauge> {
+        let w = v.get("rate_limits")?.get(key)?;
+        let resets_at_ms = w.get("resets_at")?.as_i64()? * 1000;
+        if resets_at_ms <= now_ms {
+            return None;
+        }
+        let percent = w.get("used_percentage")?.as_f64()?.round().clamp(0.0, 100.0) as u8;
+        Some(LimitGauge { label: label.to_owned(), percent, resets_at_ms: Some(resets_at_ms) })
+    };
+    Some(ClaudeStatus {
+        gauges: [window("five_hour", "Session"), window("seven_day", "Week")].into_iter().flatten().collect(),
+        context_percent: v
+            .get("context_window")
+            .and_then(|c| c.get("used_percentage"))
+            .and_then(|p| p.as_f64())
+            .map(|p| p.round().clamp(0.0, 100.0) as u8),
+        project: v
+            .get("workspace")
+            .and_then(|w| w.get("project_dir").or(w.get("current_dir")))
+            .or(v.get("cwd"))
+            .and_then(|d| d.as_str())
+            .map(project_name),
+    })
 }
 
 #[derive(Default)]
@@ -138,6 +214,14 @@ struct FileState {
     session: Option<Arc<str>>,
 }
 
+/// What a single OpenCode session's cumulative totals looked like when last
+/// read: each poll counts only the growth.
+#[derive(Default, Clone)]
+struct OpenCodeSeen {
+    updated: i64,
+    totals: TokenCounts,
+}
+
 /// Everything read from the logs so far.
 #[derive(Default)]
 pub struct Scanner {
@@ -145,6 +229,23 @@ pub struct Scanner {
     records: HashMap<String, Record>,
     sessions: HashMap<Arc<str>, SessionInfo>,
     strings: HashMap<String, Arc<str>>,
+    codex_limits: Option<CodexLimits>,
+    /// Claude Code logs a limit when it is hit: (window, resets at).
+    claude_hit: Option<(String, i64)>,
+    /// OpenCode's per-session cumulative totals, from its SQLite database.
+    opencode: HashMap<String, OpenCodeSeen>,
+}
+
+/// The short key an agent is named by in session and record keys.
+fn agent_key(agent: UsageAgent) -> &'static str {
+    match agent {
+        UsageAgent::ClaudeCode => "claude",
+        UsageAgent::Codex => "codex",
+        UsageAgent::OpenCode => "opencode",
+        UsageAgent::Gemini => "gemini",
+        UsageAgent::Qoder => "qoder",
+        UsageAgent::Antigravity => "antigravity",
+    }
 }
 
 impl Scanner {
@@ -158,12 +259,8 @@ impl Scanner {
     }
 
     fn touch_session(&mut self, key: &Arc<str>, ts_ms: i64, project: Option<&str>) {
-        let info = self.sessions.entry(key.clone()).or_insert_with(|| SessionInfo {
-            first_ms: ts_ms,
-            last_ms: ts_ms,
-            ..Default::default()
-        });
-        info.first_ms = info.first_ms.min(ts_ms);
+        let info =
+            self.sessions.entry(key.clone()).or_insert_with(|| SessionInfo { last_ms: ts_ms, ..Default::default() });
         info.last_ms = info.last_ms.max(ts_ms);
         if let Some(p) = project.filter(|p| !p.is_empty()) {
             if info.project.is_empty() {
@@ -176,6 +273,9 @@ impl Scanner {
     /// it is counted once, with its largest output. Resumed and sub-agent logs
     /// repeat message ids too, so this holds across files.
     pub fn add_claude_line(&mut self, line: &str) {
+        if line.contains("\"quotaLimits\"") {
+            self.note_claude_limit(line);
+        }
         if !line.contains("\"usage\"") {
             return;
         }
@@ -199,6 +299,14 @@ impl Scanner {
         let session = self.intern(&session_key);
         let model = self.intern(&model);
         self.touch_session(&session, ts, l.cwd.as_deref());
+        // What the session's context holds is everything sent with its latest message.
+        if !l.is_sidechain {
+            if let Some(info) = self.sessions.get_mut(&session).filter(|i| ts >= i.context_ms) {
+                let used = counts.input + counts.cache_read + counts.cache_write;
+                info.context = Some((used, claude_window(&model, used)));
+                info.context_ms = ts;
+            }
+        }
         let key = format!("claude:{id}");
         match self.records.get_mut(&key) {
             Some(r) => {
@@ -209,6 +317,24 @@ impl Scanner {
             None => {
                 self.records.insert(key, Record { ts_ms: ts, session, model, agent: UsageAgent::ClaudeCode, counts });
             }
+        }
+    }
+
+    /// A refused request says which limit was reached and when it resets.
+    fn note_claude_limit(&mut self, line: &str) {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { return };
+        let Some(q) = v.get("quotaLimits") else { return };
+        if q.get("status").and_then(|s| s.as_str()) != Some("rejected") {
+            return;
+        }
+        let (Some(kind), Some(resets)) =
+            (q.get("rateLimitType").and_then(|t| t.as_str()), q.get("resetsAt").and_then(|r| r.as_i64()))
+        else {
+            return;
+        };
+        let label = if kind == "seven_day" { "Week" } else { "Session" };
+        if self.claude_hit.as_ref().is_none_or(|(_, at)| resets * 1000 >= *at) {
+            self.claude_hit = Some((label.to_owned(), resets * 1000));
         }
     }
 
@@ -235,6 +361,17 @@ impl Scanner {
             }
             Some("event_msg") if payload.get("type").and_then(|v| v.as_str()) == Some("token_count") => {
                 let Some(ts) = ts else { return };
+                if let Some(r) = payload.get("rate_limits").filter(|r| !r.is_null()) {
+                    if self.codex_limits.as_ref().is_none_or(|l| ts >= l.ts_ms) {
+                        let gauges =
+                            [r.get("primary"), r.get("secondary")].into_iter().flatten().filter_map(codex_gauge);
+                        self.codex_limits = Some(CodexLimits {
+                            ts_ms: ts,
+                            plan: r.get("plan_type").and_then(|p| p.as_str()).map(str::to_owned),
+                            gauges: gauges.collect(),
+                        });
+                    }
+                }
                 let Some(info) = payload.get("info").filter(|i| !i.is_null()) else { return };
                 let num = |o: &serde_json::Value, k: &str| o.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
                 let Some(last) = info.get("last_token_usage") else { return };
@@ -291,6 +428,109 @@ impl Scanner {
         self.files.insert(path.to_owned(), state);
     }
 
+    /// Usage an agent reported through the transports instead of writing a log
+    /// (Gemini, Qoder, Antigravity — anything that can run a command).
+    pub fn note_usage(
+        &mut self,
+        agent: UsageAgent,
+        model: Option<&str>,
+        session: Option<&str>,
+        counts: TokenCounts,
+        at_ms: i64,
+        project: Option<&str>,
+    ) {
+        if counts == TokenCounts::default() {
+            return;
+        }
+        let session_key =
+            self.intern(&format!("{}:{}", agent_key(agent), session.filter(|s| !s.is_empty()).unwrap_or("session")));
+        self.touch_session(&session_key, at_ms, project);
+        let model = self.intern(model.filter(|m| !m.is_empty()).unwrap_or("unknown"));
+        // Same millisecond and size means the same report was retried.
+        let key = format!("{}:{at_ms}:{}", agent_key(agent), counts.main());
+        self.records.insert(key, Record { ts_ms: at_ms, session: session_key, model, agent, counts });
+    }
+
+    /// OpenCode keeps *cumulative* token totals per session in its SQLite
+    /// database (`session_v2`), refreshed as the session runs. Each session is
+    /// re-read whenever it changes and only the growth is counted, so a
+    /// session can be resumed days later and still land in the right range.
+    fn read_opencode(&mut self, db: &Path, cutoff: i64) {
+        use rusqlite::OpenFlags;
+        if !db.exists() {
+            return;
+        }
+        let Ok(conn) = rusqlite::Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+            return;
+        };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT s.id, s.directory, s.model, s.tokens_input, s.tokens_output, s.tokens_reasoning, \
+             s.tokens_cache_read, s.tokens_cache_write, s.time_updated \
+             FROM session_v2 s WHERE s.time_updated > ?1 ORDER BY s.time_updated ASC",
+        ) else {
+            // A future schema change: OpenCode stays untracked rather than crashing.
+            tracing::info!("OpenCode's database no longer has the expected tables; skipping it");
+            return;
+        };
+        let rows = stmt
+            .query_map([cutoff], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, u64>(3)?,
+                    r.get::<_, u64>(4)?,
+                    r.get::<_, u64>(5)?,
+                    r.get::<_, u64>(6)?,
+                    r.get::<_, u64>(7)?,
+                    r.get::<_, i64>(8)?,
+                ))
+            })
+            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>());
+        let Ok(rows) = rows else {
+            tracing::debug!("could not read OpenCode's database");
+            return;
+        };
+        tracing::info!(db = %db.display(), sessions = rows.len(), "read OpenCode sessions");
+        for (id, directory, model_raw, input, output, reasoning, cache_read, cache_write, updated) in rows {
+            // Reasoning tokens are generated output.
+            let output = output + reasoning;
+            let seen = self.opencode.entry(id.clone()).or_default();
+            if updated <= seen.updated {
+                continue;
+            }
+            let totals = TokenCounts { input, output, cache_read, cache_write };
+            let delta = TokenCounts {
+                input: totals.input.saturating_sub(seen.totals.input),
+                output: totals.output.saturating_sub(seen.totals.output),
+                cache_read: totals.cache_read.saturating_sub(seen.totals.cache_read),
+                cache_write: totals.cache_write.saturating_sub(seen.totals.cache_write),
+            };
+            seen.updated = updated;
+            seen.totals = totals;
+            if delta == TokenCounts::default() {
+                continue;
+            }
+            // `model` is a JSON blob like {"id":"gemini-3-pro","providerID":"…"}.
+            let model = model_raw
+                .as_deref()
+                .and_then(|m| serde_json::from_str::<serde_json::Value>(m).ok())
+                .and_then(|v| v.get("id").and_then(|i| i.as_str()).map(str::to_owned))
+                .or(model_raw)
+                .unwrap_or_default();
+            let session_key = self.intern(&format!("opencode:{id}"));
+            self.touch_session(&session_key, updated, Some(&directory));
+            let record = Record {
+                ts_ms: updated,
+                session: session_key,
+                model: self.intern(&model),
+                agent: UsageAgent::OpenCode,
+                counts: delta,
+            };
+            self.records.insert(format!("opencode:{id}:{updated}"), record);
+        }
+    }
+
     fn read_lines(
         &mut self,
         path: &Path,
@@ -314,6 +554,9 @@ impl Scanner {
             match agent {
                 UsageAgent::ClaudeCode => self.add_claude_line(line),
                 UsageAgent::Codex => self.add_codex_line(line, state, fallback),
+                // The other agents are read from databases or reported via the
+                // transports, not from JSONL logs.
+                _ => {}
             }
         }
     }
@@ -328,8 +571,10 @@ impl Scanner {
                 self.read_file(&path, agent);
             }
         }
+        self.read_opencode(&home.join(".local/share/opencode/opencode.db"), cutoff);
         self.records.retain(|_, r| r.ts_ms >= cutoff);
         self.sessions.retain(|_, s| s.last_ms >= cutoff);
+        self.opencode.retain(|_, s| s.updated >= cutoff);
     }
 
     /// The three ranges the page shows, ending today.
@@ -341,11 +586,16 @@ impl Scanner {
     }
 
     fn range(&self, label: &str, start_ms: i64, buckets: usize, step_ms: i64) -> UsageRange {
-        let mut out = UsageRange { label: label.to_owned(), bars: vec![(0, 0); buckets], ..Default::default() };
+        let mut out = UsageRange {
+            label: label.to_owned(),
+            bars: vec![vec![0; UsageAgent::ALL.len()]; buckets],
+            ..Default::default()
+        };
         let mut agents: HashMap<UsageAgent, u64> = HashMap::new();
         let mut models: HashMap<&str, u64> = HashMap::new();
         // Per session: tokens, and tokens per model to name its main one.
         let mut sessions: HashMap<&Arc<str>, SessionTally> = HashMap::new();
+        let mut times: HashMap<&Arc<str>, Vec<i64>> = HashMap::new();
         for r in self.records.values() {
             if r.ts_ms < start_ms {
                 continue;
@@ -356,14 +606,12 @@ impl Scanner {
             }
             let tokens = r.counts.main();
             out.counts.add(&r.counts);
-            match r.agent {
-                UsageAgent::ClaudeCode => out.bars[i].0 += tokens,
-                UsageAgent::Codex => out.bars[i].1 += tokens,
-            }
+            out.bars[i][r.agent.slot()] += tokens;
             *agents.entry(r.agent).or_default() += tokens;
             *models.entry(&r.model).or_default() += tokens;
             let s = sessions.entry(&r.session).or_insert((0, r.agent, HashMap::new()));
             s.0 += tokens;
+            times.entry(&r.session).or_default().push(r.ts_ms);
             *s.2.entry(&r.model).or_default() += tokens;
         }
         out.agents = agents.into_iter().collect();
@@ -382,7 +630,10 @@ impl Scanner {
                         .unwrap_or_else(|| "Unknown".into()),
                     agent,
                     model: model_label(model),
-                    minutes: info.map_or(0, |i| ((i.last_ms - i.first_ms) / 60_000) as u32),
+                    minutes: times.get_mut(key).map_or(0, |t| {
+                        t.sort_unstable();
+                        active_minutes(t)
+                    }),
                     tokens,
                 }
             })
@@ -390,6 +641,59 @@ impl Scanner {
         list.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.project.cmp(&b.project)));
         list.truncate(TOP_SESSIONS);
         out.sessions = list;
+        out
+    }
+
+    /// Each found agent's limits. `claude` is what its status line last said,
+    /// and whether it is connected.
+    pub fn limits(
+        &self,
+        now_ms: i64,
+        running: &[RunningSession],
+        (claude_found, codex_found): (bool, bool),
+        claude: Option<ClaudeStatus>,
+        claude_connected: bool,
+    ) -> Vec<AgentLimits> {
+        let live = |agent| running.iter().find(|r| r.agent == agent);
+        let mut out = Vec::new();
+        if claude_found {
+            let s = live(UsageAgent::ClaudeCode);
+            let status = claude.unwrap_or_default();
+            let mut gauges = status.gauges;
+            // Without the status line, a limit that was hit is still worth showing.
+            if let Some((label, at)) = self.claude_hit.as_ref().filter(|(_, at)| *at > now_ms) {
+                if !gauges.iter().any(|g| &g.label == label) {
+                    gauges.push(LimitGauge { label: label.clone(), percent: 100, resets_at_ms: Some(*at) });
+                }
+            }
+            out.push(AgentLimits {
+                agent: UsageAgent::ClaudeCode,
+                connected: claude_connected,
+                plan: None,
+                running: s.is_some(),
+                project: s.map(|r| r.project.clone()).or(status.project),
+                gauges,
+                // The status line's exact figure, else what the logs show.
+                context_percent: s.and(status.context_percent).or(s.and_then(|r| r.context_percent)),
+            });
+        }
+        if codex_found {
+            let s = live(UsageAgent::Codex);
+            let limits = self.codex_limits.clone().unwrap_or_default();
+            let gauges = limits.gauges.into_iter().filter(|g| g.resets_at_ms.is_none_or(|at| at > now_ms)).collect();
+            out.push(AgentLimits {
+                agent: UsageAgent::Codex,
+                connected: true,
+                plan: limits.plan.map(|p| {
+                    let mut c = p.chars();
+                    c.next().map_or(String::new(), |f| f.to_uppercase().chain(c).collect::<String>()) + " plan"
+                }),
+                running: s.is_some(),
+                project: s.map(|r| r.project.clone()),
+                gauges,
+                context_percent: s.and_then(|r| r.context_percent),
+            });
+        }
         out
     }
 
@@ -492,18 +796,51 @@ fn add_ticks(ranges: &mut [UsageRange], today_start_ms: i64) {
     }
 }
 
-fn read_usage(scanner: &mut Scanner, home: &Path, now_ms: i64) -> AgentUsage {
+/// The status line's saved JSON, if Claude Code wrote it recently enough to
+/// say which session is current. Its limits hold until they reset regardless.
+fn read_claude_status(data_dir: &Path, now_ms: i64) -> Option<ClaudeStatus> {
+    let path = data_dir.join(super::connect::CLAUDE_STATUS_FILE);
+    let mut status = parse_claude_status(&std::fs::read_to_string(&path).ok()?, now_ms)?;
+    let fresh = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .is_some_and(|d| now_ms - d.as_millis() as i64 <= STATUS_FRESH_MS);
+    if !fresh {
+        status.context_percent = None;
+    }
+    Some(status)
+}
+
+fn read_usage(scanner: &mut Scanner, home: &Path, data_dir: &Path, now_ms: i64) -> AgentUsage {
+    let started = std::time::Instant::now();
     scanner.scan(home, now_ms);
+    tracing::info!(
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        records = scanner.records.len(),
+        "agent usage read"
+    );
     let today = local_day_start(now_ms);
     let mut ranges = scanner.summarize(today);
     add_ticks(&mut ranges, today);
+    let running = scanner.running(now_ms);
+    let claude_found = home.join(".claude/projects").is_dir();
+    let codex_found = home.join(".codex/sessions").is_dir();
+    let env = super::connect::Env { home: home.to_owned(), notify_bin: None, port: 0, token: None };
+    let connected = super::connect::claude_limits_status(&env) == super::connect::Status::Connected;
+    let limits =
+        scanner.limits(now_ms, &running, (claude_found, codex_found), read_claude_status(data_dir, now_ms), connected);
     AgentUsage {
         loaded: true,
-        claude_found: home.join(".claude/projects").is_dir(),
-        codex_found: home.join(".codex/sessions").is_dir(),
+        claude_found,
+        codex_found,
         opencode_found: home.join(".local/share/opencode").is_dir(),
+        gemini_found: home.join(".gemini").is_dir(),
+        qoder_found: home.join(".qoder").is_dir() || home.join("Library/Application Support/Qoder").is_dir(),
+        antigravity_found: home.join(".gemini/antigravity").is_dir(),
         ranges,
-        running: scanner.running(now_ms),
+        running,
+        limits,
     }
 }
 
@@ -525,9 +862,10 @@ impl Provider for AgentUsageProvider {
             loop {
                 let now = notchforge_core::time::now_ms();
                 let h = home.clone();
+                let data = ctx.paths.data_dir.clone();
                 // The first read can cover gigabytes: keep it off the runtime.
                 let Ok((back, usage)) = tokio::task::spawn_blocking(move || {
-                    let usage = read_usage(&mut scanner, &h, now);
+                    let usage = read_usage(&mut scanner, &h, &data, now);
                     (scanner, usage)
                 })
                 .await
@@ -541,8 +879,17 @@ impl Provider for AgentUsageProvider {
                     }
                     last = Some(usage);
                 }
-                if ctx.sleep(POLL).await == Wake::Shutdown {
-                    return Ok(());
+                let mut shutdown = ctx.shutdown.clone();
+                tokio::select! {
+                    _ = shutdown.wait() => return Ok(()),
+                    _ = tokio::time::sleep(POLL) => {}
+                    cmd = ctx.next_command() => {
+                        // Usage reported through the transports: count it and
+                        // read everything again right away.
+                        if let Some(ProviderCommand::Usage { agent, model, session, counts, at_ms }) = cmd {
+                            scanner.note_usage(agent, model.as_deref(), session.as_deref(), counts, at_ms, None);
+                        }
+                    }
                 }
             }
         })
@@ -554,6 +901,88 @@ mod tests {
     use super::*;
 
     const T: &str = "2026-11-01T10:30:00.500Z";
+
+    #[test]
+    fn reads_opencodes_cumulative_totals_incrementally() {
+        let dir = std::env::temp_dir().join(format!("nf-opencode-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db = dir.join("opencode.db");
+        let conn = rusqlite::Connection::open(&db).expect("fixture db");
+        conn.execute_batch(
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, model TEXT, \
+             tokens_input INTEGER DEFAULT 0, tokens_output INTEGER DEFAULT 0, tokens_reasoning INTEGER DEFAULT 0, \
+             tokens_cache_read INTEGER DEFAULT 0, tokens_cache_write INTEGER DEFAULT 0, time_updated INTEGER NOT NULL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session_v2 (id, directory, model, tokens_input, tokens_output, tokens_reasoning, \
+             tokens_cache_read, tokens_cache_write, time_updated) \
+             VALUES ('ses_1', '/work/deep-space', '{\"id\":\"nemotron-3.5\",\"providerID\":\"openrouter\"}', \
+             1000, 200, 50, 3000, 0, 5000)",
+            [],
+        )
+        .unwrap();
+
+        let mut sc = Scanner::default();
+        sc.read_opencode(&db, 0);
+        assert_eq!(sc.records.len(), 1);
+        let r = sc.records.values().next().unwrap();
+        assert_eq!(r.agent, UsageAgent::OpenCode);
+        assert_eq!(r.counts.input, 1000);
+        assert_eq!(r.counts.output, 250, "reasoning folds into output");
+        assert_eq!(r.counts.cache_read, 3000);
+        assert_eq!(r.model.to_string(), "nemotron-3.5");
+        let s = sc.sessions.values().next().unwrap();
+        assert_eq!(s.project, "deep-space");
+
+        // The same state again adds nothing.
+        sc.read_opencode(&db, 0);
+        assert_eq!(sc.records.len(), 1);
+
+        // Growth counts only the growth.
+        conn.execute(
+            "UPDATE session_v2 SET tokens_input = 1600, tokens_output = 400, tokens_reasoning = 100, \
+             time_updated = 9000 WHERE id = 'ses_1'",
+            [],
+        )
+        .unwrap();
+        sc.read_opencode(&db, 0);
+        assert_eq!(sc.records.len(), 2);
+        let latest = sc.records.values().max_by_key(|r| r.ts_ms).unwrap();
+        assert_eq!((latest.counts.input, latest.counts.output), (600, 250));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reported_usage_counts_without_a_log() {
+        let mut sc = Scanner::default();
+        sc.note_usage(
+            UsageAgent::Gemini,
+            Some("gemini-3-flash"),
+            Some("sess-9"),
+            TokenCounts { input: 1200, output: 340, ..Default::default() },
+            12345,
+            Some("/work/apollo"),
+        );
+        assert_eq!(sc.records.len(), 1);
+        let r = sc.records.values().next().unwrap();
+        assert_eq!(r.agent, UsageAgent::Gemini);
+        assert_eq!(r.model.to_string(), "gemini-3-flash");
+        let s = sc.sessions.values().next().unwrap();
+        assert_eq!(s.project, "apollo");
+
+        // An identical retry (same millisecond and size) counts once.
+        sc.note_usage(
+            UsageAgent::Gemini,
+            Some("gemini-3-flash"),
+            Some("sess-9"),
+            TokenCounts { input: 1200, output: 340, ..Default::default() },
+            12345,
+            None,
+        );
+        assert_eq!(sc.records.len(), 1);
+    }
 
     fn claude(id: &str, output: u64, session: &str) -> String {
         format!(
@@ -589,7 +1018,7 @@ mod tests {
         let day = now - now.rem_euclid(DAY_MS);
         let r = &s.summarize(day)[0];
         assert_eq!(r.counts, TokenCounts { input: 20, output: 48, cache_read: 200, cache_write: 10 });
-        assert_eq!(r.bars[10], (68, 0), "cache stays out of the bars");
+        assert_eq!(r.bars[10], vec![68, 0, 0, 0, 0, 0], "cache stays out of the bars");
         assert_eq!(r.agents, vec![(UsageAgent::ClaudeCode, 68)]);
         assert_eq!(r.models, vec![("Opus 5.5".to_owned(), 68)]);
         assert_eq!(r.sessions[0].project, "Notchify");
@@ -651,6 +1080,86 @@ mod tests {
         s.scan(&dir, parse_time(T).unwrap());
         assert_eq!(s.records.len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reads_claude_limits_from_its_status_data() {
+        let json = r#"{"workspace":{"project_dir":"/work/Notchify"},
+            "context_window":{"used_percentage":18.4},
+            "rate_limits":{"five_hour":{"used_percentage":41.6,"resets_at":2000},
+                           "seven_day":{"used_percentage":83,"resets_at":500}}}"#;
+        let s = parse_claude_status(json, 1_000_000).expect("parse");
+        assert_eq!(s.project.as_deref(), Some("Notchify"));
+        assert_eq!(s.context_percent, Some(18));
+        assert_eq!(s.gauges.len(), 1, "a window past its reset is gone");
+        assert_eq!(s.gauges[0], LimitGauge { label: "Session".into(), percent: 42, resets_at_ms: Some(2_000_000) });
+        assert_eq!(parse_claude_status("{}", 0).expect("empty").gauges, vec![]);
+        assert_eq!(parse_claude_status("nope", 0), None);
+    }
+
+    #[test]
+    fn keeps_the_latest_codex_limits() {
+        let mut s = Scanner::default();
+        let mut st = FileState::default();
+        let line = |t: &str, pct: u32| {
+            format!(
+                r#"{{"timestamp":"{t}","type":"event_msg","payload":{{"type":"token_count","info":null,"rate_limits":{{"plan_type":"plus","primary":{{"used_percent":{pct}.4,"window_minutes":300,"resets_at":2000000000}},"secondary":{{"used_percent":36.0,"window_minutes":10080,"resets_at":2000000000}}}}}}}}"#
+            )
+        };
+        s.add_codex_line(&line("2026-11-01T10:00:00.000Z", 12), &mut st, "f");
+        s.add_codex_line(&line("2026-11-01T09:00:00.000Z", 99), &mut st, "older");
+        let limits = s.limits(parse_time(T).unwrap(), &[], (false, true), None, false);
+        assert_eq!(limits.len(), 1);
+        assert_eq!(limits[0].plan.as_deref(), Some("Plus plan"));
+        let labels: Vec<_> = limits[0].gauges.iter().map(|g| (g.label.as_str(), g.percent)).collect();
+        assert_eq!(labels, vec![("Session", 12), ("Week", 36)]);
+    }
+
+    #[test]
+    fn shows_a_claude_limit_that_was_hit_until_it_resets() {
+        let mut s = Scanner::default();
+        s.add_claude_line(
+            r#"{"type":"assistant","quotaLimits":{"status":"rejected","rateLimitType":"five_hour","resetsAt":2000}}"#,
+        );
+        let at = |now| s.limits(now, &[], (true, false), None, false);
+        assert_eq!(at(1_000_000)[0].gauges[0].percent, 100);
+        assert!(!at(1_000_000)[0].connected);
+        assert!(at(3_000_000)[0].gauges.is_empty());
+    }
+
+    #[test]
+    fn claude_context_comes_from_its_latest_message() {
+        let mut s = Scanner::default();
+        let line = |id: &str, t: &str, cache: u64, extra: &str| {
+            format!(
+                r#"{{"timestamp":"{t}","cwd":"/work/Notchify","sessionId":"s1"{extra},"message":{{"id":"{id}","model":"claude-opus-5-5","usage":{{"input_tokens":1,"output_tokens":9,"cache_read_input_tokens":{cache},"cache_creation_input_tokens":0}}}}}}"#
+            )
+        };
+        s.add_claude_line(&line("m1", "2026-11-01T10:00:00.000Z", 100_000, ""));
+        s.add_claude_line(&line("m2", "2026-11-01T10:01:00.000Z", 756_174, ""));
+        s.add_claude_line(&line("m3", "2026-11-01T10:02:00.000Z", 5, r#","isSidechain":true"#));
+        let now = parse_time("2026-11-01T10:02:30.000Z").unwrap();
+        let live = s.running(now);
+        assert_eq!(live[0].context_percent, Some(76), "the sub-agent's small context doesn't count");
+        let limits = s.limits(now, &live, (true, false), None, false);
+        assert_eq!(limits[0].context_percent, Some(76));
+        assert!(limits[0].running);
+    }
+
+    #[test]
+    fn context_windows_are_inferred() {
+        assert_eq!(claude_window("claude-opus-5-5", 10), 1_000_000);
+        assert_eq!(claude_window("claude-sonnet-5-5", 10), 200_000);
+        assert_eq!(claude_window("claude-sonnet-5-5", 300_000), 1_000_000);
+    }
+
+    #[test]
+    fn idle_gaps_are_not_active_time() {
+        let min = 60_000;
+        assert_eq!(active_minutes(&[]), 0);
+        assert_eq!(active_minutes(&[0, 5 * min, 10 * min]), 10);
+        // A three-day pause between messages adds nothing.
+        assert_eq!(active_minutes(&[0, 5 * min, 4320 * min, 4322 * min]), 7);
     }
 
     #[test]

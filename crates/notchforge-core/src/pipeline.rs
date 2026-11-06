@@ -298,6 +298,7 @@ mod tests {
             timestamp_ms: 0,
             thread: None,
             url: None,
+            tokens: None,
         }
     }
 

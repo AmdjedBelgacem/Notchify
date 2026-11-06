@@ -25,9 +25,16 @@ It surfaces:
   agent sends something, the notch asks **Allow / Deny** and remembers your answer.
 - **Messaging notifications** from WhatsApp, Discord, Instagram, Facebook
   and Messenger, Messages, Slack, Telegram and Signal, read from Notification
-  Center.
+  Center — and you can **answer them from the notch**: a Reply box opens and
+  the reply is typed into the app's own notification banner, so Discord &
+  friends deliver it through their normal session. The banner must still be on
+  screen (it is, right after the message arrives); keep banners enabled for
+  apps you want to answer.
 - **Weather**: current conditions, high and low, and the next 5 hours (Open-Meteo,
   free with no key).
+- **Calendar**: your upcoming events from every connected calendar account
+  (iCloud, Google, Exchange, subscribed) on the Overview card — read-only, via
+  EventKit. Click through to Calendar for the rest.
 - **Batteries**: your Mac's, plus AirPods (left, right and case),
   Magic Keyboard, Mouse, Trackpad and other HID accessories.
 - **A temporary file tray.** Drag files onto the notch, then drag them back out
@@ -50,9 +57,25 @@ It surfaces:
   Agent, Gemini CLI…) ends, with no setup. **Settings › Coding Agents** connects
   Claude Code, Codex and OpenCode in one click.
 - **Agent token usage.** The panel's Agents tab shows tokens used today, over 7
-  and over 30 days, by agent, model and session, read from Claude Code and Codex
-  CLI logs on this Mac. Only counts, models, times and project names are kept.
-  It shows tokens rather than money, and OpenCode and Cursor aren't tracked yet.
+  and over 30 days, by agent, model and session — read from Claude Code and
+  Codex CLI logs, from OpenCode's local database, and from any agent that
+  reports usage through the transports (`notchforge-notify --source gemini
+  --input 1200 --output 340 --model …`). Only counts, models, times and
+  project names are kept; it shows tokens rather than money. **Antigravity**
+  is read live from its own language server while it runs — plan prompt
+  credits and per-model quota rings with their reset times. Gemini CLI and
+  Qoder record no usage on disk, so they count when something reports them.
+- **Incoming calls.** A call from any app or the current browser tab rings in the
+  notch with answer and decline buttons, and several at once stack with one on
+  top. After picking up, the notch shows who it's with, a running time and a way
+  to hang up, beside the notch and in the hover view and panel. macOS has no public
+  way to see other apps' calls, so this reads the buttons of apps making sound
+  through Accessibility, or their notifications. Background browser tabs can't be
+  read, so those depend on the site sending a notification.
+- **Agent limits.** The same tab rings each agent's session and weekly limits and
+  its context. Codex CLI logs them. Claude Code reports them through its status
+  line, so **Settings › Coding Agents** can connect it. That needs a Pro, Max or
+  Ultra plan and hides some of its footer hints, and Disconnect puts it all back.
 
 > **A note on names.** The crates, binaries (`notchforge`, `notchforge-notify`),
 > the `NotchForge.app` bundle and the `NotchForge` data folder keep the project's
@@ -83,7 +106,8 @@ secondary entry point.
 >   running app with synthetic pointer, click and Escape events: hover-expand,
 >   click-to-pin, file drop into the tray, the music page (with a synthetic
 >   Spotify track and playlists), Escape-to-collapse, a notification
->   peek, the Settings window and a screen re-layout. At each stage it asserts
+>   peek, the Settings window, a screen re-layout, the fullscreen hide, the
+>   per-wing island sizes and a pass-through click. At each stage it asserts
 >   the state, island geometry and click-through behaviour. It also measures
 >   the springs (≈50–60 fps on a GPU-less VM) and renders the island's own layers to
 >   check its pixels: an opaque black shape, content actually drawn, a square
@@ -117,16 +141,41 @@ secondary entry point.
 
 | State | Trigger | What you see |
 |---|---|---|
-| **Collapsed** | idle | The black island exactly covers the notch. With *wings* on, small live indicators sit either side: charging, low battery, number of tray files, unread count with the latest app's icon, and Focus. While music plays, the left wing shows the cover and the right wing an equaliser. |
+| **Collapsed** | idle | The black island exactly covers the notch. With *wings* on, small live indicators sit either side: charging, low battery, number of tray files, unread count with the latest app's icon, and Focus. While music plays, the left wing shows the cover and the right wing an equaliser — and **clicking either wing toggles play/pause** without opening anything (a click anywhere else on the island still passes through to the menu bar item it covers). A wing whose spot beside the notch is taken by a menu bar item is hidden instead of drawn over it (see *Avoid menu bar items* in Settings). |
 | **Peek** | a notification at or above `peek_min_priority` arrives | A short banner drops out of the notch for 4 s. A burst of notifications extends one peek; it doesn't flap. |
 | **Hover** (compact) | the pointer rests near the notch for 120 ms | Three cards: weather, battery (plus your lowest accessory), and the latest notification, or what's playing when nothing is unread. Clicking the now-playing card opens the music page. |
 | **Expanded** (pinned) | click | Two pages, picked with the buttons at the top left. **Overview**: notification list with open, copy and dismiss actions; the file tray; weather with an hourly forecast; accessory batteries; brightness and volume sliders; a resolution picker; Focus, pause and settings buttons. **Now Playing**: see [Audio & music](#audio--music). |
 | **Drop target** | dragging files toward the notch | The panel opens with the tray highlighted. Dropping pins it open. |
 
+**Nothing important gets covered while collapsed, ever.** The live wings beside
+the notch render only when the app can verify the menu bar beside it is clear
+(status items via Control Center, app menus via Accessibility) — without that
+verification the collapsed island is exactly the hardware notch, covering
+nothing beyond it.
+
 Press <kbd>Esc</kbd> or click anywhere outside to collapse.
 <kbd>⌘</kbd><kbd>,</kbd> opens Settings while the panel is pinned.
-On displays without a notch, Notchisland draws a slim pill of the same height
-as the menu bar in the same spot.
+On displays without a notch, Notchisland draws an iPhone-style **floating
+capsule** — rounded, detached a few points below the top edge — and it glides
+out of the way of menu bar items, settling in the widest free span nearest the
+centre. Turn on *Show the island on every screen* in Settings to put a
+display-only copy of the collapsed island on each other display (a real notch
+where the display has one, the floating capsule where it doesn't); each copy
+hides itself while its own screen is fullscreen. By default the island lives
+on one screen only — your choice of notch/main/pointer in Settings.
+
+**Nothing important gets stuck underneath.** A click on a part of the open
+panel that has no button — the margins around the island, or the menu-bar
+strip beside the notch while a glance is open — collapses the island *and*
+that same click lands on the element underneath, so covered menu bar items
+stay one click away. Clicking the island itself still pins it.
+
+**Fullscreen apps.** While a fullscreen app is frontmost the island hides
+completely, so pushing the pointer to the top reveals a menu bar it can't
+cover or block (*Hide in fullscreen apps* in Settings, on by default). A
+ringing call still appears, the panel can still be opened from the menu bar
+or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>N</kbd>, and dragging files onto the notch
+still shows the drop target. It comes back when you leave fullscreen.
 
 Transitions use a spring with a slight bounce when opening and critical
 damping when closing, so the island never overshoots below the notch. With
@@ -292,8 +341,10 @@ Full Disk Access**, then **+**, then choose `NotchForge.app` (or your
 terminal, when using `cargo run`). Restart Notchisland afterwards.
 
 > macOS ties permissions to the code signature. Ad-hoc-signed rebuilds look
-> like a new app, so sign with a stable identity
-> (`CODESIGN_IDENTITY=… packaging/bundle.sh`) to keep permissions across builds.
+> like a new app, so run `packaging/make_signing_identity.sh` once:
+> `packaging/bundle.sh` then signs with that local identity and permissions
+> survive rebuilds. To distribute the app, use a Developer ID instead
+> (`CODESIGN_IDENTITY=… packaging/bundle.sh`).
 
 Global mouse monitoring (for hover and drag detection) does **not** require
 Accessibility.
@@ -376,6 +427,15 @@ Slack, Telegram, Signal and Messenger are recognized by bundle id. Instagram
 and Facebook web push from Safari, Chrome, Arc, Brave, Firefox and Edge are
 recognized from the notification text.
 
+**Web platforms.** Browser pushes from YouTube, Gmail, Reddit, LinkedIn, X,
+GitHub, Netflix, Twitch and the other platforms in the notch's built-in site
+list are named after the site, not the browser — "New subscriber ·
+youtube.com" arrives as **YouTube**, with its own logo (fetched once from a
+favicon service and cached), its own group in the panel and its own switch in
+Settings. If the logo hasn't arrived yet (offline, first sighting) a
+brand-coloured tile stands in; nothing ever shows the browser's icon for a
+site the notch knows.
+
 Per-app switches, priority overrides and muted keywords are in Settings and in
 `[notifications.apps.<key>]`.
 
@@ -408,6 +468,9 @@ while the audio setup is unchanged.
 **Spotify and Apple Music** get the full player in **Now Playing**: cover
 art, title, artist and album, a seekable progress bar, play/pause, previous
 and next, shuffle and repeat. The backdrop is tinted with the cover's colour.
+**Watching a YouTube video in a browser** adds an *Up next* segment to the
+playlists tile: the video's recommended list, read from YouTube's watch page —
+click a recommendation to open it.
 Players are queried through their AppleScript dictionaries, but only while
 they're running, so Notchisland never launches a player by asking about it. Both
 players announce track changes, and the notch updates instantly.
@@ -594,7 +657,8 @@ one.
 | Spotify / Music | AppleScript dictionaries via `osascript` | `providers/src/media/script.rs` | Player shows as idle; other apps still work via media keys |
 
 The other APIs used are public: IOKit power sources, CoreGraphics display
-modes, CoreAudio (devices and, on 14.2+, process objects), CoreLocation,
+modes and the window list (fullscreen detection, status-item positions),
+CoreAudio (devices and, on 14.2+, process objects), CoreLocation,
 `SMAppService`, `NSSharingService`, the Spotify Web API and AppKit.
 Notchisland deliberately doesn't use the private MediaRemote framework. Since
 macOS 15.4 it no longer serves third-party apps.

@@ -33,16 +33,33 @@ use std::rc::Rc;
 const WIDTH: f64 = 960.0;
 const HEIGHT: f64 = 700.0;
 const SIDEBAR: f64 = 248.0;
-const CONTENT_PAD: f64 = 36.0;
-const HEADER_H: f64 = 96.0;
+const CONTENT_PAD: f64 = 24.0;
+const HEADER_H: f64 = 88.0;
 const GROUP_W: f64 = WIDTH - SIDEBAR - 2.0 * CONTENT_PAD;
-/// Height of a row without a subtitle.
-const ROW_H: f64 = 50.0;
+/// The floating sidebar, inset from the window's edges.
+const SIDE_INSET: f64 = 10.0;
+const SIDE_W: f64 = SIDEBAR - SIDE_INSET;
+const SIDE_H: f64 = HEIGHT - 2.0 * SIDE_INSET;
+/// Settings are equal tiles, two across. A setting too wide for that has a full row.
+const TILE_GAP: f64 = 10.0;
+const TILE_W: f64 = (GROUP_W - TILE_GAP) / 2.0;
+const TILE_H: f64 = 84.0;
+const WIDE_H: f64 = TILE_H;
+const TILE_R: f64 = 18.0;
+/// A text box wider than this needs a full row.
+const WIDEST_HALF_FIELD: f64 = 150.0;
 thread_local! {
     /// Self-test only: show the design boards' sample state (Spotify connected
     /// with 24 playlists, Automation allowed, Accessibility not) so renders
     /// compare like for like.
     static PREVIEW: Cell<bool> = const { Cell::new(false) };
+    /// Self-test only: offscreen renders can't see through the window.
+    static SOLID_GROUND: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Draw the window's own ground rather than showing the desktop through it.
+pub fn set_solid_ground(on: bool) {
+    SOLID_GROUND.with(|p| p.set(on));
 }
 
 /// Turn the board sample state on or off (self-test renders).
@@ -271,16 +288,67 @@ fn text_tertiary() -> Retained<NSColor> {
     rgba(1.0, 1.0, 1.0, 0.5)
 }
 fn hairline() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.07)
-}
-fn ink() -> Retained<NSColor> {
-    rgba(0.043, 0.043, 0.051, 1.0)
+    rgba(1.0, 1.0, 1.0, 0.12)
 }
 fn side_bg() -> Retained<NSColor> {
-    rgba(0.063, 0.063, 0.075, 1.0)
+    rgba(1.0, 1.0, 1.0, 0.05)
 }
 fn card_bg() -> Retained<NSColor> {
-    rgba(0.082, 0.082, 0.094, 1.0)
+    rgba(1.0, 1.0, 1.0, 0.06)
+}
+
+/// A rounded tile with a hairline edge, the same in the sidebar and the panes.
+fn glass_card(
+    mtm: MainThreadMarker,
+    frame: objc2_foundation::NSRect,
+    fill: &NSColor,
+    radius: f64,
+) -> Retained<FlippedView> {
+    let v = shape_view(mtm, frame, fill, radius);
+    if let Some(l) = v.layer() {
+        l.setBorderWidth(0.5);
+        l.setBorderColor(Some(&hairline().CGColor()));
+    }
+    v
+}
+
+/// The window's ground, as on the notch: black at the top, thinning into glass
+/// lower down. Where nothing can be seen through it, a dark tint stands in.
+fn ground(mtm: MainThreadMarker) -> Retained<FlippedView> {
+    let root = FlippedView::new(mtm, rect(0.0, 0.0, WIDTH, HEIGHT));
+    root.setWantsLayer(true);
+    let solid = SOLID_GROUND.with(Cell::get) || crate::glass::system_reduce_transparency();
+    if solid {
+        if let Some(l) = root.layer() {
+            let g = crate::ui::gradient_layer(
+                &[(0.03, 0.03, 0.035, 1.0), (0.16, 0.09, 0.13, 1.0)],
+                objc2_foundation::NSPoint::new(0.5, 0.0),
+                objc2_foundation::NSPoint::new(0.5, 1.0),
+            );
+            g.setFrame(rect(0.0, 0.0, WIDTH, HEIGHT));
+            l.addSublayer(&g);
+        }
+        return root;
+    }
+    use objc2_app_kit::{NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView};
+    let glass = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), rect(0.0, 0.0, WIDTH, HEIGHT));
+    glass.setMaterial(NSVisualEffectMaterial::HUDWindow);
+    glass.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+    glass.setState(NSVisualEffectState::Active);
+    root.addSubview(&glass);
+    let veil = FlippedView::new(mtm, rect(0.0, 0.0, WIDTH, HEIGHT));
+    veil.setWantsLayer(true);
+    if let Some(l) = veil.layer() {
+        let g = crate::ui::gradient_layer(
+            &[(0.0, 0.0, 0.0, 0.92), (0.0, 0.0, 0.0, 0.58)],
+            objc2_foundation::NSPoint::new(0.5, 0.0),
+            objc2_foundation::NSPoint::new(0.5, 1.0),
+        );
+        g.setFrame(rect(0.0, 0.0, WIDTH, HEIGHT));
+        l.addSublayer(&g);
+    }
+    root.addSubview(&veil);
+    root
 }
 
 /// Meaning of a status capsule.
@@ -362,8 +430,10 @@ struct Form<'a> {
     y: Cell<f64>,
     targets: &'a Targets,
     draft: Draft,
-    /// The open group box and the y of its next row.
-    group: RefCell<Option<(Retained<FlippedView>, f64)>>,
+    /// A half-width tile waiting for a neighbour on its right.
+    waiting: RefCell<Option<Retained<FlippedView>>>,
+    /// A section is open, so there's a gap to leave after it.
+    in_section: Cell<bool>,
     /// Colour the next row's subtitle green (a connected account).
     sub_ok: Cell<bool>,
 }
@@ -379,27 +449,34 @@ impl Form<'_> {
     fn begin(&self, title: &str) {
         self.end();
         if !title.is_empty() {
-            self.doc.addSubview(&caption(self.mtm, title, 11.0, rect(CONTENT_PAD + 6.0, self.y.get(), GROUP_W, 14.0)));
-            self.y.set(self.y.get() + 22.0);
+            self.doc.addSubview(&label(
+                self.mtm,
+                title,
+                &font(13.0, Weight::Semibold),
+                &text_primary(),
+                rect(CONTENT_PAD + 4.0, self.y.get(), GROUP_W, 17.0),
+            ));
+            self.y.set(self.y.get() + 25.0);
         }
-        let g = shape_view(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, 0.0), &card_bg(), 13.0);
-        if let Some(l) = g.layer() {
-            l.setBorderWidth(0.5);
-            l.setBorderColor(Some(&hairline().CGColor()));
+        self.in_section.set(true);
+    }
+
+    /// A tile left without a neighbour takes the whole row, so there's no hole.
+    fn finish_row(&self) {
+        if let Some(tile) = self.waiting.borrow_mut().take() {
+            tile.setFrameSize(objc2_foundation::NSSize::new(GROUP_W, TILE_H));
+            self.y.set(self.y.get() + TILE_H + TILE_GAP);
         }
-        self.doc.addSubview(&g);
-        *self.group.borrow_mut() = Some((g, 0.0));
     }
 
     fn end(&self) {
-        if let Some((g, h)) = self.group.borrow_mut().take() {
-            let f = g.frame();
-            g.setFrame(rect(f.origin.x, f.origin.y, f.size.width, h));
-            self.y.set(f.origin.y + h + 22.0);
+        self.finish_row();
+        if self.in_section.replace(false) {
+            self.y.set(self.y.get() + 14.0);
         }
     }
 
-    /// Footnote under the last group.
+    /// Footnote under the last section.
     fn note(&self, text: &str) {
         self.end();
         let f = font(12.0, Weight::Regular);
@@ -410,63 +487,75 @@ impl Form<'_> {
             text,
             &f,
             &text_tertiary(),
-            rect(CONTENT_PAD + 8.0, self.y.get() - 14.0, GROUP_W - 16.0, h),
+            rect(CONTENT_PAD + 4.0, self.y.get() - 14.0, GROUP_W - 8.0, h),
             4,
         );
         self.doc.addSubview(&l);
         self.y.set(self.y.get() - 14.0 + h + 22.0);
     }
 
-    /// Append a row of `height` to the open group; returns (row view, width).
-    fn row(&self, height: f64) -> (Retained<FlippedView>, f64) {
-        let mut g = self.group.borrow_mut();
-        let (group, y) = g.as_mut().expect("row outside a group");
-        let row = FlippedView::new(self.mtm, rect(0.0, *y, GROUP_W, height));
-        if *y > 0.0 {
-            row.addSubview(&shape_view(self.mtm, rect(16.0, 0.0, GROUP_W - 16.0, 0.5), &hairline(), 0.0));
+    /// The next half-width tile in the grid; its width and height.
+    fn half_tile(&self) -> (Retained<FlippedView>, f64, f64) {
+        let mut waiting = self.waiting.borrow_mut();
+        let x = if waiting.is_some() { CONTENT_PAD + TILE_W + TILE_GAP } else { CONTENT_PAD };
+        let tile = glass_card(self.mtm, rect(x, self.y.get(), TILE_W, TILE_H), &card_bg(), TILE_R);
+        self.doc.addSubview(&tile);
+        if waiting.take().is_some() {
+            self.y.set(self.y.get() + TILE_H + TILE_GAP);
+        } else {
+            *waiting = Some(tile.clone());
         }
-        group.addSubview(&row);
-        *y += height;
-        (row, GROUP_W)
+        (tile, TILE_W, TILE_H)
     }
 
-    /// Row height for a title with an optional subtitle in `text_w` points.
-    fn texts(&self, subtitle: Option<&str>, text_w: f64) -> f64 {
-        let lines = subtitle.map_or(0.0, |s| {
-            (text_width(&attributed(s, &font(12.0, Weight::Regular), &text_secondary())) / text_w)
+    /// A tile across the whole row.
+    fn wide_tile(&self, height: f64) -> (Retained<FlippedView>, f64) {
+        self.finish_row();
+        let tile = glass_card(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, height), &card_bg(), TILE_R);
+        self.doc.addSubview(&tile);
+        self.y.set(self.y.get() + height + TILE_GAP);
+        (tile, GROUP_W)
+    }
+
+    /// How many lines a subtitle takes in `text_w` points.
+    fn subtitle_lines(subtitle: Option<&str>, text_w: f64) -> f64 {
+        subtitle.map_or(0.0, |s| {
+            (text_width(&attributed(s, &font(11.5, Weight::Regular), &text_secondary())) / text_w)
                 .ceil()
                 .clamp(1.0, 3.0)
-        });
-        if lines == 0.0 { ROW_H } else { 38.0 + lines * 16.0 }
+        })
     }
 
+    /// Height of a full-row tile for a title and subtitle in `text_w` points.
+    fn wide_height(subtitle: Option<&str>, text_w: f64) -> f64 {
+        (28.0 + 20.0 + Self::subtitle_lines(subtitle, text_w) * 15.0).max(WIDE_H)
+    }
+
+    /// A title and subtitle, together in the middle of the tile's height.
     fn put_texts(&self, row: &FlippedView, title: &str, subtitle: Option<&str>, text_w: f64, h: f64) {
-        let has_sub = subtitle.is_some();
-        let ty = if has_sub { 10.0 } else { (h - 18.0) / 2.0 };
-        row.addSubview(&label(
-            self.mtm,
-            title,
-            &font(13.5, Weight::Medium),
-            &text_primary(),
-            rect(16.0, ty, text_w, 18.0),
-        ));
+        let lines = Self::subtitle_lines(subtitle, text_w);
+        let block = if subtitle.is_some() { 19.0 + lines * 15.0 } else { 18.0 };
+        let ty = (h - block) / 2.0;
+        let t = label(self.mtm, title, &font(13.0, Weight::Semibold), &text_primary(), rect(16.0, ty, text_w, 18.0));
+        t.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable);
+        row.addSubview(&t);
         if let Some(s) = subtitle {
             let l = crate::ui::wrapping_label(
                 self.mtm,
                 s,
-                &font(12.0, Weight::Regular),
+                &font(11.5, Weight::Regular),
                 &*if self.sub_ok.get() { rgba(0.19, 0.82, 0.35, 1.0) } else { text_secondary() },
-                rect(16.0, ty + 19.0, text_w, h - 38.0),
+                rect(16.0, ty + 19.0, text_w, lines * 15.0),
                 3,
             );
+            l.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable);
             row.addSubview(&l);
         }
     }
 
     fn switch(&self, title: &str, subtitle: Option<&str>, value: bool, set: impl Fn(&mut Config, bool) + 'static) {
-        let text_w = GROUP_W - 96.0;
-        let h = self.texts(subtitle, text_w);
-        let (row, w) = self.row(h);
+        let (row, w, h) = self.half_tile();
+        let text_w = w - 32.0 - TOGGLE_W - 12.0;
         self.put_texts(&row, title, subtitle, text_w, h);
         let draft = self.draft.clone();
         let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
@@ -483,6 +572,7 @@ impl Form<'_> {
         sw.setTitle(&ns(""));
         sw.setState(if value { NSControlStateValueOn } else { NSControlStateValueOff });
         sw.setFrame(rect(w - 16.0 - TOGGLE_W, (h - TOGGLE_H) / 2.0, TOGGLE_W, TOGGLE_H));
+        sw.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewMinXMargin);
         sw.setWantsLayer(true);
         if let Some(l) = sw.layer() {
             l.setCornerRadius(TOGGLE_H / 2.0);
@@ -509,15 +599,16 @@ impl Form<'_> {
     /// chevron; clicking opens a menu of the options.
     fn popup(&self, title: &str, options: &[&str], selected: usize, set: impl Fn(&mut Config, usize) + 'static) {
         use objc2_app_kit::{NSCellImagePosition, NSMenu, NSMenuItem};
-        let (row, w) = self.row(ROW_H);
-        self.put_texts(&row, title, None, w - 250.0, ROW_H);
-        let (pw, ph) = (112.0, 27.0);
+        let (row, w, h) = self.half_tile();
+        let (pw, ph) = (124.0, 27.0);
+        self.put_texts(&row, title, None, w - 32.0 - pw - 8.0, h);
         let value_font = font(13.0, Weight::Regular);
         let value_color = rgba(1.0, 1.0, 1.0, 0.92);
         let btn = NSButton::new(self.mtm);
         btn.setButtonType(objc2_app_kit::NSButtonType::MomentaryPushIn);
         btn.setBordered(false);
-        btn.setFrame(rect(w - 16.0 - pw, (ROW_H - ph) / 2.0, pw, ph));
+        btn.setFrame(rect(w - 16.0 - pw, (h - ph) / 2.0, pw, ph));
+        btn.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewMinXMargin);
         btn.setAlignment(NSTextAlignment::Left);
         btn.setAttributedTitle(&attributed(options.get(selected).copied().unwrap_or(""), &value_font, &value_color));
         btn.setImage(crate::ui::symbol_image("chevron.up.chevron.down", 9.0, "").as_deref());
@@ -601,9 +692,14 @@ impl Form<'_> {
         secure: bool,
         set: impl Fn(&mut Config, String) + 'static,
     ) {
-        let h = self.texts(subtitle, GROUP_W - 64.0 - width);
-        let (row, w) = self.row(h);
-        self.put_texts(&row, title, subtitle, w - 64.0 - width, h);
+        let (row, w, h) = if width > WIDEST_HALF_FIELD {
+            let h = Self::wide_height(subtitle, GROUP_W - 48.0 - width);
+            let (row, w) = self.wide_tile(h);
+            (row, w, h)
+        } else {
+            self.half_tile()
+        };
+        self.put_texts(&row, title, subtitle, w - 48.0 - width, h);
         let box_frame = rect(w - 16.0 - width, (h - 28.0) / 2.0, width, 28.0);
         let frame = rect(10.0, 4.0, width - 20.0, 20.0);
         let f: Retained<NSTextField> = if secure {
@@ -653,12 +749,21 @@ impl Form<'_> {
             f.setAction(Some(ActionTarget::action()));
         }
         field_box.addSubview(&f);
+        field_box.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewMinXMargin);
         row.addSubview(&field_box);
     }
 
     fn slider(&self, title: &str, min: f64, max: f64, value: f64, set: impl Fn(&mut Config, f64) + 'static) {
-        let (row, w) = self.row(ROW_H);
-        self.put_texts(&row, title, None, w - 270.0, ROW_H);
+        // The title above, and the slider across the tile.
+        let (row, w, h) = self.half_tile();
+        let t = label(
+            self.mtm,
+            title,
+            &font(13.0, Weight::Semibold),
+            &text_primary(),
+            rect(16.0, h / 2.0 - 24.0, w - 32.0, 18.0),
+        );
+        row.addSubview(&t);
         let draft = self.draft.clone();
         let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
             if let Some(s) = sender.and_then(|s| s.downcast_ref::<NSSlider>()) {
@@ -679,7 +784,8 @@ impl Form<'_> {
         };
         s.setControlSize(NSControlSize::Small);
         s.setContinuous(false);
-        s.setFrame(rect(w - 16.0 - 220.0, (ROW_H - 20.0) / 2.0, 220.0, 20.0));
+        s.setFrame(rect(16.0, h / 2.0 + 2.0, w - 32.0, 20.0));
+        s.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable);
         crate::ui::set_accessibility_label(&s, title);
         row.addSubview(&s);
     }
@@ -704,8 +810,8 @@ impl Form<'_> {
         let controls_w = bw.iter().sum::<f64>() + 8.0 * bw.len() as f64 + chip_w;
         let icon_w = if leading_icon.is_some() { 46.0 } else { 0.0 };
         let text_w = GROUP_W - 32.0 - controls_w - icon_w;
-        let h = self.texts(subtitle, text_w).max(if leading_icon.is_some() { 62.0 } else { ROW_H });
-        let (row, w) = self.row(h);
+        let h = Self::wide_height(subtitle, text_w);
+        let (row, w) = self.wide_tile(h);
         if let Some((sym, color)) = leading_icon {
             let tile =
                 shape_view(self.mtm, rect(16.0, (h - 34.0) / 2.0, 34.0, 34.0), &rgba(0.047, 0.047, 0.055, 1.0), 10.0);
@@ -753,16 +859,12 @@ impl Form<'_> {
 
     /// A monospaced snippet in its own dark card, with a Copy button.
     fn code_block(&self, title: &str, runs: &[(&str, Retained<NSColor>)], copy: Box<dyn Fn()>) {
-        self.end();
+        self.finish_row();
         let lines = 1 + runs.iter().map(|(t, _)| t.matches('\n').count()).sum::<usize>();
         let body_h = lines as f64 * 18.0 + 24.0;
         let h = 34.0 + body_h;
         let card =
-            shape_view(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, h), &rgba(0.039, 0.039, 0.047, 1.0), 12.0);
-        if let Some(l) = card.layer() {
-            l.setBorderWidth(0.5);
-            l.setBorderColor(Some(&hairline().CGColor()));
-        }
+            glass_card(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, h), &rgba(0.0, 0.0, 0.0, 0.34), TILE_R);
         card.addSubview(&label(
             self.mtm,
             title,
@@ -792,7 +894,7 @@ impl Form<'_> {
         body.setAttributedStringValue(&crate::ui::attributed_parts(&parts));
         card.addSubview(&body);
         self.doc.addSubview(&card);
-        self.y.set(self.y.get() + h + 22.0);
+        self.y.set(self.y.get() + h + TILE_GAP);
     }
 
     fn permission(&self, p: Permission) {
@@ -836,7 +938,7 @@ struct SideRows {
     captions: Vec<Retained<NSTextField>>,
 }
 
-const NAV_TOP: f64 = 128.0;
+const NAV_TOP: f64 = 112.0;
 const NAV_ITEM_H: f64 = 32.0;
 
 impl SideRows {
@@ -856,14 +958,14 @@ impl SideRows {
                 continue;
             }
             y += 14.0;
-            cap.setFrameOrigin(objc2_foundation::NSPoint::new(22.0, y));
+            cap.setFrameOrigin(objc2_foundation::NSPoint::new(18.0, y));
             y += 20.0;
             for (pane, view) in &self.items {
                 if panes.contains(pane) {
                     let hit = hits.contains(pane);
                     view.setHidden(!hit);
                     if hit {
-                        view.setFrameOrigin(objc2_foundation::NSPoint::new(12.0, y));
+                        view.setFrameOrigin(objc2_foundation::NSPoint::new(8.0, y));
                         y += NAV_ITEM_H + 2.0;
                     }
                 }
@@ -891,7 +993,9 @@ impl SettingsWindow {
         window.setTitle(&ns("Notchisland Settings"));
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
-        window.setBackgroundColor(Some(&ink()));
+        // See through to the desktop, under the ground's blur and veil.
+        window.setOpaque(false);
+        window.setBackgroundColor(Some(&NSColor::clearColor()));
         // SAFETY: AppKit's appearance-name constant.
         if let Some(dark) = NSAppearance::appearanceNamed(unsafe { objc2_app_kit::NSAppearanceNameDarkAqua }) {
             window.setAppearance(Some(&dark));
@@ -920,9 +1024,7 @@ impl SettingsWindow {
     pub fn show(&self, config: &Config) {
         let mtm = MainThreadMarker::from(&*self.window);
         self.targets.clear();
-        // The content draws its own ground (it must not depend on the window
-        // background, which offscreen renders and some transitions skip).
-        let root = shape_view(mtm, rect(0.0, 0.0, WIDTH, HEIGHT), &ink(), 0.0);
+        let root = ground(mtm);
         root.addSubview(&self.sidebar(mtm));
 
         let pane = self.pane.get();
@@ -932,10 +1034,11 @@ impl SettingsWindow {
             sub_ok: Cell::new(false),
             mtm,
             doc: &doc,
-            y: Cell::new(22.0),
+            y: Cell::new(4.0),
             targets: &self.targets,
             draft: Rc::new(RefCell::new(config.clone())),
-            group: RefCell::new(None),
+            waiting: RefCell::new(None),
+            in_section: Cell::new(false),
         };
         build_pane(&form, pane, config);
         form.end();
@@ -965,7 +1068,7 @@ impl SettingsWindow {
     /// The pane's icon tile, title, one-line description and status chip.
     fn header(&self, mtm: MainThreadMarker, root: &FlippedView, pane: Pane, c: &Config) {
         let x0 = SIDEBAR + CONTENT_PAD;
-        let tile = gradient_tile(mtm, rect(x0, 28.0, 40.0, 40.0), pane.gradient(), 11.0);
+        let tile = gradient_tile(mtm, rect(x0, 26.0, 40.0, 40.0), pane.gradient(), 11.0);
         tile.addSubview(&crate::ui::symbol_view(
             mtm,
             pane.icon().0,
@@ -984,69 +1087,61 @@ impl SettingsWindow {
             pane.title(),
             &font(24.0, Weight::Semibold),
             &text_primary(),
-            rect(text_x, 26.0, text_w, 30.0),
+            rect(text_x, 22.0, text_w, 30.0),
         ));
         root.addSubview(&label(
             mtm,
             pane.blurb(),
             &font(13.0, Weight::Regular),
             &text_secondary(),
-            rect(text_x, 57.0, text_w, 17.0),
+            rect(text_x, 53.0, text_w, 17.0),
         ));
         if let Some((chip, w)) = chip {
-            chip.setFrameOrigin(objc2_foundation::NSPoint::new(WIDTH - CONTENT_PAD - w, 35.0));
+            chip.setFrameOrigin(objc2_foundation::NSPoint::new(WIDTH - CONTENT_PAD - w, 33.0));
             root.addSubview(&chip);
         }
-        root.addSubview(&shape_view(mtm, rect(SIDEBAR, HEADER_H - 0.5, WIDTH - SIDEBAR, 0.5), &hairline(), 0.0));
     }
 
     fn sidebar(&self, mtm: MainThreadMarker) -> Retained<NSView> {
-        let side = shape_view(mtm, rect(0.0, 0.0, SIDEBAR, HEIGHT), &side_bg(), 0.0);
-        side.addSubview(&shape_view(mtm, rect(SIDEBAR - 0.5, 0.0, 0.5, HEIGHT), &hairline(), 0.0));
+        let side = glass_card(mtm, rect(SIDE_INSET, SIDE_INSET, SIDE_W, SIDE_H), &side_bg(), 20.0);
 
         // Brand: the app icon (it carries its own transparent margin) and name.
         let icon = NSImageView::new(mtm);
         icon.setImage(objc2_app_kit::NSApplication::sharedApplication(mtm).applicationIconImage().as_deref());
         icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
-        icon.setFrame(rect(12.0, 40.0, 44.0, 44.0));
+        icon.setFrame(rect(10.0, 30.0, 44.0, 44.0));
         side.addSubview(&icon);
         side.addSubview(&label(
             mtm,
             "Notchisland",
             &font(14.0, Weight::Semibold),
             &text_primary(),
-            rect(62.0, 49.0, SIDEBAR - 74.0, 18.0),
+            rect(60.0, 37.0, SIDE_W - 72.0, 18.0),
         ));
         side.addSubview(&label(
             mtm,
             "Settings",
             &font(11.5, Weight::Regular),
             &text_secondary(),
-            rect(62.0, 67.0, SIDEBAR - 74.0, 15.0),
+            rect(60.0, 55.0, SIDE_W - 72.0, 15.0),
         ));
 
         // Search filters the pane list in place.
-        let search = NSSearchField::initWithFrame(NSSearchField::alloc(mtm), rect(14.0, 90.0, SIDEBAR - 28.0, 28.0));
+        let search = NSSearchField::initWithFrame(NSSearchField::alloc(mtm), rect(12.0, 80.0, SIDE_W - 24.0, 28.0));
         search.setPlaceholderString(Some(&ns("Search settings")));
         crate::ui::set_accessibility_label(&search, "Search settings");
 
         let current = self.pane.get();
         let mut rows = SideRows { items: Vec::new(), captions: Vec::new() };
         for (cap, _) in Pane::SECTIONS {
-            let c = caption(mtm, cap, 10.5, rect(22.0, 0.0, SIDEBAR - 44.0, 14.0));
+            let c = caption(mtm, cap, 10.5, rect(18.0, 0.0, SIDE_W - 36.0, 14.0));
             side.addSubview(&c);
             rows.captions.push(c);
         }
         for pane in Pane::ALL {
             let selected = pane == current;
-            let bg = if selected { rgba(0.298, 0.553, 1.0, 0.16) } else { rgba(1.0, 1.0, 1.0, 0.0) };
-            let item = shape_view(mtm, rect(12.0, 0.0, SIDEBAR - 24.0, NAV_ITEM_H), &bg, 9.0);
-            if selected {
-                if let Some(l) = item.layer() {
-                    l.setBorderWidth(0.5);
-                    l.setBorderColor(Some(&rgba(0.486, 0.667, 1.0, 0.38).CGColor()));
-                }
-            }
+            let bg = rgba(1.0, 1.0, 1.0, if selected { 0.16 } else { 0.0 });
+            let item = shape_view(mtm, rect(8.0, 0.0, SIDE_W - 16.0, NAV_ITEM_H), &bg, 10.0);
             let tile = gradient_tile(mtm, rect(9.0, 5.0, 22.0, 22.0), pane.gradient(), 6.0);
             tile.addSubview(&crate::ui::symbol_view(
                 mtm,
@@ -1064,7 +1159,7 @@ impl SettingsWindow {
                 pane.title(),
                 &font(13.0, weight),
                 &fg,
-                rect(41.0, 7.0, SIDEBAR - 24.0 - 52.0, 17.0),
+                rect(41.0, 7.0, SIDE_W - 16.0 - 52.0, 17.0),
             ));
             let pc = self.pane.clone();
             let t = self.targets.add(mtm, move |_| {
@@ -1072,7 +1167,7 @@ impl SettingsWindow {
                 // Deferred: rebuilding now would free this button's own target.
                 dispatch2::DispatchQueue::main().exec_async(app::show_settings);
             });
-            let b = crate::ui::click_overlay(mtm, &t, rect(0.0, 0.0, SIDEBAR - 24.0, NAV_ITEM_H), pane.title());
+            let b = crate::ui::click_overlay(mtm, &t, rect(0.0, 0.0, SIDE_W - 16.0, NAV_ITEM_H), pane.title());
             item.addSubview(&b);
             if selected {
                 // SAFETY: accessibility setter on NSView.
@@ -1096,7 +1191,7 @@ impl SettingsWindow {
         side.addSubview(&search);
 
         // Footer: provider health and the version.
-        side.addSubview(&shape_view(mtm, rect(14.0, HEIGHT - 46.0, SIDEBAR - 28.0, 0.5), &hairline(), 0.0));
+        side.addSubview(&shape_view(mtm, rect(14.0, SIDE_H - 46.0, SIDE_W - 28.0, 0.5), &hairline(), 0.0));
         let (down, total) = app::with_controller(|c| {
             let snap = c.current_snapshot();
             (snap.providers.values().filter(|s| !s.is_healthy()).count(), snap.providers.len())
@@ -1104,14 +1199,14 @@ impl SettingsWindow {
         .unwrap_or((0, 0));
         let ok = down == 0 || total == 0;
         let dot = if ok { rgba(0.188, 0.82, 0.345, 1.0) } else { rgba(1.0, 0.624, 0.039, 1.0) };
-        side.addSubview(&shape_view(mtm, rect(20.0, HEIGHT - 28.0, 7.0, 7.0), &dot, 3.5));
+        side.addSubview(&shape_view(mtm, rect(20.0, SIDE_H - 28.0, 7.0, 7.0), &dot, 3.5));
         let status = if ok { "All providers running".to_owned() } else { format!("{down} need attention") };
         side.addSubview(&label(
             mtm,
             &status,
             &font(11.5, Weight::Regular),
             &text_secondary(),
-            rect(34.0, HEIGHT - 32.0, SIDEBAR - 160.0, 15.0),
+            rect(34.0, SIDE_H - 32.0, SIDE_W - 34.0 - 14.0 - 76.0, 15.0),
         ));
         // Version plus the bundle's build number (the commit count bundle.sh
         // stamps), so it is clear which build is running.
@@ -1120,7 +1215,7 @@ impl SettingsWindow {
             .and_then(|v| v.downcast::<objc2_foundation::NSString>().ok())
             .map(|v| v.to_string());
         let ver_text = match build {
-            Some(b) => format!("v{} · build {b}", env!("CARGO_PKG_VERSION")),
+            Some(b) => format!("v{} ({b})", env!("CARGO_PKG_VERSION")),
             None => concat!("v", env!("CARGO_PKG_VERSION")).to_owned(),
         };
         let ver = label(
@@ -1128,7 +1223,7 @@ impl SettingsWindow {
             &ver_text,
             &font(11.5, Weight::Regular),
             &text_tertiary(),
-            rect(SIDEBAR - 14.0 - 110.0, HEIGHT - 32.0, 110.0, 15.0),
+            rect(SIDE_W - 14.0 - 76.0, SIDE_H - 32.0, 76.0, 15.0),
         );
         ver.setAlignment(NSTextAlignment::Right);
         side.addSubview(&ver);
@@ -1159,6 +1254,18 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 index_of(&screens, &c.general.screen),
                 move |cfg, i| cfg.general.screen = screens[i],
             );
+            form.switch(
+                "Hide in fullscreen apps",
+                Some("Get out of the way so the auto-revealed menu bar stays usable. A ringing call still shows."),
+                c.general.hide_in_fullscreen,
+                |cfg, on| cfg.general.hide_in_fullscreen = on,
+            );
+            form.switch(
+                "Show the island on every screen",
+                Some("A display-only copy of the collapsed island on each other screen — notch or floating pill"),
+                c.general.island_on_all_screens,
+                |cfg, on| cfg.general.island_on_all_screens = on,
+            );
             form.slider("Hover delay", 0.0, 600.0, c.general.hover_delay_ms as f64, |cfg, v| {
                 cfg.general.hover_delay_ms = v.round() as u64
             });
@@ -1176,6 +1283,12 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 Some("AirPods, keyboards, mice and other connected devices"),
                 c.providers.bluetooth,
                 |cfg, on| cfg.providers.bluetooth = on,
+            );
+            form.switch(
+                "Calendar",
+                Some("Upcoming events from your connected calendar accounts on the Overview card"),
+                c.providers.calendar,
+                |cfg, on| cfg.providers.calendar = on,
             );
             form.begin("Media players");
             form.switch(
@@ -1222,6 +1335,12 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 c.appearance.show_wings,
                 |cfg, on| cfg.appearance.show_wings = on,
             );
+            form.switch(
+                "Avoid menu bar items",
+                Some("A wing with no room beside the notch is hidden rather than drawn over them"),
+                c.appearance.dodge_menu_bar,
+                |cfg, on| cfg.appearance.dodge_menu_bar = on,
+            );
             form.switch("High contrast text", None, c.appearance.high_contrast, |cfg, on| {
                 cfg.appearance.high_contrast = on
             });
@@ -1243,6 +1362,32 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 Some("Experimental. Uses Accessibility to dismiss a banner the notch already shows."),
                 c.notifications.suppress_native_banners,
                 |cfg, on| cfg.notifications.suppress_native_banners = on,
+            );
+            form.switch(
+                "Quick reply",
+                Some("Answer messaging notifications (Discord, Messages, …) from the notch, through the app's own banner"),
+                c.notifications.quick_reply,
+                |cfg, on| cfg.notifications.quick_reply = on,
+            );
+            form.begin("Calls");
+            form.switch(
+                "Show incoming calls",
+                Some("Rings in the notch when a notification announces a call. Answering uses the banner's button, which needs Accessibility; without it the app comes forward instead"),
+                c.notifications.incoming_calls,
+                |cfg, on| cfg.notifications.incoming_calls = on,
+            );
+            form.action_row(
+                "Try it",
+                Some("Rings a sample call in the notch"),
+                None,
+                vec![(
+                    "Test call",
+                    false,
+                    Box::new(|| {
+                        app::send(notchforge_core::engine::Command::TestCall);
+                    }),
+                )],
+                Some(("phone.fill", (36, 138, 61))),
             );
             form.begin("Sources");
             form.switch(
@@ -1364,6 +1509,37 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                         ),
                     };
                 form.action_row(def.name, Some(&detail), Some((word, tone)), vec![button], Some(icon));
+            }
+            {
+                let connected = app::claude_limits_connected();
+                let button: RowButton<'_> = if connected {
+                    (
+                        "Disconnect",
+                        false,
+                        Box::new(|| {
+                            app::disconnect_claude_limits();
+                            app::show_settings_soon();
+                        }),
+                    )
+                } else {
+                    (
+                        "Connect",
+                        true,
+                        Box::new(|| {
+                            app::connect_claude_limits();
+                            app::show_settings_soon();
+                        }),
+                    )
+                };
+                form.action_row(
+                    "Claude Code limits",
+                    Some(
+                        "Uses its status line, which hides some footer hints such as \u{201c}esc to interrupt\u{201d}",
+                    ),
+                    Some(if connected { ("Connected", Tone::Ok) } else { ("Not connected", Tone::Neutral) }),
+                    vec![button],
+                    Some(("gauge.with.needle", (217, 119, 87))),
+                );
             }
             form.note("Connecting edits that agent's own configuration (a .notchforge.bak copy is kept) so it reports every finished turn here. It signs in to nothing: an agent is connected once it reports to the notch.");
             form.begin("Approval");

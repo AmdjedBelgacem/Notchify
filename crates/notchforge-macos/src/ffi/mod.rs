@@ -3,6 +3,7 @@
 //! that use them.
 
 pub mod ax;
+pub mod cmio;
 pub mod cg;
 pub mod coreaudio;
 

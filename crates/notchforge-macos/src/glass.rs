@@ -108,12 +108,34 @@ fn build_host(mtm: MainThreadMarker, nh: f64) -> Glass {
     this
 }
 
+/// Smooth the edges of a layer and everything under it: rounded corners at
+/// 1× (external displays) show stair-stepping against the hardware notch's
+/// machined edge unless every layer explicitly anti-aliases its boundary.
+pub fn smooth_edges(layer: &objc2_quartz_core::CALayer) {
+    use objc2_quartz_core::CAEdgeAntialiasingMask;
+    layer.setAllowsEdgeAntialiasing(true);
+    layer.setEdgeAntialiasingMask(
+        CAEdgeAntialiasingMask::LayerTopEdge
+            | CAEdgeAntialiasingMask::LayerLeftEdge
+            | CAEdgeAntialiasingMask::LayerBottomEdge
+            | CAEdgeAntialiasingMask::LayerRightEdge,
+    );
+    // SAFETY: reading the sublayers array; every element is a CALayer.
+    let Some(subs) = (unsafe { layer.sublayers() }) else { return };
+    for sub in subs.iter() {
+        smooth_edges(&sub);
+    }
+}
+
 impl Glass {
     /// Add the material to `island`, behind anything added later.
     pub fn install(mtm: MainThreadMarker, island: &NSView, nh: f64) -> Self {
         let this = build_host(mtm, nh);
         island.addSubview(&this.effect);
         island.addSubview(&this.host);
+        if let Some(l) = island.layer() {
+            smooth_edges(&l);
+        }
         this
     }
 
