@@ -312,9 +312,36 @@ pub fn control(player: MediaPlayer, action: &MediaAction) -> (String, Vec<String
         (MediaPlayer::Music, MediaAction::PlayPlaylist(id)) => {
             (tell("play (first user playlist whose persistent ID is (item 1 of argv))"), vec![id.clone()])
         }
+        // Spotify and Music have no page to navigate; browsers get their own
+        // script (`navigate_script`), everyone else is driven by media keys.
+        (MediaPlayer::Browser, MediaAction::Navigate(_)) | (_, MediaAction::Navigate(_)) => {
+            (String::new(), vec![])
+        }
         // Browsers are driven by media keys in the macOS layer, never by script.
         (MediaPlayer::Browser, _) => (String::new(), vec![]),
     }
+}
+
+/// Escape a string for embedding in a double-quoted AppleScript literal.
+pub fn applescript_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Navigate the browser's front tab (active tab for Chromium, current tab for
+/// Safari — the try covers both shapes). The URL is an argument, not baked in.
+pub fn navigate_script(bundle_id: &str) -> String {
+    format!(
+        r#"on run argv
+	tell application id "{app}"
+		try
+			set URL of active tab of front window to (item 1 of argv)
+		on error
+			set URL of current tab of front window to (item 1 of argv)
+		end try
+	end tell
+end run"#,
+        app = bundle_id
+    )
 }
 
 #[cfg(test)]

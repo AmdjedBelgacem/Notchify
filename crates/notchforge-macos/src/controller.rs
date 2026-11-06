@@ -1505,6 +1505,12 @@ impl Controller {
 
     /// Re-render the music page from the current snapshot (after a local
     /// choice such as switching the playlist source).
+    /// The sources bar pinned a player: the music page follows it.
+    pub fn media_pin_source(&self, player: MediaPlayer) {
+        self.views.borrow().expanded.show_tab(crate::views::expanded::Tab::Media);
+        self.views.borrow().expanded.media.pin(player);
+    }
+
     pub fn media_rerender(&self) {
         let snap = self.snapshot.borrow().clone();
         let views = self.views.borrow();

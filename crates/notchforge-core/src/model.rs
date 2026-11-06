@@ -1163,6 +1163,9 @@ pub enum MediaAction {
     SetVolume(u8),
     /// Play a playlist by [`Playlist::id`].
     PlayPlaylist(String),
+    /// Point the player at this URL. For a browser this navigates the tab
+    /// that is already playing, rather than opening a new page.
+    Navigate(String),
 }
 
 // ---------------------------------------------------------------------------

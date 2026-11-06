@@ -22,7 +22,8 @@
 use crate::icons;
 use crate::media::{self as glue, MediaKey};
 use crate::ui::{
-    FlippedView, Palette, Targets, ThinSlider, Weight, attributed_parts, click_overlay, font, label, make_card,
+    FlippedView, Palette, Targets, ThinSlider, Weight, attributed, attributed_parts, click_overlay, font, label,
+    make_card,
     mono_digits, pill_button, rect, remove_all_subviews, rgb8, rgba, set_accessibility_label, set_button_symbol,
     set_gradient, set_text, shape_view, style_pill, symbol_button, symbol_view, text_width, without_animation,
     wrapping_label,
@@ -95,6 +96,10 @@ struct PageState {
     now: Option<NowPlaying>,
     devices: Vec<(String, String, String, bool)>,
     chosen_list_player: Option<MediaPlayer>,
+    /// The player the user picked in the sources bar (or via the segments):
+    /// the card and the controls follow it until they pick another one or it
+    /// stops running.
+    pinned: Option<MediaPlayer>,
     /// The playlist last started from the notch (highlighted while it plays).
     active_playlist: Option<String>,
     art_path: Option<PathBuf>,
@@ -517,6 +522,7 @@ impl MediaPage {
                 {
                     let mut st = st.borrow_mut();
                     st.chosen_list_player = Some(player);
+                    st.pinned = Some(player);
                     st.playlists_key = 0;
                 }
                 crate::app::with_controller(|c| c.media_rerender());
@@ -700,7 +706,7 @@ impl MediaPage {
     }
 
     pub fn update(&self, snap: &Snapshot) {
-        let featured = featured(&snap.media, &snap.audio);
+        let featured = self.featured(&snap.media, &snap.audio);
         {
             let mut st = self.state.borrow_mut();
             st.featured = featured.clone();
@@ -714,6 +720,30 @@ impl MediaPage {
         self.render_sources(&snap.audio, &featured);
         self.render_playlists(&snap.media);
         self.tick();
+    }
+
+    /// The featured player with the user's pick (`pin_source`) applied: it
+    /// wins over the automatic choice until it has nothing left to show.
+    fn featured(&self, media: &MediaState, audio: &AudioState) -> Featured {
+        let pinned = self.state.borrow().pinned;
+        if let Some(pl) = pinned {
+            if media.player(pl).is_some() || media.running.contains(&pl) {
+                return Featured::Player(pl);
+            }
+            self.state.borrow_mut().pinned = None;
+        }
+        featured(media, audio)
+    }
+
+    /// Pin a player (sources bar / segments): the card and the list follow.
+    pub fn pin(&self, player: MediaPlayer) {
+        {
+            let mut st = self.state.borrow_mut();
+            st.pinned = Some(player);
+            st.chosen_list_player = Some(player);
+            st.playlists_key = 0;
+        }
+        crate::app::with_controller(|c| c.media_rerender());
     }
 
     /// Tint the player tile from the cover, dark enough to keep white text legible.
@@ -900,14 +930,8 @@ impl MediaPage {
 
     /// One line for the other apps making sound; the featured one is the tile.
     fn render_sources(&self, audio: &AudioState, featured: &Featured) {
-        let is_featured = |s: &notchforge_core::model::AudioSource| match featured {
-            Featured::Player(pl) => s.bundle_id.as_deref() == Some(pl.bundle_id()),
-            Featured::App { name, .. } => &s.name == name,
-            Featured::Nothing => false,
-        };
-        let others: Vec<_> = audio.sources.iter().filter(|s| !is_featured(s)).collect();
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        for s in &others {
+        for s in &audio.sources {
             s.name.hash(&mut h);
             audio.route_label(s).hash(&mut h);
         }
@@ -923,49 +947,84 @@ impl MediaPage {
         let f = font(12.0, Weight::Regular);
         let width = self.sources_width;
         let text_at = |x: f64, text: &str| {
-            self.sources.addSubview(&label(self.mtm, text, &f, &color, rect(x, 4.0, width - x, 16.0)));
+            self.sources.addSubview(&label(self.mtm, text, &f, &color, rect(x, 4.0, (width - x).max(20.0), 16.0)));
         };
         if !audio.sources_supported {
             text_at(0.0, "Per-app audio needs macOS 14.2 or later");
             return;
         }
-        let Some(s) = others.first() else {
-            text_at(0.0, "No other app is playing audio");
+        if audio.sources.is_empty() {
+            text_at(0.0, "No app is playing audio");
             return;
-        };
-        let slot = rect(0.0, 3.0, 18.0, 18.0);
-        let boxed = icons::source_icon(s.bundle_id.as_deref(), s.app_path.as_deref())
-            .and_then(|img| crate::ui::image_box(self.mtm, slot, &img));
-        if let Some(b) = boxed {
-            self.sources.addSubview(&b);
-        } else if s.bundle_id.as_deref() == Some("com.spotify.client") {
-            // The board's Spotify tile: green, with the black mark.
-            let tile = shape_view(self.mtm, slot, &crate::ui::rgb8(MediaPlayer::Spotify.color()), 5.0);
-            tile.addSubview(&crate::ui::spotify_mark(self.mtm, rect(3.0, 3.0, 12.0, 12.0)));
-            self.sources.addSubview(&tile);
-        } else {
-            let icon = crate::views::app_icon_view(self.mtm, slot);
-            icon.setImage(crate::ui::symbol_image("app.fill", 12.0, &s.name).as_deref());
-            icon.setContentTintColor(Some(&color));
-            self.sources.addSubview(&icon);
         }
-        let route = audio.route_label(s);
-        let text = if others.len() > 1 {
-            format!("{} and {} more also playing", s.name, others.len() - 1)
-        } else {
-            format!("{} is also playing on {route}", s.name)
-        };
-        text_at(25.0, &text);
-        if let Some(b) = s.bundle_id.clone() {
-            let t = self.source_targets.add(self.mtm, move |_| glue::activate_app(&b));
-            self.sources.addSubview(&click_overlay(
-                self.mtm,
-                &t,
-                rect(0.0, 0.0, width, 24.0),
-                &format!("Show {}", s.name),
-            ));
+        // The bar: every playing source with its icon; the featured one is
+        // bright, the rest are one click away — tapping one switches what the
+        // card and the transport controls below act on.
+        let mut x = 0.0;
+        let mut shown = String::new();
+        for s in &audio.sources {
+            let mapped = s.bundle_id.as_deref().and_then(MediaPlayer::from_bundle_id);
+            let is_featured = mapped.is_some_and(|pl| matches!(&featured, Featured::Player(f) if *f == pl));
+            let entry_color = if is_featured { rgba(1.0, 1.0, 1.0, 1.0) } else { rgba(1.0, 1.0, 1.0, 0.62) };
+            let slot = rect(x, 3.0, 18.0, 18.0);
+            let boxed = icons::source_icon(s.bundle_id.as_deref(), s.app_path.as_deref())
+                .and_then(|img| crate::ui::image_box(self.mtm, slot, &img));
+            if let Some(b) = boxed {
+                self.sources.addSubview(&b);
+            } else if s.bundle_id.as_deref() == Some("com.spotify.client") {
+                // The board's Spotify tile: green, with the black mark.
+                let tile = shape_view(self.mtm, slot, &crate::ui::rgb8(MediaPlayer::Spotify.color()), 5.0);
+                tile.addSubview(&crate::ui::spotify_mark(self.mtm, rect(3.0, 3.0, 12.0, 12.0)));
+                self.sources.addSubview(&tile);
+            } else {
+                let icon = crate::views::app_icon_view(self.mtm, slot);
+                icon.setImage(crate::ui::symbol_image("app.fill", 12.0, &s.name).as_deref());
+                icon.setContentTintColor(Some(&entry_color));
+                self.sources.addSubview(&icon);
+            }
+            let icon_end = x + 22.0;
+            let text = if is_featured {
+                format!("{} · on {}", s.name, audio.route_label(s))
+            } else {
+                s.name.clone()
+            };
+            let tw = text_width(&attributed(&text, &f, &entry_color)) + 6.0;
+            if icon_end + tw > width {
+                break;
+            }
+            let lbl = label(self.mtm, &text, &f, &entry_color, rect(icon_end, 4.0, tw, 16.0));
+            self.sources.addSubview(&lbl);
+            match mapped {
+                Some(player) if !is_featured => {
+                    let t = self.source_targets.add(self.mtm, move |_| glue::pin_source(player));
+                    self.sources.addSubview(&click_overlay(
+                        self.mtm,
+                        &t,
+                        rect(x, 0.0, 22.0 + tw, 24.0),
+                        &format!("Control {}", s.name),
+                    ));
+                }
+                // Not a known player (or already featured): the click just
+                // brings its app forward.
+                _ => {
+                    if let Some(b) = s.bundle_id.clone() {
+                        let t = self.source_targets.add(self.mtm, move |_| glue::activate_app(&b));
+                        self.sources.addSubview(&click_overlay(
+                            self.mtm,
+                            &t,
+                            rect(x, 0.0, 22.0 + tw, 24.0),
+                            &format!("Show {}", s.name),
+                        ));
+                    }
+                }
+            }
+            if !shown.is_empty() {
+                shown.push_str(", ");
+            }
+            shown.push_str(&s.name);
+            x = icon_end + tw + 14.0;
         }
-        set_accessibility_label(&self.sources, &text);
+        set_accessibility_label(&self.sources, &shown);
     }
 
     /// Which player's playlists to list.
@@ -1268,9 +1327,11 @@ impl MediaPage {
             ));
             let url = v.url.clone();
             let t = self.row_targets.add(mtm, move |_| {
-                crate::sharing::open_url(&url);
+                // Play it where the music already is: the playing browser's
+                // tab navigates to the video.
+                glue::control(MediaPlayer::Browser, MediaAction::Navigate(url.clone()));
             });
-            row.addSubview(&click_overlay(mtm, &t, rect(0.0, 0.0, w, row_h), &format!("Open {}", v.title)));
+            row.addSubview(&click_overlay(mtm, &t, rect(0.0, 0.0, w, row_h), &format!("Play {}", v.title)));
             set_accessibility_label(&row, &format!("{}, {}", v.title, v.author));
             self.list_doc.addSubview(&row);
         }

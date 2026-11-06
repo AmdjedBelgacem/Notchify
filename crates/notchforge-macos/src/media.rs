@@ -28,6 +28,12 @@ pub fn send(cmd: ProviderCommand) {
 
 pub fn control(player: MediaPlayer, action: MediaAction) {
     if player == MediaPlayer::Browser {
+        // Navigating is a scripted command to the provider (media keys cannot
+        // do it); the rest rides the system media keys.
+        if let MediaAction::Navigate(_) = action {
+            send(ProviderCommand::Media { player, action });
+            return;
+        }
         // Browsers have no script interface: the system media keys reach them.
         match action {
             MediaAction::PlayPause => drop(press(MediaKey::PlayPause)),
@@ -38,6 +44,13 @@ pub fn control(player: MediaPlayer, action: MediaAction) {
         return;
     }
     send(ProviderCommand::Media { player, action });
+}
+
+/// Feature this player in the music page: the card, the transport controls
+/// and the playlist list all follow it until another one is picked (or it
+/// stops running).
+pub fn pin_source(player: MediaPlayer) {
+    app::with_controller(|c| c.media_pin_source(player));
 }
 
 pub fn set_output(uid: &str) {

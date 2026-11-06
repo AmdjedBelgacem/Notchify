@@ -193,6 +193,8 @@ struct Session {
     /// it resolved to: a title is searched once, then reused until the title
     /// changes.
     yt_resolved: Option<(String, youtube::UpNextVideo)>,
+    /// The browser currently making sound: navigation targets its tab.
+    browser_bundle: Option<&'static str>,
 }
 
 /// How long a silent browser tab stays on the notch as a paused track.
@@ -330,6 +332,7 @@ impl Session {
         let now = notchforge_core::time::now_ms();
         let sources = tokio::task::spawn_blocking(crate::audio::playing_sources).await.unwrap_or_default();
         if let Some((b, src)) = browser::find(&sources) {
+            self.browser_bundle = Some(b.bundle_id);
             let mut denied = false;
             let mut tabs = match browser::tabs_script(b) {
                 Some(src) => match script::run(&src, &[]).await {
@@ -493,7 +496,26 @@ impl Session {
         // Only "play this playlist" may launch a player; other controls are
         // meaningless when it is not running.
         if player == MediaPlayer::Browser {
-            return; // the macOS layer sends media keys instead
+            // Navigate the tab that is already playing; a browser we cannot
+            // reach falls back to opening the URL. Other browser controls are
+            // media keys, sent by the macOS layer.
+            if let MediaAction::Navigate(url) = action.clone() {
+                let navigated = match self.browser_bundle {
+                    Some(bundle) => {
+                        let src = script::navigate_script(bundle);
+                        script::run(&src, &[url.as_str()]).await.is_ok()
+                    }
+                    None => false,
+                };
+                if !navigated {
+                    tracing::info!("cannot reach the playing tab; opening the URL instead");
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _ = std::process::Command::new("open").arg(url).status();
+                    })
+                    .await;
+                }
+            }
+            return;
         }
         let launches = matches!(action, MediaAction::PlayPlaylist(_));
         if !launches && !tokio::task::spawn_blocking(move || is_running(player)).await.unwrap_or(false) {
@@ -544,6 +566,7 @@ impl Provider for MediaProvider {
                 up_next_for: None,
                 queue_at: None,
                 yt_resolved: None,
+                browser_bundle: None,
             };
             let mut login: Option<tokio::task::JoinHandle<Result<(), spotify::SpotifyError>>> = None;
             let mut last_emitted: Option<MediaState> = None;
