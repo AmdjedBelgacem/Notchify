@@ -3,7 +3,7 @@
 # events through every transport, and check the app stays alive. Used by CI.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-APP="dist/NotchForge.app"
+APP="dist/Notchisland.app"
 export NOTCHFORGE_HOME="$(mktemp -d)"
 # These checks send agent notifications straight at the app; skip the in-notch approval step.
 printf '[agents]\nrequire_approval = false\n' > "$NOTCHFORGE_HOME/config.toml"
@@ -15,11 +15,11 @@ trap 'kill $PID 2>/dev/null || true' EXIT
 
 # Wait for the UI and the webhook.
 for _ in $(seq 1 60); do
-  grep -q "NotchForge UI running" "$LOG" && grep -q "agent webhook listening" "$LOG" && break
+  grep -Eq "(NotchForge|Notchisland) UI running" "$LOG" && grep -q "agent webhook listening" "$LOG" && break
   kill -0 $PID 2>/dev/null || { echo "app exited early"; cat "$LOG"; exit 1; }
   sleep 0.5
 done
-grep -q "NotchForge UI running" "$LOG" || { echo "UI did not start"; cat "$LOG"; exit 1; }
+grep -Eq "(NotchForge|Notchisland) UI running" "$LOG" || { echo "UI did not start"; cat "$LOG"; exit 1; }
 
 NOTIFY="$APP/Contents/MacOS/notchforge-notify"
 curl -sf http://127.0.0.1:47815/v1/health

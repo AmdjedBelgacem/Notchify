@@ -1,0 +1,14 @@
+[package]
+name = "notchforge-mcp"
+description = "MCP (stdio) server that lets any MCP-capable coding agent post events to the Notchisland notch."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "notchforge-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { workspace = true }

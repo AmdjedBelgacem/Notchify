@@ -200,6 +200,10 @@ struct Ctx {
     /// The first "collapsed at rest" check waits out the boot animation (the
     /// wings appear with the first snapshot, which can land after launch).
     collapsed_pending: Cell<bool>,
+    /// Set by a step to run again on the next tick (once): a step that
+    /// depends on the real pointer can be disturbed by someone using the Mac.
+    again: Cell<bool>,
+    retried: Cell<bool>,
 }
 
 fn rect_str(r: &Rect) -> String {
@@ -434,6 +438,17 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
         3 => {
             let (st, ignores, anim) = with_controller(|c| (c.machine_state(), c.ignores_mouse(), c.last_animation()))
                 .unwrap_or((State::Collapsed, true, AnimStats::default()));
+            // The real pointer moved away (someone is using the Mac): hover
+            // again and check on the next tick, once.
+            if st != State::Hover && !ctx.retried.replace(true) {
+                tracing::info!(?st, "hover was interrupted; trying once more");
+                for dx in [-40.0, -10.0, 0.0] {
+                    post_mouse(mtm, cg::kCGEventMouseMoved, NSPoint::new(center.x + dx, center.y));
+                }
+                with_controller(|c| c.pointer_moved(center));
+                ctx.again.set(true);
+                return;
+            }
             {
                 let mut r = ctx.report.borrow_mut();
                 r.check("hover: state", st == State::Hover, format!("{st:?}"));
@@ -545,7 +560,10 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 "collapse",
                 &[LayoutKind::Collapsed, LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT)],
             );
-            check_pixels(ctx, "collapsed-wings", 0.001, false);
+            // Wings show only with live content (music, a timer…): a bare
+            // notch is correctly all black, so only demand content then.
+            let wings = matches!(with_controller(|c| c.layout_kind()), Some(LayoutKind::CollapsedWithWings(_)));
+            check_pixels(ctx, "collapsed-wings", if wings { 0.001 } else { -1.0 }, false);
             // Park the pointer well away from the notch: a pointer resting under
             // the notch would (correctly) turn the upcoming peek into a hover.
             post_mouse(mtm, cg::kCGEventMouseMoved, NSPoint::new(center.x, center.y - 400.0));
@@ -892,6 +910,15 @@ fn music_page(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core::engi
     }
     if let Some(png) = app::menubar_preview(&fake).as_deref().and_then(png_from_view) {
         emit_png(ctx, "06-menubar-player", png);
+    }
+    {
+        use notchforge_core::model::PermissionState as P;
+        let targets = crate::ui::Targets::default();
+        let states = [P::Granted, P::Denied, P::Granted, P::NotDetermined, P::Granted, P::Granted];
+        let view = crate::onboarding::build(mtm, &targets, &states);
+        if let Some(png) = png_from_view(&view) {
+            emit_png(ctx, "08-onboarding", png);
+        }
     }
     let island = with_controller(|c| c.island_global()).unwrap_or_default();
     screenshot(ctx, mtm, "03b-music", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
@@ -1407,6 +1434,23 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
             }
         })
     });
+    // The same video once its page timeline is read: scrubber and ±10 s.
+    let mut timed = browser.clone();
+    timed.generation = u64::MAX - 6;
+    if let Some(np) = timed.media.players.first_mut() {
+        np.duration = Some(320.0);
+        np.position = Some(95.0);
+        np.sampled_at_ms = notchforge_core::time::now_ms();
+    }
+    with_controller(|c| {
+        c.notched_previews(overview, &timed, &peek, &prompts, &mut |name, view, w, h| {
+            if name == "07b-notched-music" {
+                if let Some(png) = view.layer().and_then(|l| png_from_layer(&l, w, h, 2.0)) {
+                    emit_png(ctx, "07e-notched-browser-timeline", png);
+                }
+            }
+        })
+    });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
     r.check("notched: eighteen views rendered", sizes.len() == 18, format!("{sizes:?}"));
@@ -1807,13 +1851,21 @@ pub fn start(mtm: MainThreadMarker, dir: PathBuf) {
         eprintln!("self-test watchdog: the run did not finish in 150 s");
         std::process::exit(3);
     });
-    let ctx = Rc::new(Ctx { dir, report: RefCell::new(Report::default()), collapsed_pending: Cell::new(true) });
+    let ctx = Rc::new(Ctx {
+        dir,
+        report: RefCell::new(Report::default()),
+        collapsed_pending: Cell::new(true),
+        again: Cell::new(false),
+        retried: Cell::new(false),
+    });
     let step = Rc::new(std::cell::Cell::new(0usize));
     let block = RcBlock::new(move |timer: NonNull<NSTimer>| {
         let n = step.get();
-        step.set(n + 1);
         tracing::info!(step = n, "self-test step");
         run_step(&ctx, mtm, n);
+        if !ctx.again.replace(false) {
+            step.set(n + 1);
+        }
         // The last step (`finish`) is the first one past the explicit list.
         if n >= LAST_STEP {
             // SAFETY: the timer passed to its own block is valid.

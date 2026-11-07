@@ -26,6 +26,7 @@ pub struct Config {
     pub tray: TrayConfig,
     pub controls: ControlsConfig,
     pub media: MediaConfig,
+    pub ci: CiConfig,
 }
 
 /// Which screen hosts the notch UI.
@@ -67,6 +68,11 @@ pub struct GeneralConfig {
     /// `notchforge --print-config` or the log line "mirror islands synced".
     #[serde(default)]
     pub mirror_screens: Vec<u32>,
+    /// The first-run setup (permissions, agents) was finished or skipped.
+    #[serde(default)]
+    pub onboarded: bool,
+    /// Say when a newer release is out (reads the release feed on GitHub).
+    pub check_updates: bool,
 }
 
 impl Default for GeneralConfig {
@@ -82,6 +88,8 @@ impl Default for GeneralConfig {
             hide_in_fullscreen: true,
             island_on_all_screens: false,
             mirror_screens: Vec::new(),
+            onboarded: false,
+            check_updates: true,
         }
     }
 }
@@ -149,6 +157,31 @@ pub struct ProvidersConfig {
     pub media: bool,
     /// Upcoming events from the connected calendar accounts (EventKit).
     pub calendar: bool,
+    /// GitHub Actions runs as live activities (through the `gh` CLI).
+    #[serde(default = "yes")]
+    pub ci: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// GitHub Actions runs shown as live activities.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CiConfig {
+    /// `owner/name` repositories to always watch.
+    pub repos: Vec<String>,
+    /// Also watch repositories you pushed to recently (from your GitHub events).
+    pub follow_my_pushes: bool,
+    /// How often to ask GitHub while something is running (seconds).
+    pub poll_seconds: u64,
+}
+
+impl Default for CiConfig {
+    fn default() -> Self {
+        Self { repos: Vec::new(), follow_my_pushes: true, poll_seconds: 45 }
+    }
 }
 
 impl Default for ProvidersConfig {
@@ -164,6 +197,7 @@ impl Default for ProvidersConfig {
             audio: true,
             media: true,
             calendar: true,
+            ci: true,
         }
     }
 }
@@ -222,6 +256,10 @@ pub struct AgentsConfig {
     pub watch_sessions: bool,
     /// Read token counts from the agents' own session logs for the Agents page.
     pub token_usage: bool,
+    /// How long a tool-permission request waits for Allow / Deny in the notch
+    /// before the agent asks in its terminal instead (seconds, 0 = never ask
+    /// in the notch).
+    pub permission_wait_secs: u64,
 }
 
 impl Default for AgentsConfig {
@@ -237,6 +275,7 @@ impl Default for AgentsConfig {
             require_approval: true,
             watch_sessions: true,
             token_usage: true,
+            permission_wait_secs: 45,
         }
     }
 }

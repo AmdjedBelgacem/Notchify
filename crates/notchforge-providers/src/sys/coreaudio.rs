@@ -400,9 +400,7 @@ pub fn microphone_in_use() -> bool {
             }
             let mut buf = vec![0u8; bytes as usize];
             let mut written = bytes;
-            if AudioObjectGetPropertyData(p, &run_addr, 0, std::ptr::null(), &mut written, buf.as_mut_ptr() as _)
-                != 0
-            {
+            if AudioObjectGetPropertyData(p, &run_addr, 0, std::ptr::null(), &mut written, buf.as_mut_ptr() as _) != 0 {
                 continue;
             }
             if buf.iter().any(|&b| b != 0) {
@@ -428,4 +426,3 @@ mod tests {
         assert_eq!(std::mem::size_of::<AudioStreamBasicDescription>(), 40);
     }
 }
-

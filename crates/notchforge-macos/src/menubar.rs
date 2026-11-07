@@ -292,6 +292,7 @@ impl MenuBar {
         menu.addItem(&NSMenuItem::separatorItem(mtm));
 
         menu.addItem(&menu_item(mtm, &targets, "Settings…", ",", app::show_settings));
+        menu.addItem(&menu_item(mtm, &targets, "Set Up Notchisland…", "", crate::onboarding::show));
         menu.addItem(&menu_item(mtm, &targets, "Open Config File", "", app::open_config_file));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         menu.addItem(&menu_item(mtm, &targets, "Quit Notchisland", "q", app::quit));

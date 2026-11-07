@@ -2,6 +2,7 @@
 //! Accessibility permission and only fires for the exact combinations:
 //! * ⌃⌥N — show or hide the panel (the shortcut shown in the menu bar extra).
 //! * ⌃⌥C — shelve the clipboard's text or link into the tray.
+//! * ⌃⌥Y / ⌃⌥D — allow / deny the coding agent's waiting tool request.
 
 use std::ffi::c_void;
 
@@ -30,6 +31,15 @@ unsafe extern "C" {
         user_data: *mut c_void,
         out_ref: *mut *mut c_void,
     ) -> i32;
+    fn GetEventParameter(
+        event: *mut c_void,
+        name: u32,
+        desired_type: u32,
+        actual_type: *mut u32,
+        buffer_size: usize,
+        actual_size: *mut usize,
+        data: *mut c_void,
+    ) -> i32;
     fn RegisterEventHotKey(
         key_code: u32,
         modifiers: u32,
@@ -48,16 +58,44 @@ const OPTION_KEY: u32 = 1 << 11;
 const KEY_N: u32 = 0x2D;
 /// `kVK_ANSI_C`.
 const KEY_C: u32 = 0x08;
+/// `kVK_ANSI_Y`.
+const KEY_Y: u32 = 0x10;
+/// `kVK_ANSI_D`.
+const KEY_D: u32 = 0x02;
 
-unsafe extern "C" fn on_hot_key(_next: *mut c_void, _event: *mut c_void, user: *mut c_void) -> i32 {
-    // Delivered on the main thread (application event target); `user` is the
-    // hotkey id we registered with.
-    match user as usize {
+/// `kEventParamDirectObject` and `typeEventHotKeyID`.
+const PARAM_DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
+const TYPE_HOT_KEY_ID: u32 = u32::from_be_bytes(*b"hkid");
+
+unsafe extern "C" fn on_hot_key(_next: *mut c_void, event: *mut c_void, _user: *mut c_void) -> i32 {
+    // Delivered on the main thread (application event target). Which hotkey
+    // fired is in the event's direct object: the id we registered it with.
+    let mut hk = EventHotKeyID { signature: 0, id: 0 };
+    // SAFETY: `hk` is a valid, correctly sized out-buffer for the parameter.
+    let status = unsafe {
+        GetEventParameter(
+            event,
+            PARAM_DIRECT_OBJECT,
+            TYPE_HOT_KEY_ID,
+            std::ptr::null_mut(),
+            std::mem::size_of::<EventHotKeyID>(),
+            std::ptr::null_mut(),
+            (&mut hk as *mut EventHotKeyID).cast(),
+        )
+    };
+    if status != 0 {
+        return 0;
+    }
+    let user = hk.id as usize;
+    match user {
         1 => {
             crate::app::with_controller(|c| c.toggle());
         }
         2 => {
             crate::app::with_controller(|c| c.capture_clipboard());
+        }
+        3 | 4 => {
+            crate::app::with_controller(|c| c.answer_pending_permission(user == 3));
         }
         _ => {}
     }
@@ -71,15 +109,21 @@ fn register(key_code: u32, id: usize) {
     // lives for the process and hands `id` back to the handler.
     unsafe {
         let id = EventHotKeyID { signature: u32::from_be_bytes(*b"NFrg"), id: id as u32 };
-        let status =
-            RegisterEventHotKey(key_code, CONTROL_KEY | OPTION_KEY, id, GetApplicationEventTarget(), 0, &mut hotkey_ref);
+        let status = RegisterEventHotKey(
+            key_code,
+            CONTROL_KEY | OPTION_KEY,
+            id,
+            GetApplicationEventTarget(),
+            0,
+            &mut hotkey_ref,
+        );
         if status != 0 {
             tracing::warn!(status, "hotkey is taken by another app; it will not fire");
         }
     }
 }
 
-/// Register ⌃⌥N and ⌃⌥C.
+/// Register ⌃⌥N, ⌃⌥C, ⌃⌥Y and ⌃⌥D.
 pub fn install() {
     let spec = EventTypeSpec { event_class: K_EVENT_CLASS_KEYBOARD, event_kind: K_EVENT_HOT_KEY_PRESSED };
     let mut handler_ref = std::ptr::null_mut();
@@ -95,4 +139,6 @@ pub fn install() {
     }
     register(KEY_N, 1);
     register(KEY_C, 2);
+    register(KEY_Y, 3);
+    register(KEY_D, 4);
 }

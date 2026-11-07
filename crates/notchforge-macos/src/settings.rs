@@ -1430,6 +1430,20 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 },
             );
             form.text_row(
+                "Ask in the notch for",
+                Some("Seconds a tool request waits for Allow / Deny before the terminal asks. 0 turns it off"),
+                &c.agents.permission_wait_secs.to_string(),
+                "45",
+                true,
+                86.0,
+                false,
+                |cfg, v| {
+                    if let Ok(n) = v.trim().parse::<u64>() {
+                        cfg.agents.permission_wait_secs = n.min(570);
+                    }
+                },
+            );
+            form.text_row(
                 "Bearer token",
                 Some("Optional. Requests then need Authorization: Bearer"),
                 if preview() { "board-sample" } else { c.agents.token.as_deref().unwrap_or("") },

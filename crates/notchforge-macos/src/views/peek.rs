@@ -197,7 +197,7 @@ impl PeekView {
             && matches!(n.kind, NotificationKind::Message)
             && n.app.category() == notchforge_core::apps::AppCategory::Messaging;
         let (first, second) = match &target {
-            Some(AuthTarget::Agent(_)) => ("Allow", Some("Deny")),
+            Some(AuthTarget::Agent(_) | AuthTarget::ToolPermission(_)) => ("Allow", Some("Deny")),
             Some(AuthTarget::Spotify) => ("Cancel", None),
             None if replyable => ("Reply", Some("Open")),
             None => ("Open", None),

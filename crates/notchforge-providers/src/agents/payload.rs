@@ -47,7 +47,8 @@ pub struct AgentPayload {
     #[serde(alias = "session_id", alias = "conversation_id", alias = "session", alias = "turn-id")]
     pub thread: Option<String>,
     pub url: Option<String>,
-    /// Unix seconds or milliseconds.
+    /// Unix seconds or milliseconds, or an RFC 3339 string (Gemini CLI).
+    #[serde(default, deserialize_with = "timestamp")]
     pub timestamp: Option<i64>,
     /// Reported token usage (telemetry; see `NewNotification::tokens`).
     #[serde(alias = "usage")]
@@ -59,6 +60,48 @@ pub struct AgentPayload {
     pub hook_event_name: Option<String>,
     pub cwd: Option<String>,
     pub tool_name: Option<String>,
+    /// Claude Code's `Stop` / `SubagentStop` (and Gemini CLI's `AfterAgent`
+    /// `prompt_response`): the reply it just finished.
+    #[serde(alias = "prompt_response")]
+    pub last_assistant_message: Option<String>,
+}
+
+/// The gist of a finished reply for the "finished" peek: its first
+/// paragraph, without Markdown marks, at most a couple of lines.
+pub fn reply_gist(text: &str) -> Option<String> {
+    let para = text
+        .split("\n\n")
+        .map(|p| p.trim())
+        // A lone heading says little; the paragraph after it says what happened.
+        .find(|p| !p.is_empty() && !p.starts_with("```") && (!p.starts_with('#') || p.contains('\n')))?;
+    let plain: String = para
+        .lines()
+        .map(|l| l.trim().trim_start_matches(['#', '-', '*', '>']).trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("**", "")
+        .replace('`', "");
+    let plain = plain.trim();
+    if plain.is_empty() {
+        return None;
+    }
+    Some(if plain.chars().count() > 220 {
+        format!("{}…", plain.chars().take(219).collect::<String>().trim_end())
+    } else {
+        plain.to_owned()
+    })
+}
+
+/// A timestamp as a number (seconds or milliseconds) or an RFC 3339 string;
+/// anything else is ignored rather than failing the whole event.
+fn timestamp<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(match v {
+        Some(serde_json::Value::Number(n)) => n.as_i64(),
+        Some(serde_json::Value::String(s)) => super::usage::parse_time(&s),
+        _ => None,
+    })
 }
 
 /// Single event or batch.
@@ -144,6 +187,7 @@ impl AgentPayload {
             }
         });
         let body = non_empty(self.body)
+            .or_else(|| self.last_assistant_message.as_deref().and_then(reply_gist))
             .or_else(|| self.tool_name.clone().map(|t| format!("Tool: {t}")))
             .unwrap_or_else(|| match kind {
                 NotificationKind::TaskFinished => format!("{} finished responding.", app.display_name),
@@ -292,5 +336,38 @@ mod tests {
     fn rejects_garbage() {
         assert!(parse_events(b"not json", Origin::AgentWebhook, &Overrides::default()).is_err());
         assert!(parse_events(b"[]", Origin::AgentWebhook, &Overrides::default()).is_err());
+    }
+
+    #[test]
+    fn finished_replies_become_a_short_gist() {
+        assert_eq!(
+            reply_gist("## Done\n\nI **fixed** the `timeline` and ran the tests.\n\nDetails…").as_deref(),
+            Some("I fixed the timeline and ran the tests.")
+        );
+        assert_eq!(
+            reply_gist("I **fixed** the `timeline`.\nAll tests pass.").as_deref(),
+            Some("I fixed the timeline. All tests pass.")
+        );
+        assert!(reply_gist("   ").is_none());
+        let long = "word ".repeat(100);
+        assert!(reply_gist(&long).expect("gist").chars().count() <= 220);
+        let p: AgentPayload = serde_json::from_str(
+            r#"{"hook_event_name":"Stop","cwd":"/w/notch","last_assistant_message":"Shipped the player redesign."}"#,
+        )
+        .expect("payload");
+        let n = p.into_notification(Origin::AgentWebhook, &Overrides::default());
+        assert_eq!(n.body, "Shipped the player redesign.");
+    }
+
+    #[test]
+    fn gemini_turn_ends_become_a_finished_note() {
+        let body = br#"{"session_id":"g","cwd":"/w/demo-app","timestamp":"2026-11-07T15:20:00Z",
+            "hook_event_name":"AfterAgent","prompt":"run the tests","prompt_response":"All 42 tests pass."}"#;
+        let overrides = Overrides { source: Some("gemini".into()), kind: Some("task_finished".into()) };
+        let n = parse_events(body, Origin::AgentWebhook, &overrides).expect("parsed");
+        assert_eq!(n.len(), 1);
+        assert_eq!(n[0].body, "All 42 tests pass.");
+        assert_eq!(n[0].kind, NotificationKind::TaskFinished);
+        assert!(n[0].timestamp_ms > 1_700_000_000_000);
     }
 }

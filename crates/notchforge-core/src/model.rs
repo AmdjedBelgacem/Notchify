@@ -112,6 +112,9 @@ pub enum Origin {
 pub const AUTH_THREAD_AGENT: &str = "auth:agent:";
 /// Thread key of the Spotify sign-in prompt.
 pub const AUTH_THREAD_SPOTIFY: &str = "auth:spotify";
+/// Thread-key prefix of a tool-permission request held for the notch; the
+/// rest is the request id the agent's hook is waiting on.
+pub const AUTH_THREAD_PERMISSION: &str = "auth:permission:";
 
 /// What an [`NotificationKind::Authorization`] notification asks about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +123,8 @@ pub enum AuthTarget {
     Agent(String),
     /// Spotify's sign-in is waiting on the browser: Cancel.
     Spotify,
+    /// A coding agent waits to run a tool (by request id): Allow / Deny.
+    ToolPermission(String),
 }
 
 /// A notification as produced by a provider, before the pipeline assigns an id.
@@ -180,7 +185,10 @@ impl Notification {
         }
         match self.thread.as_deref()? {
             AUTH_THREAD_SPOTIFY => Some(AuthTarget::Spotify),
-            t => t.strip_prefix(AUTH_THREAD_AGENT).map(|k| AuthTarget::Agent(k.to_owned())),
+            t => match t.strip_prefix(AUTH_THREAD_PERMISSION) {
+                Some(id) => Some(AuthTarget::ToolPermission(id.to_owned())),
+                None => t.strip_prefix(AUTH_THREAD_AGENT).map(|k| AuthTarget::Agent(k.to_owned())),
+            },
         }
     }
 
@@ -422,6 +430,26 @@ pub struct UsageRange {
     pub agents: Vec<(UsageAgent, u64)>,
     pub models: Vec<(String, u64)>,
     pub sessions: Vec<UsageSession>,
+}
+
+/// A lifecycle event an agent reported through its hooks (Claude Code's
+/// `UserPromptSubmit`, `PreToolUse`, `Stop`…): the live sessions follow these
+/// the moment they happen instead of waiting for the next log read.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AgentHook {
+    pub agent: UsageAgent,
+    /// The agent's own session id (Claude Code's `session_id`).
+    pub session: String,
+    /// The hook's event name, or `PermissionResolved` when a held
+    /// permission request ended (answered, timed out or cancelled).
+    pub event: String,
+    pub tool: Option<String>,
+    /// What it is doing or asking, in a few words ("Running cargo test").
+    pub detail: Option<String>,
+    pub cwd: Option<String>,
+    pub at_ms: i64,
+    /// For `PermissionRequest` / `PermissionResolved`: the held request.
+    pub permission_id: Option<String>,
 }
 
 /// A session active in the last half hour.

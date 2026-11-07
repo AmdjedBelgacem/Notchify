@@ -138,18 +138,11 @@ fn video_from_compact(node: &serde_json::Value) -> Option<(String, UpNextVideo)>
     let video_id = node.get("videoId")?.as_str()?.to_owned();
     let title = text_of(node.get("title"))?;
     // Watch-page sidebars say `authorText`, search results `ownerText`.
-    let author = text_of(node.get("authorText"))
-        .or_else(|| text_of(node.get("ownerText")))
-        .unwrap_or_default();
+    let author = text_of(node.get("authorText")).or_else(|| text_of(node.get("ownerText"))).unwrap_or_default();
     let duration = text_of(node.get("lengthText")).unwrap_or_default();
     Some((
         video_id.clone(),
-        UpNextVideo {
-            title,
-            author,
-            duration,
-            url: format!("https://www.youtube.com/watch?v={video_id}"),
-        },
+        UpNextVideo { title, author, duration, url: format!("https://www.youtube.com/watch?v={video_id}") },
     ))
 }
 
@@ -212,13 +205,7 @@ fn text_of(value: Option<&serde_json::Value>) -> Option<String> {
     if let Some(t) = v.get("simpleText").and_then(|t| t.as_str()) {
         return Some(t.to_owned());
     }
-    Some(
-        v.get("runs")?
-            .as_array()?
-            .iter()
-            .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
-            .collect::<String>(),
-    )
+    Some(v.get("runs")?.as_array()?.iter().filter_map(|r| r.get("text").and_then(|t| t.as_str())).collect::<String>())
 }
 
 use std::time::Duration;
@@ -256,7 +243,6 @@ mod tests {
         assert!(parse_up_next("<html>no data</html>", "x").is_empty());
         assert!(parse_up_next("<script>var ytInitialData = {broken", "x").is_empty());
     }
-
 
     #[test]
     fn parses_search_results_for_a_title() {

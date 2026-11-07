@@ -337,7 +337,7 @@ pub fn close_settings() {
 /// Take over the main thread and run the AppKit event loop. Never returns
 /// under normal operation (the process exits from `terminate:`).
 pub fn run(boot: Boot) -> Result<(), String> {
-    let mtm = MainThreadMarker::new().ok_or("NotchForge's UI must run on the main thread")?;
+    let mtm = MainThreadMarker::new().ok_or("Notchisland's UI must run on the main thread")?;
     let app = NSApplication::sharedApplication(mtm);
     // Accessory: no Dock icon, no main menu, never steals focus by itself.
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
@@ -353,6 +353,7 @@ pub fn run(boot: Boot) -> Result<(), String> {
     menubar.set_visible(boot.config.general.show_menu_bar_icon);
 
     crate::hotkey::install();
+    crate::url_scheme::install(mtm);
     crate::location::start(mtm, boot.location);
     if boot.config.providers.weather && boot.config.weather.location.eq_ignore_ascii_case("auto") {
         crate::location::request_if_undetermined();
@@ -403,9 +404,22 @@ pub fn run(boot: Boot) -> Result<(), String> {
     if let Some(dir) = boot.self_test {
         tracing::info!(dir = %dir.display(), "running UI self-test");
         crate::selftest::start(mtm, dir);
+    } else {
+        crate::onboarding::show_if_first_run();
+        // An older Claude Code connection gets the current hooks (live sessions,
+        // permission requests in the notch).
+        {
+            use notchforge_providers::agents::connect;
+            let env = connect::Env::current(boot.config.agents.http_port, boot.config.agents.token.clone());
+            std::thread::spawn(move || {
+                if connect::upgrade_claude(&env) {
+                    tracing::info!("Claude Code hooks upgraded");
+                }
+            });
+        }
     }
 
-    tracing::info!("NotchForge UI running");
+    tracing::info!("Notchisland UI running");
     app.run();
     Ok(())
 }

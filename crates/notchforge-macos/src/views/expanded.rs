@@ -83,8 +83,21 @@ pub enum Tab {
     Agents,
 }
 
+impl Tab {
+    /// The tab `step` places along the tab bar, wrapping around (← / →).
+    pub fn step(self, step: i32) -> Tab {
+        let i = TABS.iter().position(|t| *t == self).unwrap_or(0) as i32;
+        TABS[(i + step).rem_euclid(TABS.len() as i32) as usize]
+    }
+
+    /// The tab at a 1-based position (⌘1 … ⌘5).
+    pub fn nth(n: usize) -> Option<Tab> {
+        n.checked_sub(1).and_then(|i| TABS.get(i).copied())
+    }
+}
+
 /// The tabs in the order of their buttons.
-const TABS: [Tab; 5] = [Tab::Overview, Tab::Planner, Tab::Media, Tab::Live, Tab::Agents];
+pub const TABS: [Tab; 5] = [Tab::Overview, Tab::Planner, Tab::Media, Tab::Live, Tab::Agents];
 const TAB_W: f64 = 34.0;
 
 pub struct ExpandedView {
@@ -610,9 +623,8 @@ impl ExpandedView {
         let usage = UsagePage::new(mtm, w, h, nh, p);
         usage.root.setHidden(true);
         root.addSubview(&usage.root);
-        let data_dir = notchforge_core::config::Paths::resolve()
-            .map(|p| p.data_dir)
-            .unwrap_or_else(|_| std::env::temp_dir());
+        let data_dir =
+            notchforge_core::config::Paths::resolve().map(|p| p.data_dir).unwrap_or_else(|_| std::env::temp_dir());
         let planner = super::planner::PlannerPage::new(mtm, w, h, nh, p, data_dir);
         planner.root.setHidden(true);
         root.addSubview(&planner.root);
@@ -1478,7 +1490,7 @@ impl ExpandedView {
             row.addSubview(&b);
         };
         match target {
-            AuthTarget::Agent(_) => {
+            AuthTarget::Agent(_) | AuthTarget::ToolPermission(_) => {
                 let bw = (w - 24.0 - 8.0) / 2.0;
                 add("Deny", 12.0, bw, false, false);
                 add("Allow", 12.0 + bw + 8.0, bw, true, true);
@@ -1862,5 +1874,20 @@ impl ExpandedView {
         let info = d.as_ref()?;
         let m = info.modes.get(usize::try_from(idx).ok()?)?;
         Some((self.display_id.get(), m.id))
+    }
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::Tab;
+
+    #[test]
+    fn arrows_wrap_around_the_tab_bar() {
+        assert_eq!(Tab::Overview.step(1), Tab::Planner);
+        assert_eq!(Tab::Overview.step(-1), Tab::Agents);
+        assert_eq!(Tab::Agents.step(1), Tab::Overview);
+        assert_eq!(Tab::nth(3), Some(Tab::Media));
+        assert_eq!(Tab::nth(0), None);
+        assert_eq!(Tab::nth(6), None);
     }
 }

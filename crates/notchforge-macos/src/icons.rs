@@ -152,6 +152,54 @@ pub fn average_color(image: &NSImage) -> Option<(f64, f64, f64)> {
     Some(lift(r.min(1.0), g.min(1.0), b.min(1.0)))
 }
 
+/// A 6 × 6 copy of `image`, smoothly enlarged: stretched over a tile with linear
+/// filtering it reads as a heavy blur of the cover — Apple Music's ambient
+/// backdrop, at no rendering cost.
+pub fn ambient_image(image: &NSImage) -> Option<objc2_core_foundation::CFRetained<objc2_core_graphics::CGImage>> {
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImageAlphaInfo,
+    };
+    // SAFETY: null proposed rect / context / hints are documented as allowed.
+    let cg = unsafe { image.CGImageForProposedRect_context_hints(std::ptr::null_mut(), None, None) }?;
+    let space = CGColorSpace::new_device_rgb()?;
+    // SAFETY: the context owns its own buffer (null data).
+    unsafe {
+        let ctx = CGBitmapContextCreate(
+            std::ptr::null_mut(),
+            6,
+            6,
+            8,
+            0,
+            Some(&space),
+            CGImageAlphaInfo::PremultipliedLast.0,
+        )?;
+        CGContext::draw_image(Some(&ctx), crate::ui::rect(0.0, 0.0, 6.0, 6.0), Some(&cg));
+        let mut img = CGBitmapContextCreateImage(Some(&ctx))?;
+        // Enlarge in steps with smooth interpolation: each pass softens the
+        // last one's seams, so no cells or bands show at any size.
+        for side in [18usize, 54, 120] {
+            let next = CGBitmapContextCreate(
+                std::ptr::null_mut(),
+                side,
+                side,
+                8,
+                0,
+                Some(&space),
+                CGImageAlphaInfo::PremultipliedLast.0,
+            )?;
+            CGContext::set_interpolation_quality(Some(&next), objc2_core_graphics::CGInterpolationQuality::High);
+            let pad = side as f64 / 12.0;
+            CGContext::draw_image(
+                Some(&next),
+                crate::ui::rect(-pad, -pad, side as f64 + 2.0 * pad, side as f64 + 2.0 * pad),
+                Some(&img),
+            );
+            img = CGBitmapContextCreateImage(Some(&next))?;
+        }
+        Some(img)
+    }
+}
+
 /// Raise very dark colours toward a minimum brightness, keeping the hue.
 pub fn lift(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     let max = r.max(g).max(b);

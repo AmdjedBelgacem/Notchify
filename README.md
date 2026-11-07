@@ -426,10 +426,22 @@ from posting.
 
 ### Recipes
 
-- **Claude Code.** Merge [`integrations/claude-code/settings.json`](integrations/claude-code/settings.json)
-  into `~/.claude/settings.json`. Hook payloads are understood natively:
-  permission prompts show as **Needs your input · project**, and turn ends
-  show as **Finished · project**.
+- **Claude Code.** Settings › Coding Agents › **Connect** (or merge
+  [`integrations/claude-code/settings.json`](integrations/claude-code/settings.json)
+  into `~/.claude/settings.json`). Nine hooks post to `POST /v1/hooks`: the
+  Live page follows each prompt, tool and stop the moment it happens, a
+  finished turn peeks with the gist of Claude's reply, and tool permission
+  requests are asked in the notch (below). Older connections are upgraded on
+  launch.
+- **Gemini CLI, Cursor's agent, Aider.** Settings › Coding Agents › Connect.
+  Gemini CLI gets the same lifecycle hooks (`~/.gemini/settings.json`, live
+  sessions included), Cursor reports finished turns and file edits
+  (`~/.cursor/hooks.json`), Aider says when it is waiting for you
+  (`notifications-command` in `~/.aider.conf.yml`).
+- **Any MCP-capable agent.** `notchforge-mcp` (inside the app bundle) gives
+  agents `notch_notify`, `notch_progress` and `notch_finished` tools — see
+  [`crates/notchforge-mcp/README.md`](crates/notchforge-mcp/README.md). For
+  Claude Code: `claude mcp add notchisland -- /Applications/Notchisland.app/Contents/MacOS/notchforge-mcp`.
 - **ChatGPT Codex CLI.** Add `notify = ["notchforge-notify", "--source", "chatgpt", "--best-effort"]`
   to `~/.codex/config.toml` ([details](integrations/codex/README.md)).
 - **OpenCode.** Copy [`integrations/opencode/notchforge.js`](integrations/opencode/notchforge.js)
@@ -444,6 +456,36 @@ from posting.
   [`integrations/shell/notchforge.sh`](integrations/shell/notchforge.sh) and run
   `nfwrap --source aider aider …`. You're notified with the exit status and
   duration.
+
+### Answering tool requests from the notch
+
+When Claude Code wants to run a tool that needs your permission, its
+`PermissionRequest` hook waits while the notch asks: **Allow** / **Deny** on the
+card, **⌃⌥Y** / **⌃⌥D** from anywhere, or `open notchisland://allow`. The answer
+goes straight back to Claude Code. Nobody answers within
+`agents.permission_wait_secs` (45 s, Settings › Coding Agents; 0 turns it off)
+and Claude Code asks in its terminal as usual. If Notchisland isn't running the
+hook does nothing. Your deny rules in Claude Code still apply.
+
+### Links, shortcuts and keys
+
+`notchisland://` links drive the notch from Shortcuts ("Open URL"), Raycast,
+Alfred or `open` in a script: `open`, `tab/<overview|planner|music|live|agents>`,
+`toggle`, `close`, `timer?minutes=25&label=Focus`, `cancel-timer`,
+`notify?title=…&body=…`, `play-pause`, `next`, `previous`, `allow`, `deny`,
+`shelve`, `settings`, `setup`. Ready-made, signed shortcuts for the common
+ones are in [`integrations/shortcuts/`](integrations/shortcuts/README.md), and
+the app adds native Shortcuts actions (Open the Notch, Start a Notch Timer,
+Show in the Notch, Answer Agent Request…) when built with Xcode installed. Keys: **⌃⌥N** opens the notch, **← →** and
+**⌘1…⌘5** switch tabs while it is open, **⌃⌥C** shelves the clipboard.
+
+### CI runs and updates
+
+With the GitHub CLI signed in (`gh auth login`), runs of GitHub Actions in the
+repositories you pushed to recently (plus any listed in `[ci] repos`) peek when
+they start and notify when they pass or fail, with a link to the run. Twice a
+day the app reads the latest release's `appcast.json` and says once when a
+newer version is out (`general.check_updates`).
 
 ---
 
@@ -630,6 +672,7 @@ observer, live in `notchforge-macos`. They send into the same event channel
 | 60–120 fps | Each frame changes one layer frame and one corner radius, composited by the window server. Springs are integrated at a fixed 240 Hz sub-step, so motion is identical at 60 Hz and on 120 Hz ProMotion. |
 | No jank under bursts | Folding, grouping and rate limiting happen before the UI. Snapshots are coalesced (≤ 1 per 16 ms) and the main thread keeps only the latest one. |
 | Instant hover | Global mouse monitors and an always-active tracking area feed a pure state machine. The hover-intent delay is configurable and can be 0. |
+| Measured, not assumed | `packaging/energy_check.sh` samples CPU, wakeups and memory with `top` and fails over budget (1 % of a core by default). The agent watcher lists processes in-process instead of launching `ps`, and agent hooks update the live sessions without re-reading the logs. |
 | Clean shutdown | A shutdown signal is shared by every task. Providers remove their socket and the engine persists the tray. The binary waits for every task to finish (up to 1 s) before exiting. |
 
 ---

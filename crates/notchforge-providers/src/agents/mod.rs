@@ -21,6 +21,7 @@ pub mod connect;
 pub mod http;
 pub mod inbox;
 pub mod payload;
+pub mod permission;
 pub mod socket;
 pub mod usage;
 pub mod watch;

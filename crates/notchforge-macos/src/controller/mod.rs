@@ -10,6 +10,9 @@
 //!   never blocks clicks on the menu bar outside its own shape,
 //! * render snapshots into the views (lazily for the expanded panel).
 
+mod calls;
+mod previews;
+
 use crate::panel::{NotchPanel, RootView};
 use crate::screen;
 use crate::ui::{Palette, rect};
@@ -49,6 +52,10 @@ const JUST_ANSWERED_MS: i64 = 5_000;
 /// Pressing hang up again this soon, with no button found, means it's over.
 const HANG_UP_AGAIN_MS: i64 = 20_000;
 const KEY_COMMA: u16 = 43;
+const KEY_LEFT: u16 = 123;
+const KEY_RIGHT: u16 = 124;
+/// `kVK_ANSI_1` … `kVK_ANSI_5` (not contiguous: 5 is 23).
+const KEY_DIGITS: [u16; 5] = [18, 19, 20, 21, 23];
 /// How long a paused track keeps the media wings (dimmed, static) so one
 /// click on them resumes it, before the wings fold back to the indicators.
 const PAUSED_WINGS_MS: i64 = 5 * 60 * 1000;
@@ -79,17 +86,17 @@ pub struct WingDecision<'a> {
 /// screen (menu bar items, the camera/mic pill, …). Shared by the primary
 /// island and the mirrors.
 pub fn wing_mask_for(layout: &NotchLayout, content: u8, occupancy: &[Rect]) -> u8 {
-        let notch = layout.notch.rect;
-        let mut mask = content;
-        let left = Rect::new(notch.x - WING_WIDTH, notch.y, WING_WIDTH, notch.height);
-        let right = Rect::new(notch.max_x(), notch.y, WING_WIDTH, notch.height);
-        if occupancy.iter().any(|r| r.intersects(&left)) {
-            mask &= !WING_LEFT;
-        }
-        if occupancy.iter().any(|r| r.intersects(&right)) {
-            mask &= !WING_RIGHT;
-        }
-        mask
+    let notch = layout.notch.rect;
+    let mut mask = content;
+    let left = Rect::new(notch.x - WING_WIDTH, notch.y, WING_WIDTH, notch.height);
+    let right = Rect::new(notch.max_x(), notch.y, WING_WIDTH, notch.height);
+    if occupancy.iter().any(|r| r.intersects(&left)) {
+        mask &= !WING_LEFT;
+    }
+    if occupancy.iter().any(|r| r.intersects(&right)) {
+        mask &= !WING_RIGHT;
+    }
+    mask
 }
 
 pub struct Controller {
@@ -603,7 +610,6 @@ impl Controller {
         self.wing_override.set((sides, notchforge_core::time::now_ms()));
         self.refresh_wing_mask();
     }
-
 
     /// Is there room beside the notch on each side? Fail-safe: without
     /// Accessibility the spans *cannot* be checked, so they count as occupied —
@@ -1248,6 +1254,29 @@ impl Controller {
         self.views.borrow().expanded.resolution_menu(anchor);
     }
 
+    fn is_expanded(&self) -> bool {
+        self.machine.try_borrow().map(|m| matches!(m.state(), State::Expanded)).unwrap_or(false)
+    }
+
+    /// The newest tool-permission request waiting in the notch, if any.
+    fn pending_permission(&self) -> Option<String> {
+        self.snapshot.borrow().notifications.iter().find_map(|n| match n.auth_target() {
+            Some(notchforge_core::model::AuthTarget::ToolPermission(id)) => Some(id),
+            _ => None,
+        })
+    }
+
+    /// ⌃⌥Y / ⌃⌥D: answer the waiting tool request without reaching for the mouse.
+    pub fn answer_pending_permission(&self, allow: bool) -> bool {
+        match self.pending_permission() {
+            Some(id) => {
+                self.answer_auth(&notchforge_core::model::AuthTarget::ToolPermission(id), allow);
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn show_expanded_tab(&self, tab: crate::views::expanded::Tab) {
         self.views.borrow().expanded.show_tab(tab);
     }
@@ -1255,247 +1284,6 @@ impl Controller {
     /// 1 Hz tick from the music page (progress bar and clocks).
     pub fn media_tick(&self) {
         self.views.borrow().expanded.media.tick();
-    }
-
-    /// Render the hover glance from an arbitrary snapshot (self-test).
-    pub fn preview_compact(&self, snap: &Snapshot) {
-        self.views.borrow().compact.update(snap, &self.palette.borrow());
-    }
-
-    /// Render the Overview from an arbitrary snapshot (self-test).
-    pub fn preview_overview(&self, snap: &Snapshot) {
-        self.views.borrow().expanded.update(snap);
-    }
-
-    /// Build every view for a simulated 14-inch MacBook Pro (1512 × 982,
-    /// 185 × 32 pt notch: the geometry the design boards use), draw them from
-    /// the given snapshots and hand each island, hosted in an offscreen
-    /// window, to `render` (self-test).
-    pub fn notched_previews(
-        &self,
-        overview: &Snapshot,
-        music: &Snapshot,
-        peek: &Notification,
-        prompts: &[Notification; 2],
-        render: &mut dyn FnMut(&str, &NSView, f64, f64),
-    ) {
-        use crate::views::expanded::Tab;
-        use notchforge_core::geometry::{Rect, ScreenInfo};
-        use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
-        let screen = ScreenInfo {
-            id: 0,
-            frame: Rect::new(0.0, 0.0, 1512.0, 982.0),
-            visible_frame: Rect::new(0.0, 0.0, 1512.0, 950.0),
-            safe_area_top: 32.0,
-            aux_top_left: Some(Rect::new(0.0, 950.0, 663.5, 32.0)),
-            aux_top_right: Some(Rect::new(848.5, 950.0, 663.5, 32.0)),
-            backing_scale: 2.0,
-            is_builtin: true,
-            is_main: false,
-        };
-        let cfg = self.config.borrow().clone();
-        let layout = NotchLayout::new(screen, cfg.appearance.clone());
-        let views = Views::new(self.mtm, &layout, &cfg, &self.engine);
-        let palette = self.palette.borrow().clone();
-
-        let mut show = |name: &str, kind: LayoutKind, content: &NSView| {
-            let s = layout.shape(kind);
-            // SAFETY: a plain borderless window; it is closed and dropped
-            // below and nothing else holds it, so it must not self-release.
-            let window = unsafe {
-                let w = NSWindow::initWithContentRect_styleMask_backing_defer(
-                    NSWindow::alloc(self.mtm),
-                    rect(-20000.0, -20000.0, s.width, s.height),
-                    NSWindowStyleMask::Borderless,
-                    NSBackingStoreType::Buffered,
-                    false,
-                );
-                w.setReleasedWhenClosed(false);
-                w
-            };
-            let island = NSView::initWithFrame(NSView::alloc(self.mtm), rect(0.0, 0.0, s.width, s.height));
-            island.setWantsLayer(true);
-            if let Some(l) = island.layer() {
-                l.setMasksToBounds(true);
-                // On screen the top corners sit above the display edge; only
-                // the lower two are visible.
-                l.setCornerRadius(s.corner_radius);
-                l.setMaskedCorners(
-                    objc2_quartz_core::CACornerMask::LayerMinXMinYCorner
-                        | objc2_quartz_core::CACornerMask::LayerMaxXMinYCorner,
-                );
-            }
-            let notch_h = self.layout.borrow().notch.rect.height;
-            let t = if matches!(kind, LayoutKind::Collapsed | LayoutKind::CollapsedWithWings(_)) { 0.0 } else { 1.0 };
-            let _material =
-                crate::glass::Glass::preview(self.mtm, &island, s.width, s.height, s.corner_radius, notch_h, t);
-            content.setHidden(false);
-            // Top-aligned, as on screen: a view can be taller than this shape.
-            content.setFrameOrigin(NSPoint::new(0.0, s.height - content.frame().size.height));
-            island.addSubview(content);
-            window.setContentView(Some(&island));
-            // On screen (far outside every display, never key) so layer-backed
-            // views are drawn the way they are in the real panel.
-            window.orderFrontRegardless();
-            window.displayIfNeeded();
-            objc2_quartz_core::CATransaction::flush();
-            render(name, &island, s.width, s.height);
-            content.removeFromSuperview();
-            window.close();
-        };
-
-        views.expanded.update(overview);
-        views.expanded.preview_controls(0.72, 0.62, "1512 × 982");
-        views.expanded.show_tab(Tab::Overview);
-        show("07a-notched-overview", LayoutKind::Expanded, &views.expanded.root);
-        views.expanded.media.invalidate();
-        views.expanded.media.set_active_playlist(music.media.playlists.first().map(|p| p.id.clone()));
-        views.expanded.media.update(music);
-        views.expanded.show_tab(Tab::Media);
-        show("07b-notched-music", LayoutKind::Expanded, &views.expanded.root);
-        views.compact.update(music, &palette);
-        show("07c-notched-hover", LayoutKind::Compact, &views.compact.root);
-        views.peek.show(peek, &palette);
-        show("07d-notched-peek", LayoutKind::Peek, &views.peek.root);
-        // Collapsed with wings while a browser tab plays audio (no Spotify / Music).
-        let mut browser = music.clone();
-        browser.media.players.clear();
-        browser.audio.sources = vec![notchforge_core::model::AudioSource {
-            pid: 200,
-            name: "Google Chrome".into(),
-            bundle_id: Some("com.google.Chrome".into()),
-            app_path: None,
-            device_uids: vec![],
-        }];
-        views.collapsed.update(
-            &browser,
-            &palette,
-            crate::views::collapsed::WingOptions { media: true, animate: false, mask: WING_LEFT | WING_RIGHT, chevrons: 0 },
-        );
-        show(
-            "07e-notched-wings-browser",
-            LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT),
-            &views.collapsed.root,
-        );
-        // Authorization prompts: an agent asking for access, a Spotify sign-in.
-        views.peek.show(&prompts[0], &palette);
-        show("07f-notched-auth-agent", LayoutKind::Peek, &views.peek.root);
-        views.peek.show(&prompts[1], &palette);
-        show("07g-notched-auth-spotify", LayoutKind::Peek, &views.peek.root);
-        let mut asking = overview.clone();
-        asking.notifications.splice(0..0, prompts.iter().cloned());
-        asking.generation += 1;
-        views.expanded.update(&asking);
-        views.expanded.show_tab(Tab::Overview);
-        show("07h-notched-auth-overview", LayoutKind::Expanded, &views.expanded.root);
-        // The Agents page, with sample usage.
-        let mut agents = overview.clone();
-        agents.generation += 2;
-        agents.usage = crate::selftest::sample_usage();
-        views.expanded.update(&agents);
-        views.expanded.show_tab(Tab::Agents);
-        show("07i-notched-agents", LayoutKind::Expanded, &views.expanded.root);
-        views.expanded.show_tab(Tab::Live);
-        show("07q-notched-live", LayoutKind::Expanded, &views.expanded.root);
-        // The Planner, with a sample day.
-        let mut planner = agents.clone();
-        planner.generation += 1;
-        planner.calendar = crate::selftest::sample_calendar(planner.now_ms);
-        views.expanded.update(&planner);
-        views.expanded.show_tab(Tab::Planner);
-        show("07r-notched-planner", LayoutKind::Expanded, &views.expanded.root);
-        // As from the desktop app alone: Claude Code's limits unknown, large totals.
-        let mut desktop = agents.clone();
-        desktop.generation += 1;
-        desktop.usage.limits[0].gauges.clear();
-        desktop.usage.limits[0].context_percent = Some(76);
-        desktop.usage.limits[1].gauges.truncate(1);
-        desktop.usage.limits[1].context_percent = None;
-        desktop.usage.limits[1].running = false;
-        desktop.usage.ranges[0].counts.input = 2_000;
-        desktop.usage.ranges[0].counts.output = 2_350_000;
-        desktop.usage.ranges[0].counts.cache_read = 443_800_000;
-        views.expanded.update(&desktop);
-        show("07l-notched-agents-desktop", LayoutKind::Expanded, &views.expanded.root);
-        // A call just picked up, then on the hover card and the panel's pill.
-        let on_call = crate::selftest::sample_active_call();
-        views.call.update_active(&on_call, notchforge_core::time::now_ms());
-        show("07m-notched-in-call", LayoutKind::Incoming(1), &views.call.root);
-        let mut hovering = music.clone();
-        hovering.active_call = Some(on_call.clone());
-        views.compact.update(&hovering, &palette);
-        show("07n-notched-hover-in-call", LayoutKind::Compact, &views.compact.root);
-        views.compact.update(music, &palette);
-        views.expanded.show_tab(Tab::Overview);
-        views.expanded.set_call(Some(&on_call), notchforge_core::time::now_ms());
-        show("07o-notched-panel-in-call", LayoutKind::Expanded, &views.expanded.root);
-        views.expanded.set_call(None, 0);
-        // Calls ringing: one, then several stacked.
-        let calls = crate::selftest::sample_calls();
-        views.call.update(&calls[..1], false);
-        show("07j-notched-call", LayoutKind::Incoming(1), &views.call.root);
-        views.call.update(&calls, false);
-        show("07k-notched-calls", LayoutKind::Incoming(3), &views.call.root);
-        views.expanded.show_tab(Tab::Overview);
-        views.expanded.media.set_active(false);
-        // The floating capsule, as it renders on a notchless display: rounded
-        // all round, hanging below the top edge, with the browser wings.
-        let float_screen = notchforge_core::geometry::ScreenInfo {
-            id: 7,
-            frame: Rect::new(0.0, 0.0, 2560.0, 1440.0),
-            visible_frame: Rect::new(0.0, 0.0, 2560.0, 1415.0),
-            safe_area_top: 0.0,
-            aux_top_left: None,
-            aux_top_right: None,
-            backing_scale: 1.0,
-            is_builtin: false,
-            is_main: false,
-        };
-        let float_layout = NotchLayout::new(float_screen, cfg.appearance.clone());
-        let float_view = crate::views::collapsed::CollapsedView::new(self.mtm, &float_layout, &palette);
-        float_view.update(
-            &browser,
-            &palette,
-            crate::views::collapsed::WingOptions { media: true, animate: false, mask: WING_LEFT | WING_RIGHT, chevrons: 0 },
-        );
-        let fs = float_layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
-        float_view.root.setHidden(false);
-        float_view.root.setFrameOrigin(NSPoint::new(0.0, fs.height - float_view.root.frame().size.height));
-        let float_island = NSView::initWithFrame(NSView::alloc(self.mtm), rect(0.0, 0.0, fs.width, fs.height));
-        float_island.setWantsLayer(true);
-        if let Some(l) = float_island.layer() {
-            l.setMasksToBounds(true);
-            l.setCornerRadius(fs.corner_radius);
-            l.setBackgroundColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
-        }
-        float_island.addSubview(&float_view.root);
-        let _material = crate::glass::Glass::preview(
-            self.mtm,
-            &float_island,
-            fs.width,
-            fs.height,
-            fs.corner_radius,
-            fs.height,
-            0.0,
-        );
-        // SAFETY: a plain borderless window; closed and dropped below.
-        let float_window = unsafe {
-            let w = NSWindow::initWithContentRect_styleMask_backing_defer(
-                NSWindow::alloc(self.mtm),
-                rect(-20000.0, -20000.0, fs.width, fs.height),
-                NSWindowStyleMask::Borderless,
-                NSBackingStoreType::Buffered,
-                false,
-            );
-            w.setReleasedWhenClosed(false);
-            w.setContentView(Some(&float_island));
-            w.orderFrontRegardless();
-            w.displayIfNeeded();
-            w
-        };
-        objc2_quartz_core::CATransaction::flush();
-        render("07p-notched-floating", &float_island, fs.width, fs.height);
-        float_window.close();
     }
 
     pub fn media_page_visible(&self) -> bool {
@@ -1540,6 +1328,23 @@ impl Controller {
             KEY_COMMA if flags.contains(NSEventModifierFlags::Command) => {
                 crate::app::show_settings();
                 true
+            }
+            // ← / → walk the tabs while the panel is open.
+            KEY_LEFT | KEY_RIGHT if self.is_expanded() => {
+                let views = self.views.borrow();
+                let tab = views.expanded.tab().step(if key == KEY_LEFT { -1 } else { 1 });
+                views.expanded.show_tab(tab);
+                true
+            }
+            // ⌘1 … ⌘5 jump straight to a tab.
+            k if flags.contains(NSEventModifierFlags::Command) && self.is_expanded() => {
+                match KEY_DIGITS.iter().position(|d| *d == k).and_then(|i| crate::views::expanded::Tab::nth(i + 1)) {
+                    Some(tab) => {
+                        self.views.borrow().expanded.show_tab(tab);
+                        true
+                    }
+                    None => false,
+                }
             }
             _ => false,
         }
@@ -1600,6 +1405,13 @@ impl Controller {
 
     pub fn collapse(&self) {
         self.handle(Event::Escape);
+    }
+
+    /// Pin the panel open (a link, a shortcut), whatever state it is in.
+    pub fn open_pinned(&self) {
+        if !self.is_expanded() {
+            self.handle(Event::Toggle);
+        }
     }
 
     /// Start a quick reply: expand the native banner's reply field (while it
@@ -1686,6 +1498,11 @@ impl Controller {
             AuthTarget::Spotify => {
                 self.engine.send(Command::Provider(notchforge_core::provider::ProviderCommand::SpotifyCancel))
             }
+            // The agent's hook is waiting on this answer.
+            AuthTarget::ToolPermission(id) => {
+                notchforge_providers::agents::permission::decide(id, primary);
+                self.engine.send(Command::ResolvePermission(id.clone()));
+            }
         }
     }
 
@@ -1770,185 +1587,6 @@ impl Controller {
     }
 
     // ── snapshots & config ───────────────────────────────────────────────
-
-    /// Show, resize or stop showing the ringing calls.
-    fn sync_calls(&self, snap: &Snapshot) {
-        let ids: Vec<_> = snap.calls.iter().map(|c| c.id).collect();
-        let is_new = ids.iter().any(|id| !self.known_calls.borrow().contains(id));
-        *self.known_calls.borrow_mut() = ids;
-        if is_new || (snap.calls.is_empty() && snap.active_call.is_none()) {
-            self.calls_hidden.set(false);
-        }
-        self.set_call_timer(!snap.calls.is_empty() || snap.active_call.is_some());
-        self.views.borrow().expanded.set_call(snap.active_call.as_ref(), now_ms());
-        let show = !snap.calls.is_empty() && !self.calls_hidden.get();
-        // Just picked up: show who with and how to hang up, then settle beside the notch.
-        let just_answered = snap.active_call.as_ref().filter(|a| {
-            snap.calls.is_empty() && !self.calls_hidden.get() && now_ms() - a.started_ms < JUST_ANSWERED_MS
-        });
-        if let Some(call) = just_answered {
-            self.views.borrow().call.update_active(call, now_ms());
-            self.calls_showing.set(true);
-            self.update_interactive();
-            if self.kind.get() != LayoutKind::Incoming(1) {
-                self.set_layout(LayoutKind::Incoming(1));
-            }
-        } else if show {
-            let shown = snap.calls.len().min(notchforge_core::geometry::MAX_VISIBLE_CALLS) as u8;
-            self.views.borrow().call.update(&snap.calls, !self.reduce_motion());
-            self.calls_showing.set(true);
-            self.update_interactive();
-            if self.kind.get() != LayoutKind::Incoming(shown) {
-                self.set_layout(LayoutKind::Incoming(shown));
-            }
-        } else if self.calls_showing.replace(false) {
-            self.update_interactive();
-            self.set_layout(self.wanted_kind.get());
-        }
-    }
-
-    /// Check once a second, while anything rings, for calls that stopped.
-    fn set_call_timer(&self, on: bool) {
-        let mut slot = self.call_timer.borrow_mut();
-        if on && slot.is_none() {
-            let block = RcBlock::new(|_t: NonNull<NSTimer>| {
-                crate::app::send(Command::ExpireCalls);
-                crate::app::with_controller(|c| c.call_second());
-            });
-            // SAFETY: documented NSTimer API; the block is copied by the timer.
-            let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(1.0, true, &block) };
-            // SAFETY: valid timer and run loop mode constant.
-            unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes) };
-            *slot = Some(timer);
-        } else if !on {
-            if let Some(t) = slot.take() {
-                t.invalidate();
-            }
-        }
-    }
-
-    /// Once a second during a call: move the clocks on, and settle the view.
-    pub fn call_second(&self) {
-        let snap = self.snapshot.borrow().clone();
-        let Some(call) = &snap.active_call else { return };
-        let now = now_ms();
-        self.views.borrow().call.set_clock(&notchforge_core::calls::call_clock(call.started_ms, now));
-        self.render_small(&snap);
-        // Rebuilding the big view each second would lose a click in progress.
-        if now - call.started_ms >= JUST_ANSWERED_MS || !snap.calls.is_empty() {
-            self.sync_calls(&snap);
-        }
-    }
-
-    /// The process whose windows a call's buttons are in. A call seen through
-    /// a notification has none yet, so its app's main process is the place to look.
-    fn call_pid(window_pid: Option<i32>, app: &notchforge_core::apps::AppRef) -> Option<i32> {
-        window_pid.or_else(|| {
-            let pid = crate::call_watch::main_pid(app.bundle_id.as_deref()?, 0);
-            (pid != 0).then_some(pid)
-        })
-    }
-
-    /// The process a call is ringing in right now. A call seen only through a
-    /// notification may have no buttons yet, and the app's other "Accept" and
-    /// "Decline" buttons are not this call's.
-    fn ringing_pid(call: &notchforge_core::calls::Call) -> Option<i32> {
-        let pid = Self::call_pid(call.window_pid, &call.app)?;
-        (call.window_pid.is_some() || crate::accessibility::inspect_call_window(pid, true).ringing).then_some(pid)
-    }
-
-    /// Press whatever ends the call: its hang-up button, or its decline button
-    /// if it turns out to be ringing still.
-    fn press_hang_up(call: &notchforge_core::calls::ActiveCall) -> bool {
-        use notchforge_core::calls::{DECLINE_WORDS, HANG_UP_WORDS, LEAVE_WORDS};
-        Self::call_pid(call.window_pid, &call.app).is_some_and(|pid| {
-            crate::accessibility::press_window_button(pid, HANG_UP_WORDS)
-                || crate::accessibility::press_window_button(pid, LEAVE_WORDS)
-                || (crate::accessibility::inspect_call_window(pid, true).ringing
-                    && crate::accessibility::press_window_button(pid, DECLINE_WORDS))
-        })
-    }
-
-    /// End the call in progress with the app's own button. If there's none to
-    /// press, its tab or app may be out of view: bring it forward and try once
-    /// more. Pressing hang up again means it's over, whatever the app shows.
-    pub fn hang_up(&self) {
-        let snap = self.snapshot.borrow().clone();
-        let Some(call) = &snap.active_call else { return };
-        let pressed = Self::press_hang_up(call);
-        let now = now_ms();
-        let again = now - self.hang_up_tried_ms.get() < HANG_UP_AGAIN_MS;
-        tracing::debug!(pressed, again, source = %call.source, "call: hang up");
-        let bundle = call.app.bundle_id.clone();
-        match bundle {
-            Some(b) if !pressed && !again => {
-                self.hang_up_tried_ms.set(now);
-                crate::call_watch::bring_forward(b, call.caller.clone(), call.source.clone(), None);
-                let when = dispatch2::DispatchTime::NOW.time(1_500_000_000);
-                let _ = dispatch2::DispatchQueue::main().after(when, || {
-                    crate::app::with_controller(|c| c.hang_up_in_view());
-                });
-            }
-            _ => {
-                self.hang_up_tried_ms.set(0);
-                self.engine.send(Command::EndActiveCall);
-            }
-        }
-    }
-
-    /// Hang up again, now the call's tab or app has come forward.
-    fn hang_up_in_view(&self) {
-        let snap = self.snapshot.borrow().clone();
-        let Some(call) = &snap.active_call else { return };
-        if Self::press_hang_up(call) {
-            tracing::debug!(source = %call.source, "call: hung up once in view");
-            self.hang_up_tried_ms.set(0);
-            self.engine.send(Command::EndActiveCall);
-        }
-    }
-
-    /// Answer, decline or reorder a call.
-    pub fn call_action(&self, call: &notchforge_core::calls::Call, action: crate::views::call::CallAction) {
-        use crate::views::call::CallAction;
-        use notchforge_core::calls::{ANSWER_WORDS, DECLINE_WORDS};
-        match action {
-            CallAction::Promote => self.engine.send(Command::PromoteCall(call.id)),
-            CallAction::Answer => {
-                let pressed = Self::ringing_pid(call)
-                    .is_some_and(|pid| crate::accessibility::press_window_button(pid, ANSWER_WORDS))
-                    || crate::accessibility::press_banner_button(&call.banner_title, ANSWER_WORDS);
-                tracing::debug!(pressed, source = %call.source, "call: answer");
-                if pressed {
-                    self.engine.send(Command::CallAnswered(call.id));
-                    return;
-                }
-                // Still ringing out of view: bring it forward, and the watch
-                // presses its button as soon as it can be seen.
-                if !crate::accessibility::open_banner(&call.banner_title) {
-                    if let Some(b) = call.app.bundle_id.clone() {
-                        let (caller, source) = (call.caller.clone(), call.source.clone());
-                        crate::call_watch::bring_forward(b, caller, source, call.url.clone());
-                    }
-                }
-                self.engine.send(Command::CallAnswering(call.id));
-            }
-            CallAction::Decline => {
-                // Without a button to press, this only stops the notch ringing.
-                let pressed = Self::ringing_pid(call)
-                    .is_some_and(|pid| crate::accessibility::press_window_button(pid, DECLINE_WORDS))
-                    || crate::accessibility::press_banner_button(&call.banner_title, DECLINE_WORDS);
-                tracing::debug!(pressed, source = %call.source, "call: decline");
-                self.engine.send(Command::EndCall(call.id));
-            }
-        }
-    }
-
-    /// Move the ringing calls out of the way until something new rings.
-    pub fn hide_calls(&self) {
-        self.calls_hidden.set(true);
-        let snap = self.snapshot.borrow().clone();
-        self.sync_calls(&snap);
-    }
 
     pub fn apply_snapshot(&self, snap: Arc<Snapshot>) {
         *self.snapshot.borrow_mut() = snap.clone();

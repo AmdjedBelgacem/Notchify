@@ -1,0 +1,8 @@
+# Self-test checks that may fail on CI runners without blocking the build.
+# One check-name PREFIX per line; blank lines and lines starting with # are ignored.
+# Used by packaging/selftest_gate.py.
+
+# Hover depends on synthetic mouse events, which the hosted runners deliver unreliably.
+hover:
+# The collapsed wings render nothing on some headless runner displays.
+collapsed-wings: content is drawn

@@ -3,8 +3,8 @@
 //! that use them.
 
 pub mod ax;
-pub mod cmio;
 pub mod cg;
+pub mod cmio;
 pub mod coreaudio;
 
 /// CoreFoundation helpers are shared with the providers crate.

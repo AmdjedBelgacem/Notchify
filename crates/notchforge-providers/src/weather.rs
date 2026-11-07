@@ -151,13 +151,7 @@ fn rain_soon_in_minutes(minutely: Option<&Minutely>) -> Option<u8> {
     if m.precipitation.first().copied().unwrap_or(0.0) > 0.2 {
         return None; // already raining
     }
-    m.precipitation
-        .iter()
-        .copied()
-        .skip(1)
-        .position(wet)
-        .map(|slot| (slot as u8 + 1) * 15)
-        .filter(|mins| *mins <= 120)
+    m.precipitation.iter().copied().skip(1).position(wet).map(|slot| (slot as u8 + 1) * 15).filter(|mins| *mins <= 120)
 }
 
 /// Rain-soon minutes straight from a forecast response body.
@@ -169,12 +163,7 @@ fn rain_soon_from_json(json: &[u8]) -> Option<u8> {
 /// The internal "rain soon" peek, styled as coming from Weather.
 fn rain_alert(mins: u8, place: &str) -> ProviderEvent {
     let n = NewNotification {
-        app: AppRef {
-            known: None,
-            bundle_id: None,
-            display_name: "Weather".into(),
-            platform: None,
-        },
+        app: AppRef { known: None, bundle_id: None, display_name: "Weather".into(), platform: None },
         origin: Origin::Internal,
         kind: NotificationKind::Info,
         priority: Some(Priority::Normal),
@@ -356,7 +345,10 @@ mod tests {
 
     #[test]
     fn rain_soon_fires_before_the_first_drop() {
-        let m = |p: &[f32]| Minutely { time: (0..p.len()).map(|i| format!("2026-01-01T00:{:02}", i)).collect(), precipitation: p.to_vec() };
+        let m = |p: &[f32]| Minutely {
+            time: (0..p.len()).map(|i| format!("2026-01-01T00:{:02}", i)).collect(),
+            precipitation: p.to_vec(),
+        };
         // Dry now, rain in slot 3 -> ~45 minutes.
         assert_eq!(rain_soon_in_minutes(Some(&m(&[0.0, 0.0, 0.0, 0.5, 0.9]))), Some(45));
         // Already raining: no alert.

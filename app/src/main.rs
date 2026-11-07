@@ -55,7 +55,7 @@ fn run(args: cli::Args) -> anyhow::Result<()> {
         return Ok(());
     }
     let _log_guard = logging::init(&paths.log_dir, args.verbose);
-    tracing::info!(version = env!("CARGO_PKG_VERSION"), config = %paths.config_file.display(), "starting NotchForge");
+    tracing::info!(version = env!("CARGO_PKG_VERSION"), config = %paths.config_file.display(), "starting Notchisland");
 
     let config = match Config::load_or_init(&paths.config_file) {
         Ok(c) => c,

@@ -13,9 +13,10 @@ use crate::calls::{
 };
 use crate::config::{Config, Paths};
 use crate::model::{
-    AUTH_THREAD_AGENT, AUTH_THREAD_SPOTIFY, AgentLimits, AgentUsage, AudioState, BatteryStatus, CalendarState, TimerState,
-    DeviceBattery, FocusState, MediaPlayer, MediaState, NewNotification, Notification, NotificationId, NotificationKind, Origin,
-    PlaylistStatus, Priority, ProviderStatus, TrayItem, TrayItemId, UsageAgent, Weather,
+    AUTH_THREAD_AGENT, AUTH_THREAD_PERMISSION, AUTH_THREAD_SPOTIFY, AgentLimits, AgentUsage, AudioState, BatteryStatus,
+    CalendarState, DeviceBattery, FocusState, MediaPlayer, MediaState, NewNotification, Notification, NotificationId,
+    NotificationKind, Origin, PlaylistStatus, Priority, ProviderStatus, TimerState, TrayItem, TrayItemId, UsageAgent,
+    Weather,
 };
 use crate::pipeline::{Outcome, Pipeline, PipelineFlags};
 use crate::provider::{ProviderCommand, ProviderEvent, Shutdown};
@@ -40,6 +41,8 @@ pub const LOW_DEVICE_BATTERY: u8 = 15;
 #[derive(Debug, Clone)]
 pub enum Command {
     DismissNotification(NotificationId),
+    /// A held tool-permission request was answered in the notch: drop its prompt.
+    ResolvePermission(String),
     /// Dismiss every notification from an app (by rule key).
     DismissApp(String),
     ClearNotifications,
@@ -97,7 +100,10 @@ pub enum Command {
         kind: CallKind,
     },
     /// Start a user countdown timer.
-    StartTimer { duration_ms: i64, label: String },
+    StartTimer {
+        duration_ms: i64,
+        label: String,
+    },
     /// Cancel the running timer.
     CancelTimer,
 }
@@ -266,9 +272,12 @@ impl Engine {
         loop {
             let deadline = last_publish + COALESCE;
             // A running timer wakes the engine when it ends.
-            let timer_end = self.state.timer.as_ref().filter(|t| !t.expired).map(|t| {
-                std::time::Duration::from_millis((t.ends_at_ms - now_ms()).max(50) as u64)
-            });
+            let timer_end = self
+                .state
+                .timer
+                .as_ref()
+                .filter(|t| !t.expired)
+                .map(|t| std::time::Duration::from_millis((t.ends_at_ms - now_ms()).max(50) as u64));
             tokio::select! {
                 biased;
                 _ = shutdown.wait() => break,
@@ -381,6 +390,7 @@ impl Engine {
     pub fn apply_event(&mut self, ev: ProviderEvent) -> bool {
         match ev {
             ProviderEvent::Notification(n) => self.ingest(n),
+            ProviderEvent::AgentHook(h) => self.agent_hook(h),
             ProviderEvent::Battery(b) => {
                 self.check_mac_battery(&b);
                 let changed = self.state.battery.as_ref() != Some(&b);
@@ -441,6 +451,10 @@ impl Engine {
         let cfg = self.config();
         match cmd {
             Command::DismissNotification(id) => self.state.pipeline.dismiss(id),
+            Command::ResolvePermission(id) => match self.prompt_id(&format!("{AUTH_THREAD_PERMISSION}{id}")) {
+                Some(n) => self.state.pipeline.dismiss(n),
+                None => false,
+            },
             Command::DismissApp(key) => {
                 self.state.pipeline.dismiss_app(&key);
                 true
@@ -808,6 +822,53 @@ impl Engine {
             self.state.active_call = None;
         }
         !gone.is_empty() || call_over
+    }
+
+    /// A coding agent's lifecycle hook. Permission requests become a prompt
+    /// raised here — never by the transport, so nothing outside can pose as
+    /// one — and every event goes on to the provider tracking live sessions.
+    fn agent_hook(&mut self, h: crate::model::AgentHook) -> bool {
+        let mut changed = false;
+        match (h.event.as_str(), h.permission_id.as_deref()) {
+            ("PermissionRequest", Some(id)) => {
+                let app = AppRef::known(
+                    match h.agent {
+                        UsageAgent::Codex => crate::apps::KnownApp::from_key("chatgpt"),
+                        UsageAgent::Gemini => crate::apps::KnownApp::from_key("gemini"),
+                        _ => crate::apps::KnownApp::from_key("claude"),
+                    }
+                    .unwrap_or(crate::apps::KnownApp::GenericAgent),
+                );
+                let denied = self.state.trust.decision(&app.rule_key()) == Some(Decision::Deny);
+                if !denied {
+                    let project = h.cwd.as_deref().and_then(|c| c.rsplit('/').find(|p| !p.is_empty()));
+                    let tool = h.tool.clone().unwrap_or_else(|| "a tool".into());
+                    let prompt = NewNotification {
+                        title: format!("{} wants to use {tool}", app.display_name),
+                        subtitle: project.map(str::to_owned),
+                        body: h.detail.clone().unwrap_or_default(),
+                        app,
+                        origin: Origin::Internal,
+                        kind: NotificationKind::Authorization,
+                        priority: Some(Priority::High),
+                        timestamp_ms: now_ms(),
+                        thread: Some(format!("{AUTH_THREAD_PERMISSION}{id}")),
+                        url: None,
+                        tokens: None,
+                    };
+                    changed = self.ingest_now(prompt);
+                }
+            }
+            ("PermissionResolved", Some(id)) => {
+                if let Some(n) = self.prompt_id(&format!("{AUTH_THREAD_PERMISSION}{id}")) {
+                    changed = self.state.pipeline.dismiss(n);
+                }
+                return changed;
+            }
+            _ => {}
+        }
+        let _ = self.provider_commands.send(ProviderCommand::AgentHook(h));
+        changed
     }
 
     fn ingest(&mut self, n: NewNotification) -> bool {

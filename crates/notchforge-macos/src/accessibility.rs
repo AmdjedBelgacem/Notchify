@@ -762,44 +762,44 @@ unsafe fn walk_text_area(el: CFTypeRef, depth: usize, text: &str) -> bool {
     // SAFETY: the whole walk touches only AX objects we own or borrow from
     // owned arrays, within this call's lifetime.
     unsafe {
-    if depth > MAX_DEPTH {
-        return false;
-    }
-    if attr_string(el, "AXRole").as_deref() == Some("AXTextArea") {
-        let filled = attr_string(el, "AXValue").is_some_and(|v| !v.trim().is_empty());
-        if !filled {
-            let Some(value) = cf::cfstring(text) else { return false };
-            let focused = cf::cfstring("AXFocused");
-            if let Some(focused) = &focused {
-                AXUIElementSetAttributeValue(el, focused.as_ptr(), kCFBooleanTrue);
-            }
-            AXUIElementSetAttributeValue(el, value.as_ptr(), kCFBooleanTrue);
-            // Some apps confirm the field directly; others need a Return key,
-            // which the caller posts after focusing.
-            let mut names: CFTypeRef = std::ptr::null();
-            if AXUIElementCopyActionNames(el, &mut names) == kAXErrorSuccess {
-                if let Some(names) = Owned::from_create(names) {
-                    for j in 0..CFArrayGetCount(names.as_ptr()) {
-                        let action = CFArrayGetValueAtIndex(names.as_ptr(), j);
-                        if cf::as_string(action).as_deref() == Some("AXConfirm") {
-                            AXUIElementPerformAction(el, action);
-                            break;
+        if depth > MAX_DEPTH {
+            return false;
+        }
+        if attr_string(el, "AXRole").as_deref() == Some("AXTextArea") {
+            let filled = attr_string(el, "AXValue").is_some_and(|v| !v.trim().is_empty());
+            if !filled {
+                let Some(value) = cf::cfstring(text) else { return false };
+                let focused = cf::cfstring("AXFocused");
+                if let Some(focused) = &focused {
+                    AXUIElementSetAttributeValue(el, focused.as_ptr(), kCFBooleanTrue);
+                }
+                AXUIElementSetAttributeValue(el, value.as_ptr(), kCFBooleanTrue);
+                // Some apps confirm the field directly; others need a Return key,
+                // which the caller posts after focusing.
+                let mut names: CFTypeRef = std::ptr::null();
+                if AXUIElementCopyActionNames(el, &mut names) == kAXErrorSuccess {
+                    if let Some(names) = Owned::from_create(names) {
+                        for j in 0..CFArrayGetCount(names.as_ptr()) {
+                            let action = CFArrayGetValueAtIndex(names.as_ptr(), j);
+                            if cf::as_string(action).as_deref() == Some("AXConfirm") {
+                                AXUIElementPerformAction(el, action);
+                                break;
+                            }
                         }
                     }
                 }
-            }
-            return true;
-        }
-    }
-    if let Some(children) = copy_attr(el, "AXChildren") {
-        for i in 0..CFArrayGetCount(children.as_ptr()) {
-            let child = CFArrayGetValueAtIndex(children.as_ptr(), i);
-            if walk_text_area(child, depth + 1, text) {
                 return true;
             }
         }
-    }
-    false
+        if let Some(children) = copy_attr(el, "AXChildren") {
+            for i in 0..CFArrayGetCount(children.as_ptr()) {
+                let child = CFArrayGetValueAtIndex(children.as_ptr(), i);
+                if walk_text_area(child, depth + 1, text) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 

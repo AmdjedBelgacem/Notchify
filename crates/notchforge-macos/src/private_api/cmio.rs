@@ -21,8 +21,7 @@ fn get_array(selector: u32) -> Option<Vec<u32>> {
     // SAFETY: valid object/addresses; sizes checked before the read.
     unsafe {
         let mut size = 0usize;
-        if CMIOObjectGetPropertyDataSize(kCMIOObjectSystemObject, &address, 0, std::ptr::null(), &mut size)
-            != 0
+        if CMIOObjectGetPropertyDataSize(kCMIOObjectSystemObject, &address, 0, std::ptr::null(), &mut size) != 0
             || size == 0
         {
             return None;

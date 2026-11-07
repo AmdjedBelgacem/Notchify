@@ -66,6 +66,50 @@ pub fn all_pids() -> Vec<i32> {
     pids
 }
 
+/// When a process started (Unix seconds).
+pub fn start_secs(pid: i32) -> Option<i64> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `info` is a correctly sized out-buffer for PROC_PIDTBSDINFO.
+    let n = unsafe {
+        libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&mut info as *mut libc::proc_bsdinfo).cast(), size)
+    };
+    (n == size).then_some(info.pbi_start_tvsec as i64)
+}
+
+/// A process's command line, space-joined (`KERN_PROCARGS2`). Only readable
+/// for the person's own processes, which is all this is used for.
+pub fn args(pid: i32) -> Option<String> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut size: libc::size_t = 0;
+    // SAFETY: sysctl size query, then a read into a buffer of that size.
+    unsafe {
+        if libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &mut size, std::ptr::null_mut(), 0) != 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; size];
+        if libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) != 0 {
+            return None;
+        }
+        buf.truncate(size);
+        parse_procargs(&buf)
+    }
+}
+
+/// `KERN_PROCARGS2` layout: argc (i32), the executable path, padding NULs,
+/// then argc NUL-terminated arguments.
+pub fn parse_procargs(buf: &[u8]) -> Option<String> {
+    let argc = i32::from_ne_bytes(buf.get(..4)?.try_into().ok()?) as usize;
+    let mut rest = &buf[4..];
+    let exe_end = rest.iter().position(|b| *b == 0)?;
+    rest = &rest[exe_end..];
+    let start = rest.iter().position(|b| *b != 0)?;
+    rest = &rest[start..];
+    let args: Vec<String> =
+        rest.split(|b| *b == 0).take(argc).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+    (!args.is_empty()).then(|| args.join(" "))
+}
+
 /// Short process name (`p_comm`, up to 32 characters).
 pub fn name(pid: i32) -> Option<String> {
     let mut buf = [0u8; 64];
@@ -126,5 +170,10 @@ mod tests {
         assert!(all_pids().contains(&me));
         assert!(executable_path(me).is_some());
         assert!(responsible_pid(me) > 0);
+        assert!(start_secs(me).is_some_and(|t| t > 1_600_000_000));
+        assert!(args(me).is_some_and(|a| !a.is_empty()));
+        let mut raw = 2i32.to_ne_bytes().to_vec();
+        raw.extend_from_slice(b"/usr/bin/node\0\0\0node\0/opt/bin/gemini\0FOO=1\0");
+        assert_eq!(parse_procargs(&raw).as_deref(), Some("node /opt/bin/gemini"));
     }
 }

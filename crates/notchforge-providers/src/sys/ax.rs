@@ -19,7 +19,6 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-
 /// A string attribute of an AX element, empty-to-None.
 pub(crate) fn attribute_string(el: CFTypeRef, name: &str) -> Option<String> {
     let key = cf::cfstring(name)?;
@@ -156,6 +155,313 @@ pub fn window_titles(pid: i32) -> Vec<String> {
             }
         }
         out
+    }
+}
+
+/// A web page's media timeline (YouTube's "Seek slider" and the like), found
+/// once in the browser's Accessibility tree and then read cheaply per poll.
+pub struct WebSlider(Owned);
+
+// SAFETY: AXUIElementRefs are immutable CF handles; the AX API may be called
+// from any thread, one call at a time, which is how this is used.
+unsafe impl Send for WebSlider {}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFNumberCreate(alloc: CFTypeRef, the_type: cf::CFIndex, value: *const std::ffi::c_void) -> CFTypeRef;
+}
+
+#[link(name = "ApplicationServices", kind = "framework")]
+unsafe extern "C" {
+    fn AXUIElementSetAttributeValue(el: CFTypeRef, key: *const std::ffi::c_void, val: CFTypeRef) -> i32;
+}
+
+const K_CF_NUMBER_FLOAT64: cf::CFIndex = 6;
+
+/// A numeric attribute (`AXValue`, `AXMaxValue`).
+fn attribute_number(el: CFTypeRef, name: &str) -> Option<f64> {
+    let key = cf::cfstring(name)?;
+    let mut v: CFTypeRef = std::ptr::null();
+    // SAFETY: valid element/key; the result is owned and type-checked.
+    unsafe {
+        if AXUIElementCopyAttributeValue(el, key.as_ptr(), &mut v) != 0 {
+            return None;
+        }
+        let owned = Owned::from_create(v)?;
+        if cf::CFGetTypeID(owned.as_ptr()) != cf::CFNumberGetTypeID() {
+            return None;
+        }
+        let mut out = 0.0f64;
+        let ok = cf::CFNumberGetValue(owned.as_ptr(), K_CF_NUMBER_FLOAT64, (&mut out as *mut f64).cast());
+        (ok != 0 && out.is_finite()).then_some(out)
+    }
+}
+
+/// Whether a slider's name says it is a media timeline.
+pub fn is_timeline_name(name: &str) -> bool {
+    let n = name.to_lowercase();
+    !n.contains("volume")
+        && ["seek", "progress", "playback", "position", "scrub", "timeline", "time slider", "track"]
+            .iter()
+            .any(|w| n.contains(w))
+}
+
+impl WebSlider {
+    /// Find the playing page's timeline in `pid`'s windows. A bounded walk
+    /// (the page tree can be large), so callers cache the result.
+    pub fn find(pid: i32) -> Option<Self> {
+        // SAFETY: AX calls on objects we own or borrow from owned arrays.
+        unsafe {
+            if AXIsProcessTrusted() == 0 {
+                return None;
+            }
+            let app = Owned::from_create(AXUIElementCreateApplication(pid))?;
+            // Chromium builds the page's tree only for assistive clients.
+            if let (Some(k), Some(v)) = (cf::cfstring("AXManualAccessibility"), cf::cfstring("true")) {
+                let _ = AXUIElementSetAttributeValue(app.as_ptr(), k.as_ptr(), v.as_ptr());
+            }
+            let key = cf::cfstring("AXWindows")?;
+            let mut windows: CFTypeRef = std::ptr::null();
+            if AXUIElementCopyAttributeValue(app.as_ptr(), key.as_ptr(), &mut windows) != 0 {
+                return None;
+            }
+            let windows = Owned::from_create(windows)?;
+            let mut budget = 9000usize;
+            for i in 0..CFArrayGetCount(windows.as_ptr()).min(6) {
+                let win = CFArrayGetValueAtIndex(windows.as_ptr(), i);
+                if win.is_null() {
+                    continue;
+                }
+                if let Some(found) = find_timeline(win, 0, &mut budget) {
+                    return Some(Self(found));
+                }
+            }
+            None
+        }
+    }
+
+    /// `(position, duration)` in seconds; `None` once the element is gone.
+    /// Native range inputs give numbers; ARIA sliders (YouTube) give only
+    /// their value text, "1 Minutes 9 Seconds of 3 Minutes 35 Seconds".
+    pub fn read(&self) -> Option<(f64, f64)> {
+        let el = self.0.as_ptr();
+        if let Some(r) = read_numbers(el) {
+            return Some(r);
+        }
+        ["AXValue", "AXValueDescription"].iter().find_map(|a| attribute_string(el, a).and_then(|t| parse_time_text(&t)))
+    }
+
+    /// Step the slider toward `secs` with Accessibility increment/decrement
+    /// actions, which ARIA sliders turn into arrow keys (5 s on YouTube).
+    /// No page reload; the result lands within one step.
+    pub fn step_to(&self, secs: f64) -> bool {
+        unsafe extern "C" {
+            fn AXUIElementPerformAction(el: CFTypeRef, action: CFTypeRef) -> i32;
+        }
+        let el = self.0.as_ptr();
+        let (Some(inc), Some(dec)) = (cf::cfstring("AXIncrement"), cf::cfstring("AXDecrement")) else { return false };
+        // SAFETY: valid element and action names.
+        let act = |up: bool| unsafe {
+            AXUIElementPerformAction(el, if up { inc.as_ptr() } else { dec.as_ptr() }.cast()) == 0
+        };
+        // The value text goes stale while the page hides its controls; one
+        // step refreshes it, so the first read after it is the truth.
+        let fresh_after = |prev: Option<f64>| {
+            for _ in 0..12 {
+                std::thread::sleep(std::time::Duration::from_millis(40));
+                let now = self.read().map(|r| r.0);
+                if now.is_some() && now != prev {
+                    return now;
+                }
+            }
+            self.read().map(|r| r.0)
+        };
+        let Some((start, dur)) = self.read() else { return false };
+        let target = secs.clamp(0.0, dur);
+        let up = target >= start;
+        if !act(up) {
+            return false;
+        }
+        let Some(p1) = fresh_after(Some(start)) else { return false };
+        if !act(p1 <= target) {
+            return true;
+        }
+        let Some(p2) = fresh_after(Some(p1)) else { return true };
+        let step = (p2 - p1).abs().max(1.0);
+        let remaining = target - p2;
+        let n = (remaining.abs() / step).round() as usize;
+        for _ in 0..n.min(2000) {
+            if !act(remaining > 0.0) {
+                break;
+            }
+        }
+        true
+    }
+}
+
+/// Numeric `(position, duration)` of a native range input.
+fn read_numbers(el: CFTypeRef) -> Option<(f64, f64)> {
+    {
+        let max = attribute_number(el, "AXMaxValue")?;
+        let min = attribute_number(el, "AXMinValue").unwrap_or(0.0);
+        let value = attribute_number(el, "AXValue")?;
+        let span = max - min;
+        if span <= 0.5 {
+            return None;
+        }
+        // Some players count milliseconds; nothing plays for 14 hours.
+        let scale = if span > 50_000.0 { 1000.0 } else { 1.0 };
+        Some((((value - min) / scale).clamp(0.0, span / scale), span / scale))
+    }
+}
+
+/// Seconds in a slider's value text: "1 Minutes 9 Seconds of 3 Minutes 35
+/// Seconds" (any language whose units start h / m / s), or "1:09 / 3:35".
+/// Returns `(position, duration)`.
+pub fn parse_time_text(text: &str) -> Option<(f64, f64)> {
+    let t = text.to_lowercase();
+    // Clock form first: the first two h:mm:ss groups.
+    let clocks: Vec<f64> = t
+        .split(|c: char| !(c.is_ascii_digit() || c == ':'))
+        .filter(|w| w.contains(':'))
+        .filter_map(|w| {
+            let parts: Vec<f64> = w.split(':').map(|p| p.parse::<f64>().ok()).collect::<Option<_>>()?;
+            (2..=3).contains(&parts.len()).then(|| parts.iter().fold(0.0, |acc, p| acc * 60.0 + p))
+        })
+        .collect();
+    if clocks.len() >= 2 && clocks[1] > 0.0 {
+        return Some((clocks[0].min(clocks[1]), clocks[1]));
+    }
+    // Words: number + unit pairs; a unit no smaller than the last one starts
+    // the second time ("…9 seconds of 3 minutes…").
+    let words: Vec<&str> = t.split(|c: char| c.is_whitespace() || c == ',').filter(|w| !w.is_empty()).collect();
+    let mut groups: Vec<f64> = vec![0.0];
+    let mut last_rank = 9;
+    let mut seen = false;
+    for pair in words.windows(2) {
+        let Ok(n) = pair[0].parse::<f64>() else { continue };
+        let (rank, mult) = match pair[1].chars().next() {
+            Some('h') | Some('s') if pair[1].starts_with("st") => (2, 3600.0), // Stunden
+            Some('h') => (2, 3600.0),
+            Some('m') => (1, 60.0),
+            Some('s') => (0, 1.0),
+            _ => continue,
+        };
+        if seen && rank >= last_rank {
+            groups.push(0.0);
+        }
+        *groups.last_mut()? += n * mult;
+        last_rank = rank;
+        seen = true;
+    }
+    match groups.as_slice() {
+        [pos, dur, ..] if *dur > 0.0 => Some((pos.min(*dur), *dur)),
+        _ => None,
+    }
+}
+
+impl WebSlider {
+    /// Move the timeline (works for native range inputs; ARIA sliders
+    /// usually ignore it). True when the browser reports the value moved.
+    pub fn set(&self, secs: f64) -> bool {
+        let el = self.0.as_ptr();
+        if read_numbers(el).is_none() {
+            return false; // an ARIA slider: see `step_to`
+        }
+        let Some(max) = attribute_number(el, "AXMaxValue") else { return false };
+        let min = attribute_number(el, "AXMinValue").unwrap_or(0.0);
+        let scale = if max - min > 50_000.0 { 1000.0 } else { 1.0 };
+        let target = (min + secs * scale).clamp(min, max);
+        let Some(key) = cf::cfstring("AXValue") else { return false };
+        // SAFETY: a +1 CFNumber we own, passed to a valid element.
+        unsafe {
+            let Some(n) = Owned::from_create(CFNumberCreate(
+                std::ptr::null(),
+                K_CF_NUMBER_FLOAT64,
+                (&target as *const f64).cast(),
+            )) else {
+                return false;
+            };
+            if AXUIElementSetAttributeValue(el, key.as_ptr(), n.as_ptr()) != 0 {
+                return false;
+            }
+        }
+        attribute_number(el, "AXValue").is_some_and(|v| (v - target).abs() <= 2.0 * scale)
+    }
+}
+
+/// Depth-first search for a slider named like a media timeline.
+unsafe fn find_timeline(el: CFTypeRef, depth: usize, budget: &mut usize) -> Option<Owned> {
+    if depth > 40 || *budget == 0 {
+        return None;
+    }
+    *budget -= 1;
+    let role = attribute_string(el, "AXRole").unwrap_or_default();
+    if role == "AXSlider" {
+        let name = ["AXDescription", "AXTitle", "AXHelp"]
+            .iter()
+            .filter_map(|a| attribute_string(el, a))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let readable = read_numbers(el).is_some()
+            || ["AXValue", "AXValueDescription"]
+                .iter()
+                .any(|a| attribute_string(el, a).and_then(|t| parse_time_text(&t)).is_some());
+        if is_timeline_name(&name) && readable {
+            // SAFETY: borrowed element; retain it for the cache.
+            unsafe extern "C" {
+                fn CFRetain(cf: CFTypeRef) -> CFTypeRef;
+            }
+            return unsafe { Owned::from_create(CFRetain(el)) };
+        }
+        return None;
+    }
+    // Nothing inside these is a page's media timeline.
+    if matches!(role.as_str(), "AXMenuBar" | "AXToolbar" | "AXTabGroup" | "AXStaticText" | "AXImage" | "AXLink") {
+        return None;
+    }
+    let key = cf::cfstring("AXChildren")?;
+    let mut kids: CFTypeRef = std::ptr::null();
+    // SAFETY: valid element/key; result owned.
+    if unsafe { AXUIElementCopyAttributeValue(el, key.as_ptr(), &mut kids) } != 0 {
+        return None;
+    }
+    let kids = unsafe { Owned::from_create(kids) }?;
+    for i in 0..unsafe { CFArrayGetCount(kids.as_ptr()) }.min(400) {
+        let child = unsafe { CFArrayGetValueAtIndex(kids.as_ptr(), i) };
+        if !child.is_null() {
+            if let Some(found) = unsafe { find_timeline(child, depth + 1, budget) } {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod timeline_tests {
+    use super::is_timeline_name;
+
+    #[test]
+    fn reads_time_texts() {
+        use super::parse_time_text as p;
+        assert_eq!(p("0 Minutes 9 Seconds of 3 Minutes 35 Seconds"), Some((9.0, 215.0)));
+        assert_eq!(p("9 Seconds of 3 Minutes 35 Seconds"), Some((9.0, 215.0)));
+        assert_eq!(p("1 Hours 2 Minutes 3 Seconds of 2 Hours 0 Minutes 0 Seconds"), Some((3723.0, 7200.0)));
+        assert_eq!(p("3 minutes 5 secondes sur 4 minutes"), Some((185.0, 240.0)));
+        assert_eq!(p("1:09 / 3:35"), Some((69.0, 215.0)));
+        assert_eq!(p("1:02:03 of 2:00:00"), Some((3723.0, 7200.0)));
+        assert_eq!(p("Seek slider"), None);
+        assert_eq!(p("42%"), None);
+    }
+
+    #[test]
+    fn names_timelines_not_volume() {
+        assert!(is_timeline_name("Seek slider"));
+        assert!(is_timeline_name("Playback progress"));
+        assert!(!is_timeline_name("Volume"));
+        assert!(!is_timeline_name("Volume slider"));
+        assert!(!is_timeline_name("Brightness"));
     }
 }
 

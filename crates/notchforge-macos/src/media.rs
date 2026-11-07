@@ -28,9 +28,9 @@ pub fn send(cmd: ProviderCommand) {
 
 pub fn control(player: MediaPlayer, action: MediaAction) {
     if player == MediaPlayer::Browser {
-        // Navigating is a scripted command to the provider (media keys cannot
-        // do it); the rest rides the system media keys.
-        if let MediaAction::Navigate(_) = action {
+        // Navigating and seeking are done by the provider (media keys cannot
+        // do them); the rest rides the system media keys.
+        if let MediaAction::Navigate(_) | MediaAction::Seek(_) = action {
             send(ProviderCommand::Media { player, action });
             return;
         }

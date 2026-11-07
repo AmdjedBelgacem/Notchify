@@ -168,6 +168,13 @@ struct SessionInfo {
     /// Seconds each recent turn took, oldest first.
     turns: Vec<u32>,
     activity: Option<String>,
+    /// When its hooks said the turn ended (`Stop`): idle from then on until
+    /// the next prompt, however recently the log was written.
+    stopped_ms: Option<i64>,
+    /// When its hooks said the session ended (`SessionEnd`).
+    ended_ms: Option<i64>,
+    /// The agent, for sessions known only from their hooks (no token log).
+    hook_agent: Option<UsageAgent>,
 }
 
 impl SessionInfo {
@@ -321,9 +328,14 @@ struct OpenCodeSeen {
     totals: TokenCounts,
 }
 
+type SessionTokens = HashMap<Arc<str>, (u64, UsageAgent)>;
+
 /// Everything read from the logs so far.
 #[derive(Default)]
 pub struct Scanner {
+    /// Tokens per session, summed over `records`; rebuilt only after records
+    /// change (a scan, reported usage), not for every hook.
+    session_tokens: std::cell::RefCell<Option<SessionTokens>>,
     files: HashMap<PathBuf, FileState>,
     records: HashMap<String, Record>,
     sessions: HashMap<Arc<str>, SessionInfo>,
@@ -357,11 +369,47 @@ impl Scanner {
         a
     }
 
+    /// A lifecycle hook, applied the moment it happens. Only Claude Code's
+    /// sessions are keyed by the id its hooks carry.
+    pub fn note_hook(&mut self, h: &notchforge_core::model::AgentHook) {
+        if h.session.is_empty() {
+            return;
+        }
+        let prefix = agent_key(h.agent);
+        let key = self.intern(&format!("{prefix}:{}", h.session));
+        let ts = h.at_ms;
+        self.touch_session(&key, ts, h.cwd.as_deref());
+        let Some(info) = self.sessions.get_mut(&key) else { return };
+        info.hook_agent = Some(h.agent);
+        match h.event.as_str() {
+            "UserPromptSubmit" => {
+                info.begin_turn(ts);
+                info.stopped_ms = None;
+                info.ended_ms = None;
+            }
+            "PreToolUse" | "PostToolUse" => {
+                info.stopped_ms = None;
+                info.note_work(ts, h.detail.clone());
+            }
+            "PermissionRequest" | "Notification" => {
+                info.activity = Some("Waiting for you".into());
+            }
+            "Stop" => {
+                info.note_work(ts, None);
+                info.activity = None;
+                info.stopped_ms = Some(ts);
+            }
+            "SessionEnd" => info.ended_ms = Some(ts),
+            _ => {}
+        }
+    }
+
     fn touch_session(&mut self, key: &Arc<str>, ts_ms: i64, project: Option<&str>) {
-        let info = self
-            .sessions
-            .entry(key.clone())
-            .or_insert_with(|| SessionInfo { last_ms: ts_ms, first_ms: ts_ms, ..Default::default() });
+        let info = self.sessions.entry(key.clone()).or_insert_with(|| SessionInfo {
+            last_ms: ts_ms,
+            first_ms: ts_ms,
+            ..Default::default()
+        });
         if ts_ms > 0 && (info.first_ms == 0 || ts_ms < info.first_ms) {
             info.first_ms = ts_ms;
         }
@@ -613,6 +661,7 @@ impl Scanner {
         at_ms: i64,
         project: Option<&str>,
     ) {
+        self.session_tokens.get_mut().take();
         if counts == TokenCounts::default() {
             return;
         }
@@ -737,6 +786,7 @@ impl Scanner {
 
     /// Bring everything up to date and forget what no range can show any more.
     pub fn scan(&mut self, home: &Path, now_ms: i64) {
+        self.session_tokens.get_mut().take();
         let cutoff = now_ms - KEEP_DAYS * DAY_MS;
         for (root, agent) in
             [(home.join(".claude/projects"), UsageAgent::ClaudeCode), (home.join(".codex/sessions"), UsageAgent::Codex)]
@@ -874,28 +924,38 @@ impl Scanner {
     /// Sessions active in the last half hour, latest first. Those that logged
     /// something in the last few minutes are working.
     pub fn running(&self, now_ms: i64) -> Vec<RunningSession> {
-        let mut tokens: HashMap<&Arc<str>, (u64, UsageAgent)> = HashMap::new();
-        for r in self.records.values() {
-            let e = tokens.entry(&r.session).or_insert((0, r.agent));
-            e.0 += r.counts.main();
-        }
+        let mut cache = self.session_tokens.borrow_mut();
+        let tokens = cache.get_or_insert_with(|| {
+            let mut t: SessionTokens = HashMap::new();
+            for r in self.records.values() {
+                let e = t.entry(r.session.clone()).or_insert((0, r.agent));
+                e.0 += r.counts.main();
+            }
+            t
+        });
         let mut live: Vec<(i64, RunningSession)> = self
             .sessions
             .iter()
-            .filter(|(_, s)| now_ms - s.last_ms <= LIVE_MS)
+            .filter(|(_, s)| now_ms - s.last_ms <= LIVE_MS && s.ended_ms.is_none())
             .filter_map(|(key, s)| {
-                let (t, agent) = tokens.get(key)?;
+                let (t, agent) = match (tokens.get(key), s.hook_agent) {
+                    (Some((t, a)), _) => (*t, *a),
+                    (None, Some(a)) => (0, a),
+                    (None, None) => return None,
+                };
                 Some((
                     s.last_ms,
                     RunningSession {
-                        agent: *agent,
+                        agent,
                         project: if s.project.is_empty() { "Unknown".into() } else { s.project.clone() },
-                        tokens: *t,
+                        tokens: t,
                         context_percent: s
                             .context
                             .filter(|(_, w)| *w > 0)
                             .map(|(used, w)| ((used as f64 / w as f64) * 100.0).round().min(100.0) as u8),
-                        working: now_ms - s.last_ms <= RUNNING_MS,
+                        // A hook-reported Stop wins over a fresh log line
+                        // (the transcript's last write lands just after it).
+                        working: now_ms - s.last_ms <= RUNNING_MS && s.stopped_ms.is_none_or(|t| s.last_ms > t + 5_000),
                         model: model_label(&s.model),
                         started_ms: s.first_ms,
                         turn_started_ms: s.turn_start_ms,
@@ -1041,20 +1101,41 @@ impl Provider for AgentUsageProvider {
             ctx.set_status(ProviderStatus::Running).await;
             let mut scanner = Scanner::default();
             let mut last: Option<AgentUsage> = None;
+            // A hook only moves the live sessions: refresh those without
+            // walking every log folder again (hooks come several per second).
+            let mut hook_only = false;
             loop {
                 let now = notchforge_core::time::now_ms();
-                let h = home.clone();
-                let data = ctx.paths.data_dir.clone();
-                // The first read can cover gigabytes: keep it off the runtime.
-                let Ok((back, usage)) = tokio::task::spawn_blocking(move || {
-                    let usage = read_usage(&mut scanner, &h, &data, now);
-                    (scanner, usage)
-                })
-                .await
-                else {
-                    return Err(ProviderError::Other("reading agent logs stopped unexpectedly".into()));
+                let usage = match (&last, hook_only) {
+                    (Some(prev), true) => AgentUsage { running: scanner.running(now), ..prev.clone() },
+                    _ => {
+                        let h = home.clone();
+                        let data = ctx.paths.data_dir.clone();
+                        // The first read can cover gigabytes: keep it off the runtime.
+                        let Ok((back, usage)) = tokio::task::spawn_blocking(move || {
+                            let usage = read_usage(&mut scanner, &h, &data, now);
+                            (scanner, usage)
+                        })
+                        .await
+                        else {
+                            return Err(ProviderError::Other("reading agent logs stopped unexpectedly".into()));
+                        };
+                        scanner = back;
+                        usage
+                    }
                 };
-                scanner = back;
+                hook_only = false;
+                if last.as_ref().map(|l| &l.running) != Some(&usage.running) {
+                    for r in &usage.running {
+                        tracing::debug!(
+                            agent = r.agent.display_name(),
+                            project = %r.project,
+                            working = r.working,
+                            activity = r.activity.as_deref().unwrap_or(""),
+                            "live session"
+                        );
+                    }
+                }
                 if last.as_ref() != Some(&usage) {
                     if !ctx.emit(ProviderEvent::Usage(usage.clone())).await {
                         return Ok(());
@@ -1066,10 +1147,17 @@ impl Provider for AgentUsageProvider {
                     _ = shutdown.wait() => return Ok(()),
                     _ = tokio::time::sleep(POLL) => {}
                     cmd = ctx.next_command() => {
-                        // Usage reported through the transports: count it and
-                        // read everything again right away.
-                        if let Some(ProviderCommand::Usage { agent, model, session, counts, at_ms }) = cmd {
-                            scanner.note_usage(agent, model.as_deref(), session.as_deref(), counts, at_ms, None);
+                        match cmd {
+                            // Usage reported through the transports: count it
+                            // and read everything again right away.
+                            Some(ProviderCommand::Usage { agent, model, session, counts, at_ms }) => {
+                                scanner.note_usage(agent, model.as_deref(), session.as_deref(), counts, at_ms, None);
+                            }
+                            Some(ProviderCommand::AgentHook(h)) => {
+                                scanner.note_hook(&h);
+                                hook_only = true;
+                            }
+                            _ => hook_only = true,
                         }
                     }
                 }
@@ -1083,6 +1171,32 @@ mod tests {
     use super::*;
 
     const T: &str = "2026-11-01T10:30:00.500Z";
+
+    #[test]
+    fn hooks_drive_the_live_session() {
+        let mut sc = Scanner::default();
+        let hook = |event: &str, at: i64| notchforge_core::model::AgentHook {
+            agent: UsageAgent::ClaudeCode,
+            session: "s1".into(),
+            event: event.into(),
+            detail: Some("Run the tests".into()),
+            cwd: Some("/w/notch".into()),
+            at_ms: at,
+            ..Default::default()
+        };
+        sc.note_hook(&hook("UserPromptSubmit", 1_000));
+        sc.note_hook(&hook("PreToolUse", 2_000));
+        let key: Arc<str> = Arc::from("claude:s1");
+        let info = sc.sessions.get(&key).expect("session");
+        assert_eq!(info.activity.as_deref(), Some("Run the tests"));
+        assert_eq!(info.turn_start_ms, Some(1_000));
+        sc.note_hook(&hook("Stop", 9_000));
+        let info = sc.sessions.get(&key).expect("session");
+        assert_eq!(info.stopped_ms, Some(9_000));
+        assert!(info.activity.is_none());
+        sc.note_hook(&hook("SessionEnd", 10_000));
+        assert!(sc.sessions.get(&key).expect("session").ended_ms.is_some());
+    }
 
     #[test]
     fn reads_opencodes_cumulative_totals_incrementally() {

@@ -56,10 +56,7 @@ impl Mirrors {
         }
         let wanted: Vec<&ScreenInfo> = screens
             .iter()
-            .filter(|s| {
-                s.id != primary_id
-                    && (cfg.general.island_on_all_screens || listed.contains(&s.id))
-            })
+            .filter(|s| s.id != primary_id && (cfg.general.island_on_all_screens || listed.contains(&s.id)))
             .collect();
         // Drop mirrors whose screen is gone (or whose geometry changed).
         self.islands.retain(|m| {
@@ -117,16 +114,9 @@ impl Mirrors {
             // Per-screen wing mask: base occupancy plus this screen's camera
             // pill strip, applied to the layout's own notch.
             let mut occupancy = base_occupancy.to_vec();
-            if crate::private_api::cmio::camera_in_use()
-                || notchforge_providers::sys::coreaudio::microphone_in_use()
-            {
+            if crate::private_api::cmio::camera_in_use() || notchforge_providers::sys::coreaudio::microphone_in_use() {
                 let notch = m.layout.notch.rect;
-                occupancy.push(notchforge_core::geometry::Rect::new(
-                    notch.max_x(),
-                    notch.y,
-                    40.0,
-                    notch.height,
-                ));
+                occupancy.push(notchforge_core::geometry::Rect::new(notch.max_x(), notch.y, 40.0, notch.height));
             }
             let mask = crate::controller::wing_mask_for(&m.layout, content_mask, &occupancy);
             let shape = m.layout.shape(LayoutKind::CollapsedWithWings(mask));

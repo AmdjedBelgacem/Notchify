@@ -1,0 +1,165 @@
+name: Release
+
+# Builds a universal Notchisland.app, signs and notarizes it when the Apple
+# secrets are configured, and publishes Notchisland-<version>.zip, its .sha256
+# and appcast.json to a GitHub Release. Without the secrets the zip is still
+# built, ad-hoc signed (users must right-click > Open the first time).
+# See docs/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish a release for (e.g. v0.2.0). Leave empty to only build the zip as a workflow artifact."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Build, sign, notarize & publish
+    runs-on: macos-15
+    env:
+      TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      HAS_CERT: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.CODESIGN_IDENTITY != '' }}
+      HAS_NOTARY: ${{ secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # bundle.sh derives the build number from the commit count.
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'push' && github.ref || (inputs.tag != '' && format('refs/tags/{0}', inputs.tag) || github.ref) }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Resolve version
+        id: version
+        run: |
+          CARGO_VERSION="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')"
+          if [ -n "$TAG" ]; then
+            VERSION="${TAG#v}"
+            if [ "$VERSION" != "$CARGO_VERSION" ]; then
+              echo "::error::Tag $TAG does not match Cargo.toml version $CARGO_VERSION. Bump [workspace.package] version first."
+              exit 1
+            fi
+          else
+            VERSION="$CARGO_VERSION"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+          echo "zip=Notchisland-$VERSION.zip" >> "$GITHUB_OUTPUT"
+          case "$VERSION" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
+          echo "Version $VERSION, signing: $HAS_CERT, notarizing: $HAS_NOTARY"
+
+      - name: Import Developer ID certificate
+        if: env.HAS_CERT == 'true'
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Put it first in the search list so codesign finds the identity by name.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Build universal app
+        env:
+          UNIVERSAL: "1"
+          # Empty when there is no certificate: bundle.sh then signs ad hoc.
+          CODESIGN_IDENTITY: ${{ env.HAS_CERT == 'true' && secrets.CODESIGN_IDENTITY || '' }}
+        run: |
+          [ -n "$CODESIGN_IDENTITY" ] || unset CODESIGN_IDENTITY
+          packaging/bundle.sh
+          for b in notchforge notchforge-notify notchforge-mcp; do lipo -info "dist/Notchisland.app/Contents/MacOS/$b"; done
+
+      - name: Notarize and staple
+        if: env.HAS_CERT == 'true' && env.HAS_NOTARY == 'true'
+        timeout-minutes: 60
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent dist/Notchisland.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" \
+            --wait --timeout 50m --output-format json | tee "$RUNNER_TEMP/notary.json"
+          STATUS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "$RUNNER_TEMP/notary.json")"
+          if [ "$STATUS" != "Accepted" ]; then
+            ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("id",""))' "$RUNNER_TEMP/notary.json")"
+            [ -n "$ID" ] && xcrun notarytool log "$ID" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" || true
+            echo "::error::Notarization status: $STATUS"
+            exit 1
+          fi
+          xcrun stapler staple dist/Notchisland.app
+          xcrun stapler validate dist/Notchisland.app
+          spctl --assess --type execute --verbose=2 dist/Notchisland.app
+
+      - name: Skipped signing / notarization
+        if: env.HAS_CERT != 'true' || env.HAS_NOTARY != 'true'
+        run: |
+          echo "::warning::Release is not notarized (signing secrets: $HAS_CERT, notary secrets: $HAS_NOTARY). Gatekeeper will warn users on first launch. See docs/RELEASING.md."
+
+      - name: Package zip, checksum and appcast
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.version.outputs.build }}
+          ZIP: ${{ steps.version.outputs.zip }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p release
+          ditto -c -k --keepParent dist/Notchisland.app "release/$ZIP"
+          SHA="$(shasum -a 256 "release/$ZIP" | awk '{print $1}')"
+          (cd release && shasum -a 256 "$ZIP" > "$ZIP.sha256")
+          NOTES=""
+          if [ -n "$TAG" ]; then
+            NOTES="$(git tag -l --format='%(contents)' "$TAG" | sed '/-----BEGIN PGP SIGNATURE-----/,$d')"
+          fi
+          URL="https://github.com/$REPO/releases/download/${TAG:-v$VERSION}/$ZIP"
+          python3 - "$VERSION" "$BUILD" "$URL" "$SHA" "$NOTES" > release/appcast.json <<'PY'
+          import json, sys
+          version, build, url, sha, notes = sys.argv[1:6]
+          print(json.dumps({"version": version, "build": int(build), "url": url, "sha256": sha, "notes": notes.strip()}, indent=2))
+          PY
+          cat release/appcast.json
+          cat "release/$ZIP.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Notchisland-${{ steps.version.outputs.version }}
+          path: release/
+
+      - name: Publish GitHub Release
+        if: env.TAG != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Notchisland ${{ steps.version.outputs.version }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            release/${{ steps.version.outputs.zip }}
+            release/${{ steps.version.outputs.zip }}.sha256
+            release/appcast.json
+
+      - name: Remove signing keychain
+        if: always() && env.HAS_CERT == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true

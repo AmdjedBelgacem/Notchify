@@ -624,6 +624,10 @@ pub struct SliderIvars {
     knob: bool,
     /// Track height; above 4 pt the fill is clipped to a capsule track.
     thickness: f64,
+    /// Track height while hovered or dragged (a scrubber that swells under
+    /// the pointer); 0 keeps the track as it is.
+    grow: std::cell::Cell<f64>,
+    hover: std::cell::Cell<bool>,
     on_change: RefCell<Option<SliderFn>>,
     on_commit: RefCell<Option<SliderFn>>,
     tracking: std::cell::Cell<bool>,
@@ -658,6 +662,18 @@ define_class!(
             self.track_event(event, false);
         }
 
+        #[unsafe(method(mouseEntered:))]
+        fn mouse_entered(&self, _event: &objc2_app_kit::NSEvent) {
+            self.ivars().hover.set(true);
+            self.swell();
+        }
+
+        #[unsafe(method(mouseExited:))]
+        fn mouse_exited(&self, _event: &objc2_app_kit::NSEvent) {
+            self.ivars().hover.set(false);
+            self.swell();
+        }
+
         #[unsafe(method(mouseDragged:))]
         fn mouse_dragged(&self, event: &objc2_app_kit::NSEvent) {
             self.track_event(event, false);
@@ -667,6 +683,7 @@ define_class!(
         fn mouse_up(&self, event: &objc2_app_kit::NSEvent) {
             self.track_event(event, true);
             self.ivars().tracking.set(false);
+            self.swell();
         }
     }
 );
@@ -716,6 +733,8 @@ impl ThinSlider {
             value: std::cell::Cell::new(0.0),
             knob,
             thickness,
+            grow: std::cell::Cell::new(0.0),
+            hover: std::cell::Cell::new(false),
             on_change: RefCell::new(None),
             on_commit: RefCell::new(None),
             tracking: std::cell::Cell::new(false),
@@ -740,6 +759,50 @@ impl ThinSlider {
         let _: () = unsafe { msg_send![&*this, setAccessibilityRole: &*ns("AXSlider")] };
         this.layout_layers();
         this
+    }
+
+    /// Swell the track to `thickness` under the pointer and while dragging
+    /// (the media scrubber). The view's height must fit it.
+    pub fn set_grow(&self, thickness: f64) {
+        use objc2::AllocAnyThread;
+        use objc2_app_kit::{NSTrackingArea, NSTrackingAreaOptions};
+        self.ivars().grow.set(thickness);
+        let options = NSTrackingAreaOptions::MouseEnteredAndExited
+            | NSTrackingAreaOptions::ActiveAlways
+            | NSTrackingAreaOptions::InVisibleRect;
+        // SAFETY: the owner is this view, which outlives its tracking area.
+        let area = unsafe {
+            NSTrackingArea::initWithRect_options_owner_userInfo(
+                NSTrackingArea::alloc(),
+                self.bounds(),
+                options,
+                Some(self),
+                None,
+            )
+        };
+        self.addTrackingArea(&area);
+    }
+
+    /// Whether the track is swollen (hovered or being dragged).
+    pub fn is_engaged(&self) -> bool {
+        let iv = self.ivars();
+        iv.grow.get() > 0.0 && (iv.hover.get() || iv.tracking.get())
+    }
+
+    fn thickness_now(&self) -> f64 {
+        let iv = self.ivars();
+        if self.is_engaged() { iv.grow.get() } else { iv.thickness }
+    }
+
+    /// Animate the track between its resting and swollen heights.
+    fn swell(&self) {
+        if self.ivars().grow.get() <= 0.0 {
+            return;
+        }
+        objc2_quartz_core::CATransaction::begin();
+        objc2_quartz_core::CATransaction::setAnimationDuration(0.16);
+        self.place_layers();
+        objc2_quartz_core::CATransaction::commit();
     }
 
     /// Called continuously while dragging.
@@ -784,25 +847,29 @@ impl ThinSlider {
     }
 
     fn layout_layers(&self) {
+        without_animation(|| self.place_layers());
+        let iv = self.ivars();
+        // SAFETY: accessibility value setter on NSView.
+        let pct = NSString::from_str(&format!("{:.0}%", iv.value.get() * 100.0));
+        let _: () = unsafe { msg_send![self, setAccessibilityValue: &*pct] };
+    }
+
+    fn place_layers(&self) {
         let size = self.frame().size;
         let iv = self.ivars();
         let pad = self.inset();
         let usable = (size.width - 2.0 * pad).max(1.0);
-        let t = iv.thickness;
+        let t = self.thickness_now();
         let y = (size.height - t) / 2.0;
         let x = pad + usable * iv.value.get();
-        without_animation(|| {
-            iv.track.setFrame(rect(pad, y, usable, t));
-            if t > 4.0 {
-                iv.fill.setFrame(rect(0.0, 0.0, (x - pad).max(0.0), t));
-            } else {
-                iv.fill.setFrame(rect(pad, y, (x - pad).max(0.0), t));
-            }
-            iv.knob_layer.setFrame(rect(x - 7.0, size.height / 2.0 - 7.0, 14.0, 14.0));
-        });
-        // SAFETY: accessibility value setter on NSView.
-        let pct = NSString::from_str(&format!("{:.0}%", iv.value.get() * 100.0));
-        let _: () = unsafe { msg_send![self, setAccessibilityValue: &*pct] };
+        iv.track.setFrame(rect(pad, y, usable, t));
+        iv.track.setCornerRadius(t / 2.0);
+        if iv.thickness > 4.0 {
+            iv.fill.setFrame(rect(0.0, 0.0, (x - pad).max(0.0), t));
+        } else {
+            iv.fill.setFrame(rect(pad, y, (x - pad).max(0.0), t));
+        }
+        iv.knob_layer.setFrame(rect(x - 7.0, size.height / 2.0 - 7.0, 14.0, 14.0));
     }
 
     fn track_event(&self, event: &objc2_app_kit::NSEvent, commit: bool) {

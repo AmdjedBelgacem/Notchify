@@ -91,7 +91,32 @@ pub fn parse_ps(out: &str) -> Vec<Running> {
         .collect()
 }
 
+/// The running agent CLIs, read in-process (no `ps` launched every few
+/// seconds: spawning was this provider's whole cost). Cheap name filter
+/// first; command lines only for the few candidates.
 fn ps() -> Vec<Running> {
+    use crate::sys::process;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let pids = process::all_pids();
+    if pids.is_empty() {
+        return ps_command();
+    }
+    pids.into_iter()
+        .filter_map(|pid| {
+            let n = process::name(pid)?;
+            let candidate = matches!(n.as_str(), "node" | "bun" | "deno") || AGENTS.iter().any(|(exe, _, _)| *exe == n);
+            if !candidate {
+                return None;
+            }
+            let args = process::args(pid)?;
+            let (key, name) = classify(&args)?;
+            let seconds = (now - process::start_secs(pid)?).max(0) as u64;
+            Some(Running { pid, key, name, seconds })
+        })
+        .collect()
+}
+
+fn ps_command() -> Vec<Running> {
     std::process::Command::new("/bin/ps")
         .args(["-axo", "pid=,etime=,args="])
         .output()
@@ -200,5 +225,17 @@ mod tests {
         assert_eq!(n.kind, NotificationKind::TaskFinished);
         assert_eq!(n.title, "Claude Code finished");
         assert!(n.body.contains("5 min"));
+    }
+}
+
+#[cfg(test)]
+mod native_ps {
+    #[test]
+    fn in_process_listing_matches_ps() {
+        let mut a: Vec<i32> = super::ps().iter().map(|r| r.pid).collect();
+        let mut b: Vec<i32> = super::ps_command().iter().map(|r| r.pid).collect();
+        a.sort_unstable();
+        b.sort_unstable();
+        assert_eq!(a, b, "same agent processes either way");
     }
 }

@@ -7,12 +7,14 @@
 
 pub mod agents;
 pub mod audio;
-pub mod calendar;
 pub mod battery;
 pub mod bluetooth;
+pub mod calendar;
+pub mod ci;
 pub mod focus;
 pub mod media;
 pub mod sys;
+pub mod update;
 pub mod usernoted;
 pub mod util;
 pub mod weather;
@@ -78,6 +80,8 @@ pub fn registry() -> Vec<ProviderSpec> {
         spec::<focus::FocusProvider>(|c| c.providers.focus, |_| String::new()),
         spec::<audio::AudioProvider>(|c| c.providers.audio, |_| String::new()),
         spec::<media::MediaProvider>(|c| c.providers.media, |_| String::new()),
+        spec::<ci::CiProvider>(|c| c.providers.ci, |c| format!("{:?}", c.ci)),
+        spec::<update::UpdateProvider>(|c| c.general.check_updates, |_| String::new()),
     ]
 }
 

@@ -22,6 +22,12 @@ pub enum Wiring {
     CodexNotify,
     /// `~/.config/opencode/plugin/notchforge.js`.
     OpenCodePlugin,
+    /// `~/.gemini/settings.json` hooks (the same shape as Claude Code's).
+    GeminiHooks,
+    /// `~/.cursor/hooks.json`: the turn ends and file edits (Cursor's agent).
+    CursorHooks,
+    /// `notifications-command` in `~/.aider.conf.yml`.
+    AiderNotify,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -53,7 +59,137 @@ pub const AGENTS: &[AgentDef] = &[
         wiring: Wiring::OpenCodePlugin,
         detail: "Installs a plugin in ~/.config/opencode/plugin",
     },
+    AgentDef {
+        key: "gemini",
+        name: "Gemini CLI",
+        wiring: Wiring::GeminiHooks,
+        detail: "Adds session, tool and turn hooks to ~/.gemini/settings.json",
+    },
+    AgentDef {
+        key: "cursor",
+        name: "Cursor Agent",
+        wiring: Wiring::CursorHooks,
+        detail: "Adds stop and file-edit hooks to ~/.cursor/hooks.json",
+    },
+    AgentDef {
+        key: "aider",
+        name: "Aider",
+        wiring: Wiring::AiderNotify,
+        detail: "Sets notifications-command in ~/.aider.conf.yml",
+    },
 ];
+
+/// Gemini CLI events the notch follows (its names; the webhook maps them).
+const GEMINI_EVENTS: [&str; 7] =
+    ["SessionStart", "BeforeAgent", "BeforeTool", "AfterTool", "AfterAgent", "Notification", "SessionEnd"];
+/// Cursor's hooks that need no reply (the others must answer, so they stay out).
+const CURSOR_EVENTS: [&str; 2] = ["stop", "afterFileEdit"];
+const AIDER_BEGIN: &str = "# >>> notchforge (Notchisland) >>>";
+const AIDER_END: &str = "# <<< notchforge (Notchisland) <<<";
+
+fn gemini_settings(env: &Env) -> PathBuf {
+    env.home.join(".gemini/settings.json")
+}
+fn cursor_hooks(env: &Env) -> PathBuf {
+    env.home.join(".cursor/hooks.json")
+}
+fn aider_config(env: &Env) -> PathBuf {
+    env.home.join(".aider.conf.yml")
+}
+
+/// A fire-and-forget hook command posting the event to `/v1/hooks`.
+fn hook_post(env: &Env, source: &str) -> String {
+    let auth = env.token.as_deref().map(|t| format!(" -H 'Authorization: Bearer {t}'")).unwrap_or_default();
+    format!(
+        "curl -s -m 3 -o /dev/null -X POST 'http://127.0.0.1:{}/v1/hooks?source={source}' -H 'Content-Type: application/json'{auth} --data-binary @- || true",
+        env.port
+    )
+}
+
+fn aider_block(env: &Env) -> String {
+    let auth = env.token.as_deref().map(|t| format!(" -H \"Authorization: Bearer {t}\"")).unwrap_or_default();
+    format!(
+        "{AIDER_BEGIN}\nnotifications: true\nnotifications-command: 'curl -s -m 3 -o /dev/null -X POST \"http://127.0.0.1:{}/v1/notify?source=aider&kind=task_finished\" -H \"Content-Type: application/json\"{auth} --data \"{{}}\"'\n{AIDER_END}\n",
+        env.port
+    )
+}
+
+/// Does `text` (Aider's YAML) set a notifications command of its own?
+fn aider_foreign_command(text: &str) -> bool {
+    let mut inside = false;
+    for l in text.lines() {
+        if l.trim() == AIDER_BEGIN {
+            inside = true;
+        } else if l.trim() == AIDER_END {
+            inside = false;
+        } else if !inside && l.trim_start().starts_with("notifications-command") {
+            return true;
+        }
+    }
+    false
+}
+
+fn strip_aider_block(text: &str) -> String {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for l in text.lines() {
+        if l.trim() == AIDER_BEGIN {
+            inside = true;
+        } else if l.trim() == AIDER_END {
+            inside = false;
+        } else if !inside {
+            out.push(l);
+        }
+    }
+    let mut s = out.join("\n");
+    if !s.is_empty() {
+        s.push('\n');
+    }
+    s
+}
+
+/// Add our hook to every `events` list in a Claude-shaped `hooks` object
+/// (Gemini CLI uses the same shape), replacing an older one of ours.
+fn merge_hooks(v: &mut Value, events: &[&str], group: impl Fn(&str) -> Value) -> Result<(), String> {
+    if !v.is_object() {
+        return Err("settings file is not a JSON object".into());
+    }
+    let hooks = v.as_object_mut().expect("object").entry("hooks").or_insert_with(|| json!({}));
+    let hooks = hooks.as_object_mut().ok_or("\"hooks\" is not an object")?;
+    for event in events {
+        let groups = hooks.entry(*event).or_insert_with(|| json!([]));
+        let groups = groups.as_array_mut().ok_or(format!("hooks.{event} is not a list"))?;
+        groups.retain(|g| !is_ours(g) && !is_ours_flat(g));
+        groups.push(group(event));
+    }
+    Ok(())
+}
+
+/// Remove our hooks from a `hooks` object, dropping lists left empty.
+fn unmerge_hooks(v: &mut Value, events: &[&str]) {
+    if let Some(hooks) = v.get_mut("hooks").and_then(Value::as_object_mut) {
+        for event in events {
+            if let Some(groups) = hooks.get_mut(*event).and_then(Value::as_array_mut) {
+                groups.retain(|g| !is_ours(g) && !is_ours_flat(g));
+            }
+            if hooks.get(*event).and_then(Value::as_array).is_some_and(Vec::is_empty) {
+                hooks.remove(*event);
+            }
+        }
+        if hooks.is_empty() {
+            v.as_object_mut().expect("object").remove("hooks");
+        }
+    }
+}
+
+/// Cursor's hook entries are flat: `{ "command": … }`.
+fn is_ours_flat(h: &Value) -> bool {
+    h["command"].as_str().is_some_and(|c| c.contains("/v1/hooks") || c.contains(MARKER))
+}
+
+fn hooks_connected(v: &Value, events: &[&str]) -> bool {
+    events.iter().all(|e| v["hooks"][*e].as_array().is_some_and(|g| g.iter().any(|g| is_ours(g) || is_ours_flat(g))))
+}
 
 /// Where things are, injectable for tests.
 #[derive(Debug, Clone)]
@@ -86,7 +222,22 @@ pub enum Status {
 
 const MARKER: &str = "notchforge";
 const PLUGIN_JS: &str = include_str!("../../../../integrations/opencode/notchforge.js");
-const CLAUDE_EVENTS: [&str; 3] = ["Notification", "Stop", "SubagentStop"];
+/// Every Claude Code event the notch follows: the live sessions update on
+/// each one, `PermissionRequest` is answered from the notch, and
+/// Notification / Stop / SubagentStop still become notifications.
+const CLAUDE_EVENTS: [&str; 9] = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "PermissionRequest",
+    "Notification",
+    "Stop",
+    "SubagentStop",
+    "SessionEnd",
+];
+/// Events whose hooks take a tool matcher.
+const CLAUDE_TOOL_EVENTS: [&str; 3] = ["PreToolUse", "PostToolUse", "PermissionRequest"];
 
 fn claude_settings(env: &Env) -> PathBuf {
     env.home.join(".claude/settings.json")
@@ -185,20 +336,30 @@ pub fn disconnect_claude_limits(env: &Env, data_dir: &Path) -> Result<(), String
     Ok(())
 }
 
-/// The hook command for one Claude Code event.
+/// The hook command for one Claude Code event: the event's JSON goes to the
+/// notch's `/v1/hooks`. Fails silently when the app isn't running. Only the
+/// permission request prints the reply (Claude Code reads it as the
+/// decision); it may wait while the notch asks.
 fn claude_command(env: &Env, event: &str) -> String {
-    let kind = if event == "SubagentStop" { " --kind task_finished" } else { "" };
-    match &env.notify_bin {
-        Some(bin) => format!("{} --source claude{kind} --stdin --best-effort", shell_quote(bin)),
-        None => {
-            let auth = env.token.as_deref().map(|t| format!(" -H 'Authorization: Bearer {t}'")).unwrap_or_default();
-            format!(
-                "curl -s -m 2 -X POST 'http://127.0.0.1:{}/v1/notify?source=claude{}' -H 'Content-Type: application/json'{auth} --data-binary @- || true",
-                env.port,
-                if event == "SubagentStop" { "&kind=task_finished" } else { "" },
-            )
-        }
+    let auth = env.token.as_deref().map(|t| format!(" -H 'Authorization: Bearer {t}'")).unwrap_or_default();
+    let (max, out) = if event == "PermissionRequest" { (590, "") } else { (3, " -o /dev/null") };
+    format!(
+        "curl -s -m {max}{out} -X POST 'http://127.0.0.1:{}/v1/hooks?source=claude' -H 'Content-Type: application/json'{auth} --data-binary @- || true",
+        env.port,
+    )
+}
+
+/// One hook group as written into settings.json.
+fn claude_group(env: &Env, event: &str) -> Value {
+    let mut hook = json!({ "type": "command", "command": claude_command(env, event) });
+    if event != "PermissionRequest" {
+        hook["timeout"] = json!(10);
     }
+    let mut group = json!({ "hooks": [hook] });
+    if CLAUDE_TOOL_EVENTS.contains(&event) {
+        group["matcher"] = json!("*");
+    }
+    group
 }
 
 fn backup_once(path: &Path) {
@@ -230,7 +391,11 @@ fn write_text(path: &Path, text: &str) -> Result<(), String> {
 
 fn is_ours(group: &Value) -> bool {
     group["hooks"].as_array().is_some_and(|hs| {
-        hs.iter().any(|h| h["command"].as_str().is_some_and(|c| c.contains(MARKER) || c.contains("/v1/notify")))
+        hs.iter().any(|h| {
+            h["command"]
+                .as_str()
+                .is_some_and(|c| c.contains(MARKER) || c.contains("/v1/notify") || c.contains("/v1/hooks"))
+        })
     })
 }
 
@@ -273,6 +438,26 @@ pub fn status(def: &AgentDef, env: &Env) -> Status {
                 Status::NotConnected
             }
         }
+        Wiring::GeminiHooks => match read_json(&gemini_settings(env)) {
+            Ok(v) if hooks_connected(&v, &GEMINI_EVENTS) => Status::Connected,
+            Ok(_) => Status::NotConnected,
+            Err(e) => Status::Blocked(e),
+        },
+        Wiring::CursorHooks => match read_json(&cursor_hooks(env)) {
+            Ok(v) if hooks_connected(&v, &CURSOR_EVENTS) => Status::Connected,
+            Ok(_) => Status::NotConnected,
+            Err(e) => Status::Blocked(e),
+        },
+        Wiring::AiderNotify => {
+            let text = std::fs::read_to_string(aider_config(env)).unwrap_or_default();
+            if text.contains(AIDER_BEGIN) {
+                Status::Connected
+            } else if aider_foreign_command(&text) {
+                Status::Blocked("Aider already runs another notifications command".into())
+            } else {
+                Status::NotConnected
+            }
+        }
     }
 }
 
@@ -291,10 +476,10 @@ pub fn connect(def: &AgentDef, env: &Env) -> Result<String, String> {
                 let groups = hooks.entry(event).or_insert_with(|| json!([]));
                 let groups = groups.as_array_mut().ok_or(format!("hooks.{event} is not a list"))?;
                 groups.retain(|g| !is_ours(g));
-                groups.push(json!({ "hooks": [{ "type": "command", "command": claude_command(env, event) }] }));
+                groups.push(claude_group(env, event));
             }
             write_text(&path, &(serde_json::to_string_pretty(&v).map_err(|e| e.to_string())? + "\n"))?;
-            Ok("Claude Code now reports to the notch. Restart running sessions to pick it up.".into())
+            Ok("Claude Code now reports to the notch, and asks there before running a tool. Restart running sessions to pick it up.".into())
         }
         Wiring::CodexNotify => {
             let bin = env.notify_bin.as_ref().ok_or("notchforge-notify was not found next to the app")?;
@@ -327,7 +512,59 @@ pub fn connect(def: &AgentDef, env: &Env) -> Result<String, String> {
             write_text(&opencode_plugin(env), PLUGIN_JS)?;
             Ok("OpenCode loads the plugin the next time it starts.".into())
         }
+        Wiring::GeminiHooks => {
+            let path = gemini_settings(env);
+            let mut v = read_json(&path)?;
+            merge_hooks(&mut v, &GEMINI_EVENTS, |e| {
+                let mut g = json!({ "hooks": [{ "type": "command", "command": hook_post(env, "gemini") }] });
+                if e == "BeforeTool" || e == "AfterTool" {
+                    g["matcher"] = json!("*");
+                }
+                g
+            })?;
+            write_text(&path, &(serde_json::to_string_pretty(&v).map_err(|e| e.to_string())? + "\n"))?;
+            Ok("Gemini CLI now reports to the notch. Restart running sessions to pick it up.".into())
+        }
+        Wiring::CursorHooks => {
+            let path = cursor_hooks(env);
+            let mut v = read_json(&path)?;
+            if v.get("version").is_none() {
+                v["version"] = json!(1);
+            }
+            merge_hooks(&mut v, &CURSOR_EVENTS, |_| json!({ "command": hook_post(env, "cursor") }))?;
+            write_text(&path, &(serde_json::to_string_pretty(&v).map_err(|e| e.to_string())? + "\n"))?;
+            Ok("Cursor's agent now reports finished turns and edits to the notch.".into())
+        }
+        Wiring::AiderNotify => {
+            let path = aider_config(env);
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            if aider_foreign_command(&text) {
+                return Err(
+                    "Aider already runs another notifications command; remove it from ~/.aider.conf.yml first".into()
+                );
+            }
+            let mut out = strip_aider_block(&text);
+            out.push_str(&aider_block(env));
+            write_text(&path, &out)?;
+            Ok("Aider now tells the notch when it is waiting for you.".into())
+        }
     }
+}
+
+/// Bring an older Claude Code connection (fewer hooks, or the notify CLI)
+/// up to the current set, without asking: it was connected on purpose.
+/// Returns whether anything changed.
+pub fn upgrade_claude(env: &Env) -> bool {
+    let Ok(v) = read_json(&claude_settings(env)) else { return false };
+    let ours = |e: &str| v["hooks"][e].as_array().is_some_and(|g| g.iter().any(is_ours));
+    let any = CLAUDE_EVENTS.iter().any(|e| ours(e));
+    let current = CLAUDE_EVENTS
+        .iter()
+        .all(|e| v["hooks"][*e].as_array().is_some_and(|g| g.iter().any(|g| *g == claude_group(env, e))));
+    if !any || current {
+        return false;
+    }
+    connect(&AGENTS[0], env).is_ok()
 }
 
 /// Remove what [`connect`] added, leaving everything else as it was.
@@ -367,6 +604,24 @@ pub fn disconnect(def: &AgentDef, env: &Env) -> Result<(), String> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.to_string()),
         },
+        Wiring::GeminiHooks | Wiring::CursorHooks => {
+            let (path, events): (PathBuf, &[&str]) = if def.wiring == Wiring::GeminiHooks {
+                (gemini_settings(env), &GEMINI_EVENTS)
+            } else {
+                (cursor_hooks(env), &CURSOR_EVENTS)
+            };
+            let mut v = read_json(&path)?;
+            unmerge_hooks(&mut v, events);
+            write_text(&path, &(serde_json::to_string_pretty(&v).map_err(|e| e.to_string())? + "\n"))
+        }
+        Wiring::AiderNotify => {
+            let path = aider_config(env);
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            if text.contains(AIDER_BEGIN) {
+                write_text(&path, &strip_aider_block(&text))?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -380,7 +635,7 @@ mod tests {
         std::fs::create_dir_all(&home).expect("home");
         Env {
             home,
-            notify_bin: bin.then(|| PathBuf::from("/Applications/NotchForge.app/Contents/MacOS/notchforge-notify")),
+            notify_bin: bin.then(|| PathBuf::from("/Applications/Notchisland.app/Contents/MacOS/notchforge-notify")),
             port: 47815,
             token: None,
         }
@@ -404,14 +659,14 @@ mod tests {
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
         assert_eq!(v["model"], "opus");
         assert_eq!(v["hooks"]["Stop"].as_array().expect("stop").len(), 2, "user's hook kept, ours added once");
-        assert!(
-            v["hooks"]["SubagentStop"][0]["hooks"][0]["command"]
-                .as_str()
-                .expect("cmd")
-                .contains("--kind task_finished")
-        );
+        let cmd = |e: &str| v["hooks"][e][0]["hooks"][0]["command"].as_str().unwrap_or("").to_owned();
+        assert!(cmd("SubagentStop").contains("/v1/hooks?source=claude") && cmd("SubagentStop").contains("/dev/null"));
+        assert!(!cmd("PermissionRequest").contains("/dev/null"), "the decision is printed for Claude Code");
+        assert_eq!(v["hooks"]["PreToolUse"][0]["matcher"], "*");
         assert!(path.with_extension("json.notchforge.bak").exists());
+        assert!(!upgrade_claude(&e), "already current");
         disconnect(def, &e).expect("disconnect");
+        assert!(!upgrade_claude(&e), "never connects what was disconnected");
         assert_eq!(status(def, &e), Status::NotConnected);
         let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
         assert_eq!(v["hooks"]["Stop"].as_array().expect("stop").len(), 1);
@@ -420,13 +675,48 @@ mod tests {
     }
 
     #[test]
-    fn claude_falls_back_to_curl_without_the_cli() {
+    fn claude_hooks_carry_the_token() {
         let mut e = env("curl", false);
         e.token = Some("s3cret".into());
         connect(&AGENTS[0], &e).expect("connect");
         let text = std::fs::read_to_string(claude_settings(&e)).expect("read");
-        assert!(text.contains("curl -s -m 2") && text.contains("Bearer s3cret") && text.contains("/v1/notify"));
+        assert!(text.contains("curl -s -m 3") && text.contains("Bearer s3cret") && text.contains("/v1/hooks"));
         assert_eq!(status(&AGENTS[0], &e), Status::Connected);
+        let _ = std::fs::remove_dir_all(&e.home);
+    }
+
+    #[test]
+    fn gemini_cursor_and_aider_connect_and_disconnect_cleanly() {
+        let e = env("more", false);
+        let def = |k: &str| *AGENTS.iter().find(|d| d.key == k).expect("agent");
+        std::fs::create_dir_all(e.home.join(".gemini")).expect("dir");
+        std::fs::write(gemini_settings(&e), r#"{"ui":{"theme":"dark"}}"#).expect("write");
+        for k in ["gemini", "cursor", "aider"] {
+            assert_eq!(status(&def(k), &e), Status::NotConnected, "{k}");
+            connect(&def(k), &e).expect("connect");
+            connect(&def(k), &e).expect("idempotent");
+            assert_eq!(status(&def(k), &e), Status::Connected, "{k}");
+        }
+        let g: Value =
+            serde_json::from_str(&std::fs::read_to_string(gemini_settings(&e)).expect("read")).expect("json");
+        assert_eq!(g["ui"]["theme"], "dark");
+        assert_eq!(g["hooks"]["BeforeTool"].as_array().expect("list").len(), 1);
+        assert!(g["hooks"]["AfterAgent"][0]["hooks"][0]["command"].as_str().expect("cmd").contains("source=gemini"));
+        let c: Value = serde_json::from_str(&std::fs::read_to_string(cursor_hooks(&e)).expect("read")).expect("json");
+        assert_eq!(c["version"], 1);
+        assert!(c["hooks"]["stop"][0]["command"].as_str().expect("cmd").contains("source=cursor"));
+        let a = std::fs::read_to_string(aider_config(&e)).expect("read");
+        assert_eq!(a.matches(AIDER_BEGIN).count(), 1);
+        for k in ["gemini", "cursor", "aider"] {
+            disconnect(&def(k), &e).expect("disconnect");
+            assert_eq!(status(&def(k), &e), Status::NotConnected, "{k}");
+        }
+        let g: Value =
+            serde_json::from_str(&std::fs::read_to_string(gemini_settings(&e)).expect("read")).expect("json");
+        assert!(g.get("hooks").is_none());
+        std::fs::write(aider_config(&e), "notifications-command: say hi\n").expect("write");
+        assert!(matches!(status(&def("aider"), &e), Status::Blocked(_)));
+        assert!(connect(&def("aider"), &e).is_err());
         let _ = std::fs::remove_dir_all(&e.home);
     }
 

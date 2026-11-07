@@ -6,6 +6,7 @@ members = [
     "crates/notchforge-providers",
     "crates/notchforge-macos",
     "crates/notchforge-notify",
+    "crates/notchforge-mcp",
 ]
 
 [workspace.package]

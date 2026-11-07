@@ -195,6 +195,23 @@ struct Session {
     yt_resolved: Option<(String, youtube::UpNextVideo)>,
     /// The browser currently making sound: navigation targets its tab.
     browser_bundle: Option<&'static str>,
+    /// The playing page's timeline (browser pid, element), found once via
+    /// Accessibility and read on every poll.
+    web_slider: Option<(i32, crate::sys::ax::WebSlider)>,
+    /// When the last timeline search came up empty, and for which track:
+    /// searching is a walk of the page, so a miss waits before retrying.
+    web_slider_miss: Option<(std::time::Instant, Option<String>)>,
+    /// The last raw timeline reading and the position it stands for, with
+    /// when that was true: YouTube stops updating its slider while the
+    /// controls are hidden, so an unchanged reading keeps counting from here.
+    web_last: Option<WebReading>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WebReading {
+    raw: (f64, f64),
+    pos: f64,
+    at_ms: i64,
 }
 
 /// How long a silent browser tab stays on the notch as a paused track.
@@ -291,7 +308,8 @@ impl Session {
     }
 
     /// Read every running player. Returns players that just started running.
-    async fn read_players(&mut self, browser_audio: bool) -> Vec<MediaPlayer> {        let mut players = Vec::new();
+    async fn read_players(&mut self, browser_audio: bool) -> Vec<MediaPlayer> {
+        let mut players = Vec::new();
         let mut running = Vec::new();
         let mut denied = Vec::new();
         for player in MediaPlayer::ALL {
@@ -325,6 +343,91 @@ impl Session {
         self.state.automation_denied = denied;
         self.state.browser_denied = self.browser_denied.clone();
         started
+    }
+
+    /// The playing page's position and length, from its timeline slider in
+    /// the Accessibility tree. The element is cached; a miss is retried after
+    /// a while or when the track changes.
+    async fn read_timeline(&mut self, pid: i32, np: &NowPlaying) -> Option<(f64, f64)> {
+        const RETRY: Duration = Duration::from_secs(15);
+        let cached = match self.web_slider.take() {
+            Some((p, s)) if p == pid => Some(s),
+            _ => None,
+        };
+        let may_search = match &self.web_slider_miss {
+            Some((at, track)) => at.elapsed() > RETRY || *track != np.track_id,
+            None => true,
+        };
+        let (slider, reading) = tokio::task::spawn_blocking(move || {
+            if let Some(s) = cached {
+                if let Some(r) = s.read() {
+                    return (Some(s), Some(r));
+                }
+            }
+            if !may_search {
+                return (None, None);
+            }
+            let s = crate::sys::ax::WebSlider::find(pid);
+            let r = s.as_ref().and_then(|s| s.read());
+            (s, r)
+        })
+        .await
+        .unwrap_or((None, None));
+        match slider {
+            Some(s) if reading.is_some() => {
+                self.web_slider = Some((pid, s));
+                self.web_slider_miss = None;
+            }
+            _ => {
+                if may_search {
+                    self.web_slider_miss = Some((std::time::Instant::now(), np.track_id.clone()));
+                }
+            }
+        }
+        reading
+    }
+
+    /// Move the playing browser tab to `secs`: page JavaScript where the
+    /// browser allows it, else the timeline element itself, else (YouTube)
+    /// the video's own `&t=` link in the same tab.
+    async fn seek_browser(&mut self, secs: f64) {
+        let secs = secs.max(0.0);
+        let Some(bundle) = self.browser_bundle else { return };
+        // Whatever moves it, the page now stands at `secs`.
+        if let Some(r) = self.web_last.as_mut() {
+            r.pos = secs;
+            r.at_ms = notchforge_core::time::now_ms();
+        }
+        let family = browser::BROWSERS.iter().find(|b| b.bundle_id == bundle).map(|b| b.family);
+        if matches!(family, Some(browser::Family::Chromium | browser::Family::Safari)) {
+            let src = script::seek_script(bundle, family == Some(browser::Family::Safari));
+            let arg = format!("{secs:.2}");
+            if script::run(&src, &[arg.as_str()]).await.is_ok_and(|o| o.trim() == "ok") {
+                tracing::debug!("browser seek: page script");
+                return;
+            }
+        }
+        if let Some((pid, s)) = self.web_slider.take() {
+            let moved = tokio::task::spawn_blocking(move || {
+                let ok = s.set(secs) || s.step_to(secs);
+                (s, ok)
+            })
+            .await;
+            if let Ok((s, ok)) = moved {
+                self.web_slider = Some((pid, s));
+                if ok {
+                    tracing::debug!("browser seek: timeline element");
+                    return;
+                }
+            }
+        }
+        let video = self.last_browser.as_ref().and_then(|(np, _)| np.track_id.as_deref().and_then(browser::youtube_id));
+        if let Some(id) = video {
+            let url = format!("https://www.youtube.com/watch?v={id}&t={}s", secs.round() as i64);
+            tracing::debug!("browser seek: reopening the video at the time");
+            let src = script::navigate_script(bundle);
+            let _ = script::run(&src, &[url.as_str()]).await;
+        }
     }
 
     /// A browser that is making sound, as a track (or the one it just played).
@@ -396,9 +499,7 @@ impl Session {
                 // The audio source's pid is a helper; the real page lives in
                 // the browser's own (responsible) process.
                 let main_pid = crate::sys::process::responsible_pid(src.pid);
-                tokio::task::spawn_blocking(move || crate::sys::ax::web_titles(main_pid))
-                    .await
-                    .unwrap_or_default()
+                tokio::task::spawn_blocking(move || crate::sys::ax::web_titles(main_pid)).await.unwrap_or_default()
             } else {
                 Vec::new()
             };
@@ -437,6 +538,21 @@ impl Session {
                 np.artist = author;
             }
             np.artwork_path = self.artwork_for(&np, "").await;
+            if let Some((pos, dur)) = self.read_timeline(crate::sys::process::responsible_pid(src.pid), &np).await {
+                let now = notchforge_core::time::now_ms();
+                let r = match self.web_last {
+                    // Same text as before: stale, so count on from the
+                    // position it was last known to mean.
+                    Some(last) if last.raw == (pos, dur) => last,
+                    _ => WebReading { raw: (pos, dur), pos, at_ms: now },
+                };
+                self.web_last = Some(r);
+                np.duration = Some(dur);
+                np.position = Some(r.pos);
+                np.sampled_at_ms = r.at_ms;
+            } else {
+                self.web_last = None;
+            }
             // YouTube's up-next recommendations: fetched once per video.
             let video_id = np.track_id.as_deref().and_then(browser::youtube_id);
             match &video_id {
@@ -499,6 +615,10 @@ impl Session {
             // Navigate the tab that is already playing; a browser we cannot
             // reach falls back to opening the URL. Other browser controls are
             // media keys, sent by the macOS layer.
+            if let MediaAction::Seek(secs) = action {
+                self.seek_browser(*secs).await;
+                return;
+            }
             if let MediaAction::Navigate(url) = action.clone() {
                 let navigated = match self.browser_bundle {
                     Some(bundle) => {
@@ -567,6 +687,9 @@ impl Provider for MediaProvider {
                 queue_at: None,
                 yt_resolved: None,
                 browser_bundle: None,
+                web_slider: None,
+                web_slider_miss: None,
+                web_last: None,
             };
             let mut login: Option<tokio::task::JoinHandle<Result<(), spotify::SpotifyError>>> = None;
             let mut last_emitted: Option<MediaState> = None;
@@ -701,7 +824,7 @@ impl Provider for MediaProvider {
                         s.playlists_loaded_ms.remove(&MediaPlayer::Spotify);
                     }
                     Wake::Command(ProviderCommand::SetOutputDevice(_)) => {}
-                    Wake::Command(ProviderCommand::Usage { .. }) => {}
+                    Wake::Command(ProviderCommand::Usage { .. } | ProviderCommand::AgentHook(_)) => {}
                 }
             }
         })

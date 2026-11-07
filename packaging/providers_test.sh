@@ -4,7 +4,7 @@
 # Notification Center and Focus providers all come up healthy. Used by CI.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-BIN="dist/NotchForge.app/Contents/MacOS/notchforge"
+BIN="dist/Notchisland.app/Contents/MacOS/notchforge"
 export NOTCHFORGE_HOME="$(mktemp -d)"
 LOG="$NOTCHFORGE_HOME/stderr.log"
 printf '[weather]\nlocation = "Paris"\n' > "$NOTCHFORGE_HOME/config.toml"

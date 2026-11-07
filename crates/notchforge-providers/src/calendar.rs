@@ -7,9 +7,7 @@
 //! read-only; reminders can be added and completed from the Planner.
 
 use notchforge_core::model::Permission::Calendar as CalendarPermission;
-use notchforge_core::model::{
-    CalendarEvent, CalendarState, PermissionState, ProviderStatus, ReminderItem,
-};
+use notchforge_core::model::{CalendarEvent, CalendarState, PermissionState, ProviderStatus, ReminderItem};
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
 };
@@ -81,8 +79,8 @@ const MAX_EVENTS: usize = 6;
 #[cfg(target_os = "macos")]
 mod mac {
     use block2::RcBlock;
-    use objc2::rc::Retained;
     use objc2::MainThreadMarker;
+    use objc2::rc::Retained;
     use objc2_event_kit::{EKAuthorizationStatus, EKEntityType, EKEventStore, EKSourceType};
     use objc2_foundation::{NSDate, NSError, NSString};
     use std::cell::RefCell;
@@ -100,9 +98,7 @@ mod mac {
         unsafe {
             match EKEventStore::authorizationStatusForEntityType(EKEntityType::Event) {
                 EKAuthorizationStatus::FullAccess => PermissionState::Granted,
-                EKAuthorizationStatus::Denied | EKAuthorizationStatus::Restricted => {
-                    PermissionState::Denied
-                }
+                EKAuthorizationStatus::Denied | EKAuthorizationStatus::Restricted => PermissionState::Denied,
                 _ => PermissionState::NotDetermined,
             }
         }
@@ -140,9 +136,7 @@ mod mac {
     /// The calendar's colour as RGB, for the dot in the list.
     fn color(cal: &objc2_event_kit::EKCalendar) -> Option<(u8, u8, u8)> {
         // SAFETY: a plain colour-space conversion.
-        let rgb = unsafe {
-            cal.color().colorUsingColorSpace(&objc2_app_kit::NSColorSpace::deviceRGBColorSpace())
-        }?;
+        let rgb = unsafe { cal.color().colorUsingColorSpace(&objc2_app_kit::NSColorSpace::deviceRGBColorSpace()) }?;
         Some((
             (rgb.redComponent() * 255.0).round() as u8,
             (rgb.greenComponent() * 255.0).round() as u8,
@@ -155,27 +149,23 @@ mod mac {
         let mut out = Vec::new();
         // SAFETY: reading the AX-free EventKit tree; all calls are plain reads.
         unsafe {
-        for source in store.sources() {
-            let kind = match source.sourceType() {
-                EKSourceType::Subscribed => "Subscribed",
-                EKSourceType::CalDAV => "CalDAV",
-                EKSourceType::Exchange => "Exchange",
-                EKSourceType::MobileMe => "MobileMe",
-                EKSourceType::Local => "On this Mac",
-                EKSourceType::Birthdays => "Birthdays",
-                _ => continue,
-            };
-            let title = source.title().to_string();
-            let name = if title.is_empty() {
-                kind.to_owned()
-            } else {
-                format!("{title} ({kind})")
-            };
-            if !out.contains(&name) {
-                out.push(name);
+            for source in store.sources() {
+                let kind = match source.sourceType() {
+                    EKSourceType::Subscribed => "Subscribed",
+                    EKSourceType::CalDAV => "CalDAV",
+                    EKSourceType::Exchange => "Exchange",
+                    EKSourceType::MobileMe => "MobileMe",
+                    EKSourceType::Local => "On this Mac",
+                    EKSourceType::Birthdays => "Birthdays",
+                    _ => continue,
+                };
+                let title = source.title().to_string();
+                let name = if title.is_empty() { kind.to_owned() } else { format!("{title} ({kind})") };
+                if !out.contains(&name) {
+                    out.push(name);
+                }
             }
-        }
-        out
+            out
         }
     }
 
@@ -183,8 +173,16 @@ mod mac {
     /// hosted by the big meeting services.
     fn meeting_url_in(text: &str) -> Option<String> {
         const HOSTS: &[&str] = &[
-            "zoom.us", "zoom.com", "meet.google.com", "teams.microsoft.com", "teams.live.com",
-            "webex.com", "whereby.com", "jitsi", "around.co", "pop.com",
+            "zoom.us",
+            "zoom.com",
+            "meet.google.com",
+            "teams.microsoft.com",
+            "teams.live.com",
+            "webex.com",
+            "whereby.com",
+            "jitsi",
+            "around.co",
+            "pop.com",
         ];
         for candidate in text.split([' ', '\n', '\r', '\t', '"', '<', '>']) {
             if let Some(rest) = candidate.strip_prefix("http://").or_else(|| candidate.strip_prefix("https://")) {
@@ -271,12 +269,11 @@ mod mac {
                 let start = NSDate::dateWithTimeIntervalSince1970(from as f64 / 1000.0);
                 let end = NSDate::dateWithTimeIntervalSince1970(to as f64 / 1000.0);
                 store
-                    .eventsMatchingPredicate(&store.predicateForEventsWithStartDate_endDate_calendars(&start, &end, None))
+                    .eventsMatchingPredicate(
+                        &store.predicateForEventsWithStartDate_endDate_calendars(&start, &end, None),
+                    )
                     .into_iter()
-                    .map(|e| (
-                        (e.startDate().timeIntervalSince1970() * 1000.0).round() as i64,
-                        e,
-                    ))
+                    .map(|e| ((e.startDate().timeIntervalSince1970() * 1000.0).round() as i64, e))
                     .collect::<Vec<_>>()
             }
         };
@@ -326,41 +323,39 @@ mod mac {
         let end = NSDate::dateWithTimeIntervalSince1970(now + HORIZON_MS as f64 / 1000.0);
         // SAFETY: read-only EventKit queries.
         unsafe {
-        let found = store
-            .eventsMatchingPredicate(&store.predicateForEventsWithStartDate_endDate_calendars(
-                &start, &end, None,
-            ));
-        let mut list: Vec<CalendarEvent> = found
-            .into_iter()
-            .map(|e| {
-                let title = e.title().to_string();
-                let starts_at_ms = (e.startDate().timeIntervalSince1970() * 1000.0).round() as i64;
-                let ends_at_ms = (e.endDate().timeIntervalSince1970() * 1000.0).round() as i64;
-                let location = e.location().map(|l| l.to_string());
-                let notes = e.notes().map(|n| n.to_string()).unwrap_or_default();
-                let meeting_url = meeting_url_in(&location.clone().unwrap_or_default())
-                    .or_else(|| meeting_url_in(&notes));
-                let (calendar, color) = match e.calendar() {
-                    Some(c) => (c.title().to_string(), color(&c)),
-                    None => (String::new(), None),
-                };
-                CalendarEvent {
-                    title,
-                    starts_at_ms,
-                    ends_at_ms,
-                    all_day: e.isAllDay(),
-                    calendar,
-                    color,
-                    location,
-                    meeting_url,
-                    url: None,
-                }
-            })
-            .collect();
-        list.sort_by_key(|e| e.starts_at_ms);
-        list.retain(|e| e.starts_at_ms >= now_ms - 300_000);
-        list.truncate(MAX_EVENTS);
-        list
+            let found = store
+                .eventsMatchingPredicate(&store.predicateForEventsWithStartDate_endDate_calendars(&start, &end, None));
+            let mut list: Vec<CalendarEvent> = found
+                .into_iter()
+                .map(|e| {
+                    let title = e.title().to_string();
+                    let starts_at_ms = (e.startDate().timeIntervalSince1970() * 1000.0).round() as i64;
+                    let ends_at_ms = (e.endDate().timeIntervalSince1970() * 1000.0).round() as i64;
+                    let location = e.location().map(|l| l.to_string());
+                    let notes = e.notes().map(|n| n.to_string()).unwrap_or_default();
+                    let meeting_url =
+                        meeting_url_in(&location.clone().unwrap_or_default()).or_else(|| meeting_url_in(&notes));
+                    let (calendar, color) = match e.calendar() {
+                        Some(c) => (c.title().to_string(), color(&c)),
+                        None => (String::new(), None),
+                    };
+                    CalendarEvent {
+                        title,
+                        starts_at_ms,
+                        ends_at_ms,
+                        all_day: e.isAllDay(),
+                        calendar,
+                        color,
+                        location,
+                        meeting_url,
+                        url: None,
+                    }
+                })
+                .collect();
+            list.sort_by_key(|e| e.starts_at_ms);
+            list.retain(|e| e.starts_at_ms >= now_ms - 300_000);
+            list.truncate(MAX_EVENTS);
+            list
         }
     }
 
@@ -441,9 +436,8 @@ impl Provider for CalendarProvider {
                 let _ = ctx.emit(ProviderEvent::Calendar(CalendarState::default())).await;
                 // Keep watching: the user can grant in Settings at any time.
                 loop {
-                    let state = tokio::task::spawn_blocking(mac::authorization_state)
-                        .await
-                        .unwrap_or(PermissionState::Unknown);
+                    let state =
+                        tokio::task::spawn_blocking(mac::authorization_state).await.unwrap_or(PermissionState::Unknown);
                     if state == PermissionState::Granted {
                         break;
                     }
@@ -459,8 +453,7 @@ impl Provider for CalendarProvider {
             loop {
                 let now = notchforge_core::time::now_ms();
                 // EKEventStore is main-thread-only: hop over and read there.
-                let state = on_main(move |mtm| mac::read_state(mtm, now))
-                    .unwrap_or_default();
+                let state = on_main(move |mtm| mac::read_state(mtm, now)).unwrap_or_default();
                 if last.as_ref() != Some(&state) {
                     let _ = ctx.emit(ProviderEvent::Calendar(state.clone())).await;
                     last = Some(state);

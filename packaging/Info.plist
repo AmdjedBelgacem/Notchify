@@ -33,6 +33,18 @@
     <true/>
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
+    <!-- notchisland:// links (Shortcuts, scripts): see url_scheme.rs. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>Notchisland link</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>notchisland</string>
+            </array>
+        </dict>
+    </array>
     <!-- Permission explanations shown by macOS. -->
     <key>NSLocationUsageDescription</key>
     <string>Notchisland uses your approximate location only to show local weather in the notch.</string>

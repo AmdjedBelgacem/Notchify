@@ -33,6 +33,8 @@ pub mod menubar;
 #[cfg(target_os = "macos")]
 pub mod mirrors;
 pub mod notes;
+/// First-run setup: permissions and agents.
+pub mod onboarding;
 #[cfg(target_os = "macos")]
 pub mod panel;
 #[cfg(target_os = "macos")]
@@ -49,6 +51,8 @@ pub mod settings;
 pub mod sharing;
 #[cfg(target_os = "macos")]
 pub mod ui;
+/// `notchisland://` links (Shortcuts, scripts).
+pub mod url_scheme;
 #[cfg(target_os = "macos")]
 pub mod views;
 #[cfg(target_os = "macos")]

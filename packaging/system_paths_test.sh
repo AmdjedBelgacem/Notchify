@@ -6,7 +6,7 @@
 # Posts a genuine notification with osascript. Used by CI.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-APP="dist/NotchForge.app"
+APP="dist/Notchisland.app"
 export NOTCHFORGE_HOME="$(mktemp -d)"
 LOG="$NOTCHFORGE_HOME/stderr.log"
 printf '[providers]\naccessibility_banners = true\nweather = false\n' > "$NOTCHFORGE_HOME/config.toml"
@@ -14,12 +14,12 @@ printf '[providers]\naccessibility_banners = true\nweather = false\n' > "$NOTCHF
 "$APP/Contents/MacOS/notchforge" -v >"$LOG" 2>&1 &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; echo "--- log"; cat "$LOG"' EXIT
-for _ in $(seq 1 60); do grep -q "NotchForge UI running" "$LOG" && break; sleep 0.5; done
+for _ in $(seq 1 60); do grep -Eq "(NotchForge|Notchisland) UI running" "$LOG" && break; sleep 0.5; done
 sleep 2
 
 # The first notification also wakes the Notification Center UI process, which
 # macOS launches lazily; the banner observer attaches to it within ~5 s.
-osascript -e 'display notification "warm-up" with title "NotchForge CI"'
+osascript -e 'display notification "warm-up" with title "Notchisland CI"'
 for _ in $(seq 1 30); do
   grep -q "observing Notification Center banners via Accessibility" "$LOG" && break
   sleep 0.5

@@ -19,6 +19,8 @@
 //! empty state with shortcuts to open a player. The player tile is tinted from
 //! the cover's average colour.
 
+mod library;
+
 use crate::icons;
 use crate::media::{self as glue, MediaKey};
 use crate::ui::{
@@ -130,6 +132,8 @@ pub struct MediaPage {
     allow_overlay: RefCell<Option<Retained<NSButton>>>,
     state: Shared,
     tint: Retained<objc2_quartz_core::CAGradientLayer>,
+    /// The cover, blurred over the whole tile (Apple Music's backdrop).
+    ambient: Retained<objc2_quartz_core::CALayer>,
 
     art: Retained<NSImageView>,
     art_placeholder: Retained<NSImageView>,
@@ -140,6 +144,8 @@ pub struct MediaPage {
     progress: Retained<ThinSlider>,
     elapsed: Retained<NSTextField>,
     remaining: Retained<NSTextField>,
+    /// Stands in for the timeline when the source shares none.
+    no_timeline: Retained<NSTextField>,
     shuffle: Retained<NSButton>,
     prev: Retained<NSButton>,
     play: Retained<NSButton>,
@@ -149,9 +155,7 @@ pub struct MediaPage {
     open_music: Retained<NSButton>,
 
     output_button: Retained<NSButton>,
-    output_right: f64,
     volume: Retained<ThinSlider>,
-    volume_y: f64,
 
     caps: Retained<NSTextField>,
     sources: Retained<FlippedView>,
@@ -174,6 +178,21 @@ fn seg_style(b: &NSButton, title: &str, on: bool) {
     let fg = if on { rgba(1.0, 1.0, 1.0, 1.0) } else { rgba(1.0, 1.0, 1.0, 0.72) };
     let bg = if on { rgba(1.0, 1.0, 1.0, 0.28) } else { rgba(1.0, 1.0, 1.0, 0.0) };
     style_pill(b, title, None, &font(12.0, Weight::Semibold), &fg, &bg, 12.0);
+}
+
+/// Jump the featured track by `delta` seconds (the ±10 s buttons).
+fn skip_by(st: &Shared, delta: f64) {
+    {
+        let mut st = st.borrow_mut();
+        let Some(n) = st.now.as_mut() else { return };
+        let Some(pos) = n.position_at(now_ms()) else { return };
+        let end = n.duration.unwrap_or(f64::MAX);
+        let target = (pos + delta).clamp(0.0, (end - 1.0).max(0.0));
+        n.position = Some(target);
+        n.sampled_at_ms = now_ms();
+        glue::control(n.player, MediaAction::Seek(target));
+    }
+    crate::app::with_controller(|c| c.media_tick());
 }
 
 /// Three bars animated by Core Animation (render server: no CPU here).
@@ -237,25 +256,37 @@ impl MediaPage {
         tint.setStartPoint(NSPoint::new(0.0, 0.0));
         tint.setEndPoint(NSPoint::new(1.0, 1.0));
         tint.setOpacity(0.0);
+        let ambient = objc2_quartz_core::CALayer::new();
+        ambient.setFrame(rect(-24.0, -24.0, lw + 48.0, ph + 48.0));
+        ambient.setContentsGravity(&NSString::from_str("resizeAspectFill"));
+        ambient.setMagnificationFilter(&NSString::from_str("trilinear"));
+        ambient.setOpacity(0.0);
+        // Darker toward the controls so white glyphs always read.
+        let shade = objc2_quartz_core::CAGradientLayer::layer();
+        shade.setFrame(rect(0.0, 0.0, lw, ph));
+        set_gradient(&shade, &[(0.0, 0.0, 0.0, 0.18), (0.0, 0.0, 0.0, 0.34), (0.0, 0.0, 0.0, 0.52)]);
         if let Some(l) = player.layer() {
             l.setCornerRadius(20.0);
             l.setMasksToBounds(true);
             l.addSublayer(&tint);
+            l.addSublayer(&ambient);
+            l.addSublayer(&shade);
         }
         root.addSubview(&player);
 
-        // The artwork takes what the rows below it leave.
-        let art_side = (ph - 162.0).clamp(96.0, 150.0);
+        // The artwork takes what the rows below it leave: the timeline, the
+        // transport, the volume and the sources line.
+        let art_side = (ph - 200.0).clamp(64.0, 116.0);
 
         // ── artwork ──
         let art_shadow = FlippedView::new(mtm, rect(PAD, PAD, art_side, art_side));
         art_shadow.setWantsLayer(true);
         if let Some(l) = art_shadow.layer() {
-            l.setShadowOpacity(0.45);
-            l.setShadowRadius(14.0);
+            l.setShadowOpacity(0.5);
+            l.setShadowRadius(12.0);
             l.setShadowOffset(objc2_foundation::NSSize::new(0.0, -8.0));
         }
-        let art_card = shape_view(mtm, rect(0.0, 0.0, art_side, art_side), &white(0.1), 14.0);
+        let art_card = shape_view(mtm, rect(0.0, 0.0, art_side, art_side), &white(0.1), 12.0);
         if let Some(l) = art_card.layer() {
             l.setMasksToBounds(true);
             l.setBorderWidth(0.5);
@@ -287,20 +318,53 @@ impl MediaPage {
         // ── title block ──
         let tx = PAD + art_side + PAD;
         let tw = lw - tx - PAD;
-        let badge = label(mtm, "", &font(12.0, Weight::Semibold), &white(0.84), rect(tx, PAD + 2.0, tw, 16.0));
-        let title =
-            label(mtm, "Nothing playing", &font(26.0, Weight::Bold), &p.primary, rect(tx, PAD + 20.0, tw, 32.0));
-        let subtitle = label(mtm, "", &font(15.0, Weight::Medium), &white(0.88), rect(tx, PAD + 52.0, tw, 20.0));
-        let album = label(mtm, "", &font(13.0, Weight::Regular), &white(0.76), rect(tx, PAD + 72.0, tw, 17.0));
+        // Centred on the artwork.
+        let ty = PAD + ((art_side - 78.0) / 2.0).max(0.0);
+        let badge = label(mtm, "", &font(10.5, Weight::Bold), &white(0.62), rect(tx, ty, tw, 14.0));
+        let title = label(mtm, "Nothing playing", &font(19.0, Weight::Bold), &p.primary, rect(tx, ty + 15.0, tw, 25.0));
+        let subtitle = label(mtm, "", &font(14.0, Weight::Medium), &white(0.88), rect(tx, ty + 41.0, tw, 18.0));
+        let album = label(mtm, "", &font(12.0, Weight::Regular), &white(0.6), rect(tx, ty + 60.0, tw, 16.0));
         for v in [&*badge as &NSView, &title, &subtitle, &album] {
             player.addSubview(v);
         }
 
-        // ── progress, level with the bottom of the artwork ──
-        let bar_y = PAD + art_side - 14.0 - 19.0;
+        // ── timeline: the tile's full width under the artwork; it swells
+        // under the pointer and shows the time being scrubbed to ──
+        let bar_y = PAD + art_side + 12.0;
+        let bar_w = lw - 2.0 * PAD;
+        let times_y = bar_y + 20.0;
+        let elapsed =
+            label(mtm, "", &mono_digits(11.0, Weight::Semibold), &white(0.78), rect(PAD, times_y, 90.0, 14.0));
+        let remaining = label(
+            mtm,
+            "",
+            &mono_digits(11.0, Weight::Semibold),
+            &white(0.78),
+            rect(PAD + bar_w - 90.0, times_y, 90.0, 14.0),
+        );
+        remaining.setAlignment(NSTextAlignment::Right);
         let progress =
-            ThinSlider::capsule(mtm, rect(tx, bar_y, tw, 16.0), 7.0, &white(0.24), &rgba(1.0, 1.0, 1.0, 1.0));
+            ThinSlider::capsule(mtm, rect(PAD, bar_y, bar_w, 20.0), 5.0, &white(0.2), &rgba(1.0, 1.0, 1.0, 0.95));
+        progress.set_grow(10.0);
         set_accessibility_label(&progress, "Playback position");
+        let st = state.clone();
+        let (el, rem) = (elapsed.clone(), remaining.clone());
+        progress.set_on_change(move |v| {
+            // Scrub preview: the clocks follow the pointer, not the track.
+            let st = st.borrow();
+            let Some(d) = st.now.as_ref().and_then(|n| n.duration).filter(|d| *d > 0.0) else { return };
+            set_text(&el, &clock(v * d));
+            set_text(&rem, &format!("-{}", clock(d - v * d)));
+        });
+        let no_timeline = label(
+            mtm,
+            "No timeline from this source",
+            &font(12.0, Weight::Medium),
+            &white(0.5),
+            rect(PAD, bar_y + 6.0, bar_w, 16.0),
+        );
+        no_timeline.setAlignment(NSTextAlignment::Center);
+        no_timeline.setHidden(true);
         let st = state.clone();
         progress.set_on_commit(move |v| {
             let mut st = st.borrow_mut();
@@ -311,18 +375,13 @@ impl MediaPage {
             now.sampled_at_ms = now_ms();
             glue::control(now.player, MediaAction::Seek(secs));
         });
-        let times_y = PAD + art_side - 14.0;
-        let elapsed = label(mtm, "", &mono_digits(11.0, Weight::Medium), &white(0.82), rect(tx, times_y, 70.0, 14.0));
-        let remaining =
-            label(mtm, "", &mono_digits(11.0, Weight::Medium), &white(0.82), rect(tx + tw - 70.0, times_y, 70.0, 14.0));
-        remaining.setAlignment(NSTextAlignment::Right);
-        for v in [&*progress as &NSView, &elapsed, &remaining] {
+        for v in [&*progress as &NSView, &elapsed, &remaining, &no_timeline] {
             player.addSubview(v);
         }
 
         // ── transport: space-between across the tile ──
-        let row_y = PAD + art_side + 8.0;
-        let widths = [40.0, 52.0, 52.0, 52.0, 40.0];
+        let row_y = times_y + 18.0;
+        let widths = [40.0, 48.0, 56.0, 48.0, 40.0];
         let span = lw - 2.0 * 20.0;
         let gap = (span - widths.iter().sum::<f64>()) / 4.0;
         let mut xs = [0.0; 5];
@@ -336,13 +395,13 @@ impl MediaPage {
             let t = targets.add(mtm, move |_| action(&st));
             let bw = widths[i];
             let bh = if i == 2 {
-                52.0
+                56.0
             } else if i == 0 || i == 4 {
                 40.0
             } else {
                 44.0
             };
-            let b = symbol_button(mtm, sym, size, tip, &p.primary, &t, rect(xs[i], row_y + (52.0 - bh) / 2.0, bw, bh));
+            let b = symbol_button(mtm, sym, size, tip, &p.primary, &t, rect(xs[i], row_y + (56.0 - bh) / 2.0, bw, bh));
             player.addSubview(&b);
             b
         };
@@ -352,15 +411,22 @@ impl MediaPage {
             16.0,
             "Shuffle",
             Box::new(|st| {
-                if let Some(n) = &st.borrow().now {
-                    glue::control(n.player, MediaAction::SetShuffle(!n.shuffle.unwrap_or(false)));
+                let player = st.borrow().now.as_ref().map(|n| n.player);
+                match player {
+                    // A video has no shuffle: this slot jumps back 10 s.
+                    Some(MediaPlayer::Browser) => skip_by(st, -10.0),
+                    Some(pl) => {
+                        let on = st.borrow().now.as_ref().and_then(|n| n.shuffle).unwrap_or(false);
+                        glue::control(pl, MediaAction::SetShuffle(!on));
+                    }
+                    None => {}
                 }
             }),
         );
         let prev = mk(
             1,
             "backward.fill",
-            22.0,
+            24.0,
             "Previous track",
             Box::new(|st| match &st.borrow().featured {
                 Featured::Player(pl) => glue::control(*pl, MediaAction::Previous),
@@ -396,15 +462,18 @@ impl MediaPage {
                 crate::app::with_controller(|c| c.media_tick());
             }),
         );
-        make_card(&play, &white(0.2), 26.0);
+        // The one solid control: a white disc with a dark glyph.
+        make_card(&play, &white(0.96), 28.0);
+        play.setContentTintColor(Some(&rgba(0.08, 0.08, 0.09, 1.0)));
         if let Some(l) = play.layer() {
-            l.setBorderWidth(0.5);
-            l.setBorderColor(Some(&white(0.34).CGColor()));
+            l.setShadowOpacity(0.3);
+            l.setShadowRadius(8.0);
+            l.setShadowOffset(objc2_foundation::NSSize::new(0.0, -3.0));
         }
         let next = mk(
             3,
             "forward.fill",
-            22.0,
+            24.0,
             "Next track",
             Box::new(|st| match &st.borrow().featured {
                 Featured::Player(pl) => glue::control(*pl, MediaAction::Next),
@@ -420,8 +489,15 @@ impl MediaPage {
             16.0,
             "Repeat",
             Box::new(|st| {
-                if let Some(n) = &st.borrow().now {
-                    glue::control(n.player, MediaAction::SetRepeat(!n.repeat.unwrap_or(false)));
+                let player = st.borrow().now.as_ref().map(|n| n.player);
+                match player {
+                    // …and this one forward 10 s.
+                    Some(MediaPlayer::Browser) => skip_by(st, 10.0),
+                    Some(pl) => {
+                        let on = st.borrow().now.as_ref().and_then(|n| n.repeat).unwrap_or(false);
+                        glue::control(pl, MediaAction::SetRepeat(!on));
+                    }
+                    None => {}
                 }
             }),
         );
@@ -437,7 +513,7 @@ impl MediaPage {
             &white(0.16),
             14.0,
             &t,
-            rect(tx, bar_y + 2.0, 104.0, 28.0),
+            rect(PAD, bar_y - 4.0, 104.0, 28.0),
         );
         let t = targets.add(mtm, |_| glue::open_player(MediaPlayer::Music));
         let open_music = pill_button(
@@ -449,24 +525,34 @@ impl MediaPage {
             &white(0.16),
             14.0,
             &t,
-            rect(tx + 112.0, bar_y + 2.0, 96.0, 28.0),
+            rect(PAD + 112.0, bar_y - 4.0, 96.0, 28.0),
         );
         player.addSubview(&open_spotify);
         player.addSubview(&open_music);
 
         // ── volume and output ──
-        let volume_y = row_y + 52.0 + 8.0;
+        // ── volume: a thin bar between two speakers, the output at the end ──
+        let volume_y = row_y + 56.0 + 8.0;
         let output_right = lw - PAD;
-        let volume =
-            ThinSlider::capsule(mtm, rect(PAD, volume_y, lw - 2.0 * PAD, 36.0), 36.0, &white(0.16), &white(0.94));
-        volume.addSubview(&symbol_view(
+        let quiet = symbol_view(mtm, "speaker.fill", 11.0, &white(0.7), rect(PAD, volume_y + 7.0, 14.0, 14.0), "");
+        let loud = symbol_view(
             mtm,
-            "speaker.wave.1.fill",
-            14.0,
-            &rgba(0.11, 0.11, 0.118, 1.0),
-            rect(11.0, 10.0, 16.0, 16.0),
-            "Volume",
-        ));
+            "speaker.wave.3.fill",
+            11.0,
+            &white(0.7),
+            rect(output_right - 30.0 - 10.0 - 20.0, volume_y + 7.0, 20.0, 14.0),
+            "",
+        );
+        player.addSubview(&quiet);
+        player.addSubview(&loud);
+        let volume = ThinSlider::capsule(
+            mtm,
+            rect(PAD + 22.0, volume_y + 4.0, output_right - 30.0 - 10.0 - 26.0 - PAD - 22.0, 20.0),
+            5.0,
+            &white(0.2),
+            &white(0.9),
+        );
+        volume.set_grow(10.0);
         set_accessibility_label(&volume, "Output volume");
         volume.set_on_change(|v| {
             crate::controls::volume::set(v as f32);
@@ -477,17 +563,16 @@ impl MediaPage {
             let Some(b) = sender.and_then(|s| s.downcast_ref::<NSButton>()) else { return };
             output_menu(b, &st.borrow().devices);
         });
-        let output_button = pill_button(
+        let output_button = symbol_button(
             mtm,
+            "airplayaudio",
+            14.0,
             "Output",
-            Some("airplayaudio"),
-            &font(12.5, Weight::Semibold),
             &p.primary,
-            &white(0.16),
-            18.0,
             &t,
-            rect(output_right - 90.0, volume_y, 90.0, 36.0),
+            rect(output_right - 30.0, volume_y - 1.0, 30.0, 30.0),
         );
+        make_card(&output_button, &white(0.16), 15.0);
         player.addSubview(&output_button);
 
         // ── other apps making sound, and the output's format ──
@@ -622,6 +707,7 @@ impl MediaPage {
             allow_overlay: RefCell::new(None),
             state,
             tint,
+            ambient,
             art,
             art_placeholder,
             badge,
@@ -631,6 +717,7 @@ impl MediaPage {
             progress,
             elapsed,
             remaining,
+            no_timeline,
             shuffle,
             prev,
             play,
@@ -639,9 +726,7 @@ impl MediaPage {
             open_spotify,
             open_music,
             output_button,
-            output_right,
             volume,
-            volume_y,
             caps,
             sources,
             sources_width,
@@ -762,6 +847,23 @@ impl MediaPage {
         });
     }
 
+    /// The cover, blurred across the tile; without one the wash shows alone.
+    fn set_ambient(&self, img: Option<&objc2_app_kit::NSImage>) {
+        let cg = img.and_then(icons::ambient_image);
+        without_animation(|| match &cg {
+            Some(cg) => {
+                // SAFETY: a CGImage is a valid CALayer contents object.
+                let obj = unsafe { &*(&**cg as *const objc2_core_graphics::CGImage as *const AnyObject) };
+                unsafe { self.ambient.setContents(Some(obj)) };
+                self.ambient.setOpacity(1.0);
+            }
+            None => {
+                unsafe { self.ambient.setContents(None) };
+                self.ambient.setOpacity(0.0);
+            }
+        });
+    }
+
     fn render_featured(&self, snap: &Snapshot, featured: &Featured) {
         let p = &self.p;
         // The affordance is rebuilt on every render; drop the old one first.
@@ -787,7 +889,7 @@ impl MediaPage {
                     }
                     (MediaPlayer::Browser, None) => "Browser",
                 };
-                set_text(&self.badge, &format!("{short}{state}"));
+                set_text(&self.badge, &format!("{short}{state}").to_uppercase());
                 set_text(&self.title, n.map_or("", |n| n.title.as_str()));
                 let artist = n.map(|n| if n.artist.is_empty() { n.subtitle() } else { n.artist.clone() });
                 set_text(&self.subtitle, &artist.unwrap_or_default());
@@ -833,6 +935,7 @@ impl MediaPage {
                         b as f64 / 255.0,
                     ));
                     self.set_wash(Some(tint));
+                    self.set_ambient(img.as_deref());
                     self.state.borrow_mut().art_path = art;
                 }
                 if let Some(n) = n {
@@ -846,7 +949,7 @@ impl MediaPage {
                 (true, n.is_none_or(|n| n.duration.is_some()))
             }
             Featured::App { name, bundle_id, app_path } => {
-                set_text(&self.badge, "Playing audio");
+                set_text(&self.badge, "PLAYING AUDIO");
                 set_text(&self.album, "");
                 set_text(&self.title, name);
                 let route = snap
@@ -861,30 +964,44 @@ impl MediaPage {
                 self.art.setImage(icon.as_deref());
                 self.art_placeholder.setHidden(icon.is_some());
                 self.set_wash(None);
+                self.set_ambient(None);
                 self.state.borrow_mut().art_path = None;
                 (true, false)
             }
             Featured::Nothing => {
-                set_text(&self.badge, "Silent");
+                set_text(&self.badge, "SILENT");
                 set_text(&self.album, "");
                 set_text(&self.title, "Nothing playing");
                 set_text(&self.subtitle, "Start something in Spotify or Apple Music");
                 self.art.setImage(None);
                 self.art_placeholder.setHidden(false);
                 self.set_wash(None);
+                self.set_ambient(None);
                 self.state.borrow_mut().art_path = None;
                 (false, false)
             }
         };
         let rich = matches!(featured, Featured::Player(p) if *p != MediaPlayer::Browser);
+        // A video with a timeline gets ±10 s where shuffle and repeat sit.
+        let skips = matches!(featured, Featured::Player(MediaPlayer::Browser)) && has_progress;
         for b in [&self.prev, &self.play, &self.next] {
             b.setHidden(!has_controls);
         }
-        self.shuffle.setHidden(!rich);
-        self.repeat.setHidden(!rich);
+        if skips {
+            set_button_symbol(&self.shuffle, "gobackward.10", 18.0, "Back 10 seconds");
+            set_button_symbol(&self.repeat, "goforward.10", 18.0, "Forward 10 seconds");
+            make_card(&self.shuffle, &rgba(1.0, 1.0, 1.0, 0.0), 20.0);
+            make_card(&self.repeat, &rgba(1.0, 1.0, 1.0, 0.0), 20.0);
+        } else if rich {
+            set_button_symbol(&self.shuffle, "shuffle", 16.0, "Shuffle");
+            set_button_symbol(&self.repeat, "repeat", 16.0, "Repeat");
+        }
+        self.shuffle.setHidden(!(rich || skips));
+        self.repeat.setHidden(!(rich || skips));
         for v in [&*self.progress as &NSView, &self.elapsed, &self.remaining] {
             v.setHidden(!has_progress);
         }
+        self.no_timeline.setHidden(has_progress || !has_controls);
         if !rich && has_controls {
             set_button_symbol(&self.play, "playpause.fill", 22.0, "Play or pause");
         }
@@ -896,13 +1013,10 @@ impl MediaPage {
     fn render_output(&self, audio: &AudioState) {
         self.state.borrow_mut().devices =
             audio.devices.iter().map(|d| (d.uid.clone(), d.name.clone(), d.capabilities(), d.is_default)).collect();
-        let f = font(12.5, Weight::Semibold);
         let name = audio.default_device().map_or("No output", |d| d.name.as_str());
         let symbol = audio.default_device().map_or("airplayaudio", |d| d.symbol());
-        let bw = (text_width(&crate::ui::attributed(name, &f, &self.p.primary)) + 50.0).min(self.output_right * 0.5);
-        style_pill(&self.output_button, name, Some(symbol), &f, &self.p.primary, &rgba(1.0, 1.0, 1.0, 0.16), 18.0);
-        self.output_button.setFrame(rect(self.output_right - bw, self.volume_y, bw, 36.0));
-        self.volume.set_slider_frame(rect(PAD, self.volume_y, self.output_right - bw - 8.0 - PAD, 36.0));
+        set_button_symbol(&self.output_button, symbol, 14.0, &format!("Output: {name}"));
+        make_card(&self.output_button, &rgba(1.0, 1.0, 1.0, 0.16), 15.0);
         self.output_button.setEnabled(!audio.devices.is_empty());
         let Some(dev) = audio.default_device() else {
             set_text(&self.caps, "");
@@ -1020,324 +1134,6 @@ impl MediaPage {
             x = icon_end + tw + 14.0;
         }
         set_accessibility_label(&self.sources, &shown);
-    }
-
-    /// Which player's playlists to list.
-    fn list_player(&self, media: &MediaState) -> MediaPlayer {
-        if let Some(p) = self.state.borrow().chosen_list_player {
-            return p;
-        }
-        if let Some(p) = media.primary() {
-            return p.player;
-        }
-        MediaPlayer::ALL
-            .into_iter()
-            .find(|p| media.playlists_for(*p).next().is_some())
-            .or_else(|| media.running.first().copied())
-            .unwrap_or(if glue::is_installed(MediaPlayer::Spotify) { MediaPlayer::Spotify } else { MediaPlayer::Music })
-    }
-
-    fn render_playlists(&self, media: &MediaState) {
-        let player = self.list_player(media);
-        seg_style(&self.seg_spotify, "Spotify", player == MediaPlayer::Spotify);
-        seg_style(&self.seg_music, "Music", player == MediaPlayer::Music);
-        seg_style(&self.seg_up_next, "Up next", player == MediaPlayer::Browser);
-        self.seg_up_next.setEnabled(!media.up_next.is_empty());
-
-        // The Up next list replaces the playlist table while a YouTube video
-        // is the featured track.
-        if player == MediaPlayer::Browser {
-            self.render_up_next(media);
-            return;
-        }
-
-        let status = media.playlist_status(player);
-        let lists: Vec<&Playlist> = media.playlists_for(player).collect();
-        let running = media.running.contains(&player);
-        let denied = media.automation_denied.contains(&player);
-        let playing = media.player(player).is_some_and(NowPlaying::is_playing);
-        let active = self.state.borrow().active_playlist.clone().filter(|_| playing);
-        let queue: &[notchforge_core::model::QueueTrack] =
-            if player == MediaPlayer::Spotify { &media.spotify_queue } else { &[] };
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        player.hash(&mut h);
-        format!("{status:?}{running}{denied}{active:?}").hash(&mut h);
-        for l in &lists {
-            l.id.hash(&mut h);
-            l.name.hash(&mut h);
-            l.track_count.hash(&mut h);
-            l.artwork_path.hash(&mut h);
-        }
-        for t in queue {
-            t.title.hash(&mut h);
-            t.artist.hash(&mut h);
-        }
-        let key = h.finish();
-        if self.state.borrow().playlists_key == key {
-            return;
-        }
-        self.state.borrow_mut().playlists_key = key;
-        self.row_targets.clear();
-        remove_all_subviews(&self.list_doc);
-
-        let (message, action, action_title): (Option<String>, ListAction, &str) =
-            if denied || status == PlaylistStatus::NeedsAutomation {
-                (
-                    Some(format!("Allow Notchisland to control {} to see your playlists.", player.display_name())),
-                    ListAction::AllowAutomation,
-                    "Allow…",
-                )
-            } else if !lists.is_empty() {
-                (None, ListAction::None, "")
-            } else {
-                match (player, &status) {
-                    (MediaPlayer::Spotify, PlaylistStatus::SigningIn) => (
-                        Some("Waiting for you to approve Notchisland in your browser…".into()),
-                        ListAction::CancelSpotify,
-                        "Cancel",
-                    ),
-                    (MediaPlayer::Spotify, PlaylistStatus::NeedsSpotifyLogin) => (
-                        Some("Sign in to Spotify to list your playlists.".into()),
-                        ListAction::ConnectSpotify,
-                        "Connect Spotify",
-                    ),
-                    (MediaPlayer::Music, _) if !running => {
-                        (Some("Open Music to see your playlists.".into()), ListAction::OpenMusic, "Open Music")
-                    }
-                    (_, PlaylistStatus::Failed(e)) => {
-                        (Some(format!("Couldn't load playlists. {e}")), ListAction::Retry, "Retry")
-                    }
-                    (_, PlaylistStatus::Loaded) => (Some("No playlists yet.".into()), ListAction::None, ""),
-                    _ => (Some("Loading playlists…".into()), ListAction::None, ""),
-                }
-            };
-        self.list_action_kind.set(action);
-        match message {
-            Some(m) => {
-                set_text(&self.list_message, &m);
-                self.list_message.setHidden(false);
-            }
-            None => self.list_message.setHidden(true),
-        }
-        style_pill(
-            &self.list_action,
-            action_title,
-            None,
-            &font(12.0, Weight::Semibold),
-            &self.p.primary,
-            &self.p.accent,
-            14.0,
-        );
-        self.list_action.setHidden(action == ListAction::None);
-        self.list_scroll.setHidden(lists.is_empty() && queue.is_empty());
-
-        let p = &self.p;
-        let w = self.list_width;
-        let brand = rgb8(player.color());
-        let visible_h = self.list_scroll.frame().size.height;
-        // Five rows fill the tile; a shorter list spreads out, a longer one scrolls.
-        let rows = lists.len() + queue.len();
-        let header_h = if queue.is_empty() { 0.0 } else { 20.0 };
-        let row_h = if rows == 0 || rows as f64 >= VISIBLE_ROWS {
-            visible_h / VISIBLE_ROWS
-        } else {
-            (visible_h / rows as f64).min(MAX_ROW_H)
-        };
-        let doc_h = (rows as f64 * row_h + header_h).max(visible_h);
-        self.list_doc.setFrame(rect(0.0, 0.0, w, doc_h));
-        let detail_color = rgba(1.0, 1.0, 1.0, 0.74);
-        // Spotify's play queue sits above the playlists, under an "Up next" heading.
-        let mut base = 0.0;
-        if !queue.is_empty() {
-            let head = label(
-                self.mtm,
-                "Up next",
-                &font(10.5, Weight::Semibold),
-                &p.secondary,
-                rect(10.0, base, w - 20.0, header_h),
-            );
-            self.list_doc.addSubview(&head);
-            base += header_h;
-            for (i, t) in queue.iter().enumerate() {
-                let row =
-                    shape_view(self.mtm, rect(0.0, base + i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
-                let cy = (row_h - 40.0) / 2.0;
-                let cover = shape_view(self.mtm, rect(8.0, cy, 40.0, 40.0), &brand, 8.0);
-                cover.addSubview(&symbol_view(
-                    self.mtm,
-                    "music.quarternote.3",
-                    16.0,
-                    &rgba(1.0, 1.0, 1.0, 0.92),
-                    rect(10.0, 10.0, 20.0, 20.0),
-                    &t.title,
-                ));
-                row.addSubview(&cover);
-                let ty = (row_h - 33.0) / 2.0;
-                row.addSubview(&label(
-                    self.mtm,
-                    &t.title,
-                    &font(13.5, Weight::Medium),
-                    &p.primary,
-                    rect(58.0, ty, w - 66.0, 18.0),
-                ));
-                row.addSubview(&label(
-                    self.mtm,
-                    &t.artist,
-                    &font(12.0, Weight::Regular),
-                    &detail_color,
-                    rect(58.0, ty + 18.0, w - 66.0, 15.0),
-                ));
-                set_accessibility_label(&row, &format!("Queued: {}, {}", t.title, t.artist));
-                self.list_doc.addSubview(&row);
-            }
-            base += queue.len() as f64 * row_h;
-        }
-        for (i, pl) in lists.iter().enumerate() {
-            let is_active = active.as_deref() == Some(pl.id.as_str());
-            let row_bg = if is_active { rgba(1.0, 1.0, 1.0, 0.14) } else { rgba(1.0, 1.0, 1.0, 0.0) };
-            let row = shape_view(self.mtm, rect(0.0, base + i as f64 * row_h, w, row_h), &row_bg, 13.0);
-            let cy = (row_h - 40.0) / 2.0;
-            let cover = shape_view(self.mtm, rect(8.0, cy, 40.0, 40.0), &brand, 8.0);
-            if let Some(l) = cover.layer() {
-                l.setMasksToBounds(true);
-            }
-            match pl.artwork_path.as_deref().and_then(icons::file_image) {
-                Some(img) => {
-                    let v = NSImageView::new(self.mtm);
-                    v.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
-                    v.setFrame(rect(0.0, 0.0, 40.0, 40.0));
-                    v.setImage(Some(&img));
-                    cover.addSubview(&v);
-                }
-                None => cover.addSubview(&symbol_view(
-                    self.mtm,
-                    "music.note.list",
-                    16.0,
-                    &rgba(1.0, 1.0, 1.0, 0.92),
-                    rect(10.0, 10.0, 20.0, 20.0),
-                    &pl.name,
-                )),
-            }
-            row.addSubview(&cover);
-            let ty = (row_h - 33.0) / 2.0;
-            row.addSubview(&label(
-                self.mtm,
-                &pl.name,
-                &font(13.5, Weight::Medium),
-                &p.primary,
-                rect(58.0, ty, w - 88.0, 18.0),
-            ));
-            let mut detail = Vec::new();
-            if let Some(c) = pl.track_count {
-                detail.push(if c == 1 { "1 song".to_owned() } else { format!("{c} songs") });
-            }
-            if let Some(o) = &pl.owner {
-                detail.push(o.clone());
-            }
-            row.addSubview(&label(
-                self.mtm,
-                &detail.join(" · "),
-                &font(12.0, Weight::Regular),
-                &detail_color,
-                rect(58.0, ty + 18.0, w - 88.0, 15.0),
-            ));
-            if is_active {
-                row.addSubview(&equalizer_view(self.mtm, rect(w - 26.0, (row_h - 12.0) / 2.0, 12.0, 12.0), &brand));
-            }
-            let (id, name) = (pl.id.clone(), pl.name.clone());
-            let st = self.state.clone();
-            let t = self.row_targets.add(self.mtm, move |_| {
-                st.borrow_mut().active_playlist = Some(id.clone());
-                glue::control(player, MediaAction::PlayPlaylist(id.clone()));
-            });
-            row.addSubview(&click_overlay(self.mtm, &t, rect(0.0, 0.0, w, row_h), &format!("Play playlist {name}")));
-            set_accessibility_label(&row, &format!("{}, {}", pl.name, detail.join(", ")));
-            self.list_doc.addSubview(&row);
-        }
-        self.list_doc.scrollPoint(NSPoint::new(0.0, 0.0));
-    }
-
-    /// YouTube's up-next list, in the playlists tile: click a row to open the
-    /// video.
-    fn render_up_next(&self, media: &MediaState) {
-        let mtm = self.mtm;
-        let p = &self.p;
-        let videos = &media.up_next;
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        for v in videos {
-            v.url.hash(&mut h);
-            v.title.hash(&mut h);
-        }
-        let key = h.finish();
-        if self.state.borrow().playlists_key == key {
-            return;
-        }
-        self.state.borrow_mut().playlists_key = key;
-        self.row_targets.clear();
-        remove_all_subviews(&self.list_doc);
-        self.list_message.setHidden(true);
-        self.list_action.setHidden(true);
-        self.list_scroll.setHidden(videos.is_empty());
-        if videos.is_empty() {
-            set_text(&self.list_message, "No recommendations found.");
-            self.list_message.setHidden(false);
-            return;
-        }
-        let w = self.list_width;
-        let visible_h = self.list_scroll.frame().size.height;
-        let row_h = if videos.len() as f64 >= VISIBLE_ROWS {
-            visible_h / VISIBLE_ROWS
-        } else {
-            (visible_h / videos.len() as f64).min(MAX_ROW_H)
-        };
-        let doc_h = (videos.len() as f64 * row_h).max(visible_h);
-        self.list_doc.setFrame(rect(0.0, 0.0, w, doc_h));
-        for (i, v) in videos.iter().enumerate() {
-            let row = shape_view(self.mtm, rect(0.0, i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
-            let cy = (row_h - 40.0) / 2.0;
-            let cover = shape_view(mtm, rect(8.0, cy, 40.0, 40.0), &rgb8(MediaPlayer::Browser.color()), 8.0);
-            cover.addSubview(&symbol_view(
-                mtm,
-                "play.rectangle.fill",
-                16.0,
-                &rgba(1.0, 1.0, 1.0, 0.92),
-                rect(10.0, 10.0, 20.0, 20.0),
-                &v.title,
-            ));
-            row.addSubview(&cover);
-            let ty = (row_h - 33.0) / 2.0;
-            row.addSubview(&label(
-                mtm,
-                &v.title,
-                &font(13.5, Weight::Medium),
-                &p.primary,
-                rect(58.0, ty, w - 66.0, 18.0),
-            ));
-            let detail = if v.duration.is_empty() {
-                v.author.clone()
-            } else if v.author.is_empty() {
-                v.duration.clone()
-            } else {
-                format!("{} · {}", v.author, v.duration)
-            };
-            row.addSubview(&label(
-                mtm,
-                &detail,
-                &font(12.0, Weight::Regular),
-                &rgba(1.0, 1.0, 1.0, 0.74),
-                rect(58.0, ty + 18.0, w - 66.0, 15.0),
-            ));
-            let url = v.url.clone();
-            let t = self.row_targets.add(mtm, move |_| {
-                // Play it where the music already is: the playing browser's
-                // tab navigates to the video.
-                glue::control(MediaPlayer::Browser, MediaAction::Navigate(url.clone()));
-            });
-            row.addSubview(&click_overlay(mtm, &t, rect(0.0, 0.0, w, row_h), &format!("Play {}", v.title)));
-            set_accessibility_label(&row, &format!("{}, {}", v.title, v.author));
-            self.list_doc.addSubview(&row);
-        }
-        self.list_doc.scrollPoint(NSPoint::new(0.0, 0.0));
     }
 
     /// (title shown, playlist rows) for diagnostics.

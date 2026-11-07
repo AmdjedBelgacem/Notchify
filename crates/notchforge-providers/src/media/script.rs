@@ -314,9 +314,7 @@ pub fn control(player: MediaPlayer, action: &MediaAction) -> (String, Vec<String
         }
         // Spotify and Music have no page to navigate; browsers get their own
         // script (`navigate_script`), everyone else is driven by media keys.
-        (MediaPlayer::Browser, MediaAction::Navigate(_)) | (_, MediaAction::Navigate(_)) => {
-            (String::new(), vec![])
-        }
+        (MediaPlayer::Browser, MediaAction::Navigate(_)) | (_, MediaAction::Navigate(_)) => (String::new(), vec![]),
         // Browsers are driven by media keys in the macOS layer, never by script.
         (MediaPlayer::Browser, _) => (String::new(), vec![]),
     }
@@ -344,12 +342,51 @@ end run"#,
     )
 }
 
+/// JavaScript that moves the playing `<video>`/`<audio>` of a page by
+/// `(item 1 of argv)` seconds (absolute). Returns "ok" when a tab took it.
+/// Browsers only run it with "Allow JavaScript from Apple Events" on, so a
+/// failure is expected and the caller falls back.
+pub fn seek_script(bundle_id: &str, safari: bool) -> String {
+    let js = r#""(function(){var m=[].slice.call(document.querySelectorAll('video,audio')).filter(function(e){return e.duration>0;});var p=m.filter(function(e){return !e.paused;});var e=p[0];if(!e)return '';e.currentTime=" & secs & ";return 'ok';})()""#;
+    let run = if safari { format!("do JavaScript {js} in t") } else { format!("execute t javascript {js}") };
+    format!(
+        r#"on run argv
+	set secs to (item 1 of argv)
+	tell application id "{app}"
+		repeat with w in windows
+			try
+				set tl to tabs of w
+			on error
+				set tl to {{}}
+			end try
+			repeat with t in tl
+				try
+					set r to ({run})
+					if r is "ok" then return "ok"
+				end try
+			end repeat
+		end repeat
+	end tell
+	return ""
+end run"#,
+        app = bundle_id
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn line(fields: &[&str]) -> String {
         fields.join(&SEP.to_string())
+    }
+
+    #[test]
+    fn seek_script_keeps_the_time_out_of_the_source() {
+        let s = seek_script("com.google.Chrome", false);
+        assert!(s.contains("execute t javascript"));
+        assert!(s.contains("currentTime=\" & secs & \""));
+        assert!(seek_script("com.apple.Safari", true).contains("do JavaScript"));
     }
 
     #[test]

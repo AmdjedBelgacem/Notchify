@@ -87,6 +87,8 @@ pub enum ProviderEvent {
     Audio(AudioState),
     Media(MediaState),
     Usage(AgentUsage),
+    /// An agent's lifecycle hook (see [`crate::model::AgentHook`]).
+    AgentHook(crate::model::AgentHook),
     Status {
         provider: &'static str,
         status: ProviderStatus,
@@ -111,6 +113,8 @@ pub enum ProviderCommand {
     SpotifyCancel,
     /// Forget the stored Spotify token.
     SpotifyDisconnect,
+    /// An agent's lifecycle hook, for the provider that tracks its sessions.
+    AgentHook(crate::model::AgentHook),
     /// Tokens an agent reported through the transports (webhook, socket,
     /// inbox or the notify CLI) instead of writing a log of its own.
     Usage {
