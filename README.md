@@ -453,7 +453,10 @@ from posting.
   Gemini CLI gets the same lifecycle hooks (`~/.gemini/settings.json`, live
   sessions included), Cursor reports finished turns and file edits
   (`~/.cursor/hooks.json`), Aider says when it is waiting for you
-  (`notifications-command` in `~/.aider.conf.yml`).
+  (`notifications-command` in `~/.aider.conf.yml`). Notchisland never asks
+  for or stores an agent's credentials: each user signs in to Gemini CLI
+  (or sets their own `GEMINI_API_KEY`) themselves, and the hooks only carry
+  events.
 - **Any MCP-capable agent.** `notchforge-mcp` (inside the app bundle) gives
   agents `notch_notify`, `notch_progress` and `notch_finished` tools — see
   [`crates/notchforge-mcp/README.md`](crates/notchforge-mcp/README.md). For

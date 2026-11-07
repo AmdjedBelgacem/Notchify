@@ -56,6 +56,9 @@ Local equivalent of the CI build: `UNIVERSAL=1 packaging/bundle.sh` (add
 
 ## Signing and notarization secrets
 
+Optional, and not planned for now: releases ship ad-hoc signed. The steps
+below are kept for if that changes.
+
 Without these, users see "Apple could not verify Notchisland is free of
 malware" and must right-click > Open (or allow it in System Settings > Privacy
 & Security). Every signing step is skipped when a secret is missing.
