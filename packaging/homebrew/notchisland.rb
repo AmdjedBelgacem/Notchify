@@ -17,7 +17,7 @@ cask "notchisland" do
 
   # The app checks the latest release's appcast.json itself.
   auto_updates true
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Notchisland.app"
   binary "#{appdir}/Notchisland.app/Contents/MacOS/notchforge-notify"

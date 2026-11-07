@@ -100,7 +100,7 @@ so permissions have to be granted once more after the first signed install.
 ## Homebrew tap
 
 The cask is `packaging/homebrew/notchisland.rb`. It is published from a separate
-repository so users can run `brew install --cask AmdjedBelgacem/tap/notchisland`.
+repository so users can run `brew tap AmdjedBelgacem/tap`, `brew trust AmdjedBelgacem/tap` (newer Homebrew refuses untrusted third-party taps) and `brew install --cask notchisland`.
 
 One-time setup:
 

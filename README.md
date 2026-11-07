@@ -281,6 +281,22 @@ handful of renders.
 
 ---
 
+## Install
+
+Download `Notchisland-<version>.zip` from the
+[latest release](https://github.com/AmdjedBelgacem/Notchify/releases/latest),
+or with Homebrew:
+
+```bash
+brew tap AmdjedBelgacem/tap
+brew trust AmdjedBelgacem/tap
+brew install --cask notchisland
+```
+
+Releases are not notarized yet, so the first launch needs a right-click ›
+Open. The app checks the release feed twice a day and says when a newer
+version is out.
+
 ## Build & run
 
 **Requirements:** an Apple Silicon Mac on macOS 13 Ventura or later, and Rust
