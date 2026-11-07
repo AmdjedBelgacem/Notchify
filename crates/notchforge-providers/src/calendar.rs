@@ -7,9 +7,13 @@
 //! read-only; reminders can be added and completed from the Planner.
 
 use notchforge_core::model::Permission::Calendar as CalendarPermission;
-use notchforge_core::model::{CalendarEvent, CalendarState, PermissionState, ProviderStatus, ReminderItem};
+#[cfg(target_os = "macos")]
+use notchforge_core::model::{CalendarEvent, PermissionState, ReminderItem};
+use notchforge_core::model::{CalendarState, ProviderStatus};
+#[cfg(target_os = "macos")]
+use notchforge_core::provider::Wake;
 use notchforge_core::provider::{
-    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
+    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent,
 };
 #[cfg(target_os = "macos")]
 use std::time::Duration;
@@ -18,6 +22,7 @@ use std::time::Duration;
 pub use mac::{authorization_state, request_access};
 
 /// Complete a reminder by id, on the main thread (UI-facing helper).
+#[cfg(target_os = "macos")]
 pub fn complete_reminder_by_id(id: &str) -> bool {
     let id = id.to_owned();
     on_main(move |mtm| {
@@ -28,6 +33,7 @@ pub fn complete_reminder_by_id(id: &str) -> bool {
 }
 
 /// Add a reminder to the default Reminders list, on the main thread.
+#[cfg(target_os = "macos")]
 pub fn add_reminder(title: &str) -> bool {
     let title = title.trim().to_owned();
     if title.is_empty() {
@@ -57,6 +63,7 @@ pub fn local_day(now_ms: i64) -> (i64, u8) {
 }
 
 /// The day of the month at `ms`, in local time.
+#[cfg(target_os = "macos")]
 fn day_of_month(ms: i64) -> u8 {
     // SAFETY: as above.
     unsafe {
@@ -73,7 +80,9 @@ pub struct CalendarProvider;
 #[cfg(target_os = "macos")]
 const POLL: Duration = Duration::from_secs(60);
 /// How far ahead the tile lists events.
+#[cfg(target_os = "macos")]
 const HORIZON_MS: i64 = 12 * 3600 * 1000;
+#[cfg(target_os = "macos")]
 const MAX_EVENTS: usize = 6;
 
 #[cfg(target_os = "macos")]
@@ -405,11 +414,30 @@ mod mac {
     }
 }
 
-/// Run `f` on the main thread, or nowhere when off-macOS.
+/// Run `f` on the main thread.
+#[cfg(target_os = "macos")]
 pub fn on_main<T: Send + 'static>(f: impl FnOnce(objc2::MainThreadMarker) -> T + Send + 'static) -> Option<T> {
     mac::on_main(f)
 }
 
+/// Elsewhere there is no EventKit: the provider says so and waits.
+#[cfg(not(target_os = "macos"))]
+impl Provider for CalendarProvider {
+    fn descriptor(&self) -> ProviderDescriptor {
+        ProviderDescriptor { id: "calendar", name: "Calendar", permissions: &[CalendarPermission] }
+    }
+
+    fn run(self: Box<Self>, mut ctx: ProviderContext) -> BoxFuture<'static, Result<(), ProviderError>> {
+        Box::pin(async move {
+            ctx.set_status(ProviderStatus::Failing("Calendar is only available on macOS".into())).await;
+            let _ = ctx.emit(ProviderEvent::Calendar(CalendarState::default())).await;
+            let _ = ctx.sleep(std::time::Duration::from_secs(u64::MAX / 4)).await;
+            Ok(())
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
 impl Provider for CalendarProvider {
     fn descriptor(&self) -> ProviderDescriptor {
         ProviderDescriptor { id: "calendar", name: "Calendar", permissions: &[CalendarPermission] }
