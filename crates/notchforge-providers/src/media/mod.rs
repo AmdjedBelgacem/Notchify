@@ -596,7 +596,28 @@ impl Session {
                 Some(id) if self.up_next_for.as_deref() == Some(id) => {}
                 Some(id) => {
                     self.up_next_for = Some(id.clone());
-                    self.state.up_next = youtube::fetch_up_next(&self.http, id).await;
+                    let mut videos = youtube::fetch_up_next(&self.http, id).await;
+                    // Thumbnails come from the video id — the same files the
+                    // artwork cache uses for the playing card.
+                    let dir = self.paths.artwork_dir();
+                    let _ = std::fs::create_dir_all(&dir);
+                    for v in &mut videos {
+                        if let Some(vid) = browser::youtube_id(&v.url) {
+                            let dest = dir.join(format!("yt-{vid}.jpg"));
+                            let path = if dest.exists() {
+                                Some(dest.clone())
+                            } else {
+                                download(
+                                    &self.http,
+                                    &format!("https://i.ytimg.com/vi/{vid}/mqdefault.jpg"),
+                                    &dest,
+                                )
+                                .await
+                            };
+                            v.thumb = path;
+                        }
+                    }
+                    self.state.up_next = videos;
                     if self.state.up_next.is_empty() {
                         self.up_next_for = None; // retry next poll (offline?)
                     } else {

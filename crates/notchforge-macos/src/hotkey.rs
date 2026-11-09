@@ -5,6 +5,7 @@
 //! * ⌃⌥Y / ⌃⌥D — allow / deny the coding agent's waiting tool request.
 //! * ⌃⌥M — mute or unmute the microphone.
 //! * ⌃⌥T — start a 5-minute timer.
+//! * ⌃⌘← / ⌃⌘→ — move the island to the previous / next screen.
 
 use std::ffi::c_void;
 
@@ -56,6 +57,10 @@ const K_EVENT_CLASS_KEYBOARD: u32 = u32::from_be_bytes(*b"keyb");
 const K_EVENT_HOT_KEY_PRESSED: u32 = 5;
 const CONTROL_KEY: u32 = 1 << 12;
 const OPTION_KEY: u32 = 1 << 11;
+const COMMAND_KEY: u32 = 1 << 8;
+/// `kVK_LeftArrow` / `kVK_RightArrow`.
+const KEY_LEFT: u32 = 123;
+const KEY_RIGHT: u32 = 124;
 /// `kVK_ANSI_N`.
 const KEY_N: u32 = 0x2D;
 /// `kVK_ANSI_C`.
@@ -112,6 +117,10 @@ unsafe extern "C" fn on_hot_key(_next: *mut c_void, event: *mut c_void, _user: *
                 label: "5 min".into(),
             });
         }
+        7 | 8 => {
+            let next = user == 8;
+            crate::app::with_controller(|c| c.focus_neighbour_screen(next));
+        }
         _ => {}
     }
     0
@@ -158,4 +167,16 @@ pub fn install() {
     register(KEY_D, 4);
     register(KEY_M, 5);
     register(KEY_T, 6);
+    for (key, id) in [(KEY_LEFT, 7u32), (KEY_RIGHT, 8)] {
+        let mut hotkey_ref = std::ptr::null_mut();
+        // SAFETY: plain Carbon call with a valid out-pointer.
+        unsafe {
+            let id = EventHotKeyID { signature: u32::from_be_bytes(*b"NFrg"), id };
+            let status =
+                RegisterEventHotKey(key, COMMAND_KEY | CONTROL_KEY, id, GetApplicationEventTarget(), 0, &mut hotkey_ref);
+            if status != 0 {
+                tracing::warn!(status, "screen-cycle hotkey is taken by another app; it will not fire");
+            }
+        }
+    }
 }

@@ -349,6 +349,32 @@ impl CollapsedView {
             return;
         }
 
+        // A meeting about to start: the countdown until it does. Sits below
+        // timers and calls, above the regular wings.
+        let now = notchforge_core::time::now_ms();
+        if let Some(m) = snap
+            .calendar
+            .events
+            .iter()
+            .filter(|e| e.starts_at_ms > now)
+            .filter(|e| e.starts_at_ms - now <= 15 * 60_000)
+            .min_by_key(|e| e.starts_at_ms)
+        {
+            self.art.setHidden(true);
+            self.art_box.setHidden(true);
+            self.set_equalizer(false, &p.success, false);
+            set_symbol(&self.left_icon, "calendar.badge.clock", 12.0, "Meeting soon");
+            self.left_icon.setContentTintColor(Some(&p.accent));
+            self.left_icon.setHidden(false);
+            self.left_text.setHidden(true);
+            self.right_icon.setHidden(true);
+            let mins = (m.starts_at_ms - now + 59_999) / 60_000;
+            set_text(&self.right_text, &format!("in {mins}m"));
+            set_accessibility_label(&self.right_text, &format!("{} in {} minutes", m.title, mins));
+            self.right_text.setHidden(false);
+            return;
+        }
+
         // Calls moved out of the way: a phone and how many are ringing.
         if !snap.calls.is_empty() {
             self.art.setHidden(true);

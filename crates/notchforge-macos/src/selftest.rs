@@ -1408,19 +1408,19 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
                 title: "Harder, Better, Faster, Stronger".into(),
                 author: "Daft Punk".into(),
                 duration: "3:45".into(),
-                url: "https://www.youtube.com/watch?v=sample".into(),
+                url: "https://www.youtube.com/watch?v=sample".into(), thumb: None,
             },
             notchforge_core::model::UpNextVideo {
                 title: "Around the World".into(),
                 author: "Daft Punk".into(),
                 duration: "7:09".into(),
-                url: "https://www.youtube.com/watch?v=sample".into(),
+                url: "https://www.youtube.com/watch?v=sample".into(), thumb: None,
             },
             notchforge_core::model::UpNextVideo {
                 title: "Digital Love".into(),
                 author: "Daft Punk".into(),
                 duration: "4:58".into(),
-                url: "https://www.youtube.com/watch?v=sample".into(),
+                url: "https://www.youtube.com/watch?v=sample".into(), thumb: None,
             },
         ],
         ..Default::default()
@@ -1691,7 +1691,7 @@ fn board_snapshots(
             title: "Daft Punk - One More Time".into(),
             author: "Daft Punk".into(),
             duration: "5:20".into(),
-            url: "https://www.youtube.com/watch?v=FGBhQbmPwH8".into(),
+            url: "https://www.youtube.com/watch?v=FGBhQbmPwH8".into(), thumb: None,
         }],
     };
     (overview, music)

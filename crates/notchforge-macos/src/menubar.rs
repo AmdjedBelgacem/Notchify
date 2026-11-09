@@ -269,6 +269,14 @@ impl MenuBar {
                 });
             }));
         }
+        for (mins, label) in [(30, "Stop music in 30 min"), (60, "Stop music in 1 h")] {
+            timer_menu.addItem(&menu_item(mtm, &targets, label, "", move || {
+                crate::app::send(notchforge_core::engine::Command::StartTimer {
+                    duration_ms: mins * 60_000,
+                    label: "Sleep".into(),
+                });
+            }));
+        }
         for (work, brk, label) in [(25, 5, "Pomodoro 25 / 5"), (50, 10, "Pomodoro 50 / 10")] {
             timer_menu.addItem(&menu_item(mtm, &targets, label, "", move || {
                 crate::app::send(notchforge_core::engine::Command::StartPomodoro {

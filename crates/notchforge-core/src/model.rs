@@ -1184,6 +1184,9 @@ pub struct UpNextVideo {
     pub author: String,
     pub duration: String,
     pub url: String,
+    /// Local thumbnail file, once downloaded (the video id's ytimg image).
+    #[serde(default)]
+    pub thumb: Option<PathBuf>,
 }
 
 /// A track waiting in Spotify's play queue.

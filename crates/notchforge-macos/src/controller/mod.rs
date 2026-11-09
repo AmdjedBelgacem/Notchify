@@ -1850,6 +1850,22 @@ impl Controller {
         self.layout.borrow().screen.id
     }
 
+    /// Cycle the island to the next (or previous) screen, in display order.
+    pub fn focus_neighbour_screen(&self, next: bool) {
+        let screens = screen::screens(self.mtm);
+        if screens.len() < 2 {
+            return;
+        }
+        let current = self.screen_id();
+        let idx = screens.iter().position(|s| s.id == current).unwrap_or(0);
+        let target = if next {
+            screens[(idx + 1) % screens.len()].id
+        } else {
+            screens[(idx + screens.len() - 1) % screens.len()].id
+        };
+        self.focus_screen(target);
+    }
+
     /// A mirror was clicked: move the primary island to that screen. The pin
     /// lasts until the screen disappears (or the user changes the screen
     /// choice, which resets it).

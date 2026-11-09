@@ -293,14 +293,28 @@ impl MediaPage {
             let row = shape_view(self.mtm, rect(0.0, i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
             let cy = (row_h - 40.0) / 2.0;
             let cover = shape_view(mtm, rect(8.0, cy, 40.0, 40.0), &rgb8(MediaPlayer::Browser.color()), 8.0);
-            cover.addSubview(&symbol_view(
-                mtm,
-                "play.rectangle.fill",
-                16.0,
-                &rgba(1.0, 1.0, 1.0, 0.92),
-                rect(10.0, 10.0, 20.0, 20.0),
-                &v.title,
-            ));
+            if let Some(l) = cover.layer() {
+                l.setMasksToBounds(true);
+            }
+            // The video's own thumbnail when it arrived, else the play glyph.
+            let thumb = v.thumb.as_deref().and_then(icons::file_image);
+            match thumb {
+                Some(img) => {
+                    let iv = NSImageView::new(mtm);
+                    iv.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
+                    iv.setFrame(rect(0.0, 0.0, 40.0, 40.0));
+                    iv.setImage(Some(&img));
+                    cover.addSubview(&iv);
+                }
+                None => cover.addSubview(&symbol_view(
+                    mtm,
+                    "play.rectangle.fill",
+                    16.0,
+                    &rgba(1.0, 1.0, 1.0, 0.92),
+                    rect(10.0, 10.0, 20.0, 20.0),
+                    &v.title,
+                )),
+            }
             row.addSubview(&cover);
             let ty = (row_h - 33.0) / 2.0;
             row.addSubview(&label(

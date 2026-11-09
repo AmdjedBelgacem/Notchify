@@ -4,7 +4,8 @@
 //! for any reason we fall back to parsing `pmset -g batt`. Linux (headless
 //! development): `/sys/class/power_supply`.
 
-use notchforge_core::model::{BatteryStatus, ProviderStatus};
+use notchforge_core::apps::AppRef;
+use notchforge_core::model::{BatteryStatus, NewNotification, NotificationKind, Origin, Priority, ProviderStatus};
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
 };
@@ -97,13 +98,21 @@ impl Provider for BatteryProvider {
         Box::pin(async move {
             ctx.set_status(ProviderStatus::Running).await;
             let mut last: Option<BatteryStatus> = None;
+            // Charge alerts: one per crossing, never more than every 4 hours.
+            let mut last_alert: Option<std::time::Instant> = None;
             loop {
                 let b = read().await?;
                 let interval = if b.present { POLL } else { POLL_NO_BATTERY };
                 if last.as_ref() != Some(&b) {
                     last = Some(b.clone());
-                    if !ctx.emit(ProviderEvent::Battery(b)).await {
+                    if !ctx.emit(ProviderEvent::Battery(b.clone())).await {
                         return Ok(());
+                    }
+                    if let Some(n) = charge_alert(&b, last.as_ref(), last_alert) {
+                        last_alert = Some(std::time::Instant::now());
+                        if !ctx.emit(ProviderEvent::Notification(n)).await {
+                            return Ok(());
+                        }
                     }
                 }
                 if ctx.sleep_or_refresh(interval).await == Wake::Shutdown {
@@ -112,6 +121,54 @@ impl Provider for BatteryProvider {
             }
         })
     }
+}
+
+/// Low or full on battery power: "plug in" below 20%, "unplug" above 80%
+/// while charging (kind to the cells). Fires only when the level actually
+/// crossed the threshold since the last reading, and at most once every 4 h.
+fn charge_alert(
+    now: &BatteryStatus,
+    prev: Option<&BatteryStatus>,
+    last_alert: Option<std::time::Instant>,
+) -> Option<NewNotification> {
+    const LOW: u8 = 20;
+    const HIGH: u8 = 80;
+    let (crossed, title, body): (bool, String, String) = match prev {
+        Some(prev) if now.percent != prev.percent => {
+            if !now.charging && !now.plugged_in && prev.percent > LOW && now.percent <= LOW {
+                (
+                    true,
+                    format!("Battery low — {}%", now.percent),
+                    format!("Plug in — the battery is at {}%.", now.percent),
+                )
+            } else if now.charging && prev.percent < HIGH && now.percent >= HIGH {
+                (
+                    true,
+                    format!("Charged — {}%", now.percent),
+                    format!("Unplug when you can — the battery is at {}%.", now.percent),
+                )
+            } else {
+                (false, String::new(), String::new())
+            }
+        }
+        _ => (false, String::new(), String::new()),
+    };
+    if !crossed || last_alert.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(4 * 3600)) {
+        return None;
+    }
+    Some(NewNotification {
+        app: AppRef { known: None, bundle_id: None, display_name: "Battery".into(), platform: None },
+        origin: Origin::Internal,
+        kind: NotificationKind::Info,
+        priority: Some(Priority::Normal),
+        title,
+        subtitle: None,
+        body,
+        timestamp_ms: notchforge_core::time::now_ms(),
+        thread: Some("charge-alert".into()),
+        url: None,
+        tokens: None,
+    })
 }
 
 #[cfg(test)]

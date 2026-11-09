@@ -353,6 +353,10 @@ impl Engine {
                         let mins = t.duration_ms / 60_000;
                         let summary = if mins >= 1 { format!("{mins} min") } else { "timer".into() };
                         let is_pomodoro = phase_note.is_some();
+                        // A "Sleep" timer's whole job is to stop the music
+                        // when it fires.
+                        let sleep_pause =
+                            !is_pomodoro && t.label.eq_ignore_ascii_case("sleep");
                         let (title, body) =
                             phase_note.take().unwrap_or((format!("Timer done — {summary}"), String::new()));
                         self.ingest(NewNotification {
@@ -373,6 +377,14 @@ impl Engine {
                             url: None,
                             tokens: None,
                         });
+                        if sleep_pause {
+                            if let Some(player) = self.state.media.primary().map(|n| n.player) {
+                                let _ = self.provider_commands.send(crate::provider::ProviderCommand::Media {
+                                    player,
+                                    action: crate::model::MediaAction::PlayPause,
+                                });
+                            }
+                        }
                     }
                 }
                 _ = async {
