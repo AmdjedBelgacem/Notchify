@@ -360,14 +360,26 @@ impl UsagePage {
             rect(INSET, 0.0, chart_w, 36.0),
         ));
         let cache = compact_tokens(r.counts.cache());
+        // Rough list-price estimate — right-aligned on the cache line, "≈"
+        // says it is an approximation.
+        let cost = if r.cost_cents >= 100 {
+            format!("≈ ${:.2}", r.cost_cents as f64 / 100.0)
+        } else {
+            format!("≈ {}¢", r.cost_cents)
+        };
+        let sub = if r.cost_cents > 0 {
+            format!("+ {cache} cache   ·   {cost}")
+        } else {
+            format!("+ {cache} cache")
+        };
         self.hero.addSubview(&label(
             mtm,
-            &format!("+ {cache} cache"),
+            &sub,
             &font(11.0, Weight::Regular),
             &white(0.76),
             rect(INSET, 35.0, chart_w, 14.0),
         ));
-        set_accessibility_label(&self.hero, &format!("{total} tokens, plus {cache} from cache"));
+        set_accessibility_label(&self.hero, &format!("{total} tokens, plus {cache} from cache, {sub}"));
 
         // Chart, with its axis along the tile's bottom edge.
         let axis_y = size.height - 8.0 - 12.0;

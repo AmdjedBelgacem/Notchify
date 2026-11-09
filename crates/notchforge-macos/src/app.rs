@@ -212,6 +212,44 @@ pub fn spotify_signed_in() -> bool {
     with_app(|a| notchforge_providers::media::spotify::is_signed_in(&a.paths.spotify_token())).unwrap_or(false)
 }
 
+/// Export a copy of the settings TOML (NSSavePanel).
+pub fn export_config() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let Some(cfg) = with_config(|c| (*c).clone()) else { return };
+    let panel = objc2_app_kit::NSSavePanel::savePanel(mtm);
+    panel.setNameFieldStringValue(&ns("notchforge-settings.toml"));
+    if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+        return;
+    }
+    let Some(url) = panel.URL() else { return };
+    let path = url.path().map(|p| p.to_string()).unwrap_or_default();
+    if let Err(e) = cfg.save(std::path::Path::new(&path)) {
+        alert("Export settings", &format!("Could not save: {e}"));
+    }
+}
+
+/// Import a settings TOML picked by the user.
+pub fn import_config() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let panel = objc2_app_kit::NSOpenPanel::openPanel(mtm);
+    panel.setAllowsMultipleSelection(false);
+    if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+        return;
+    }
+    let Some(url) = panel.URLs().iter().next() else { return };
+    let path = url.path().map(|p| p.to_string()).unwrap_or_default();
+    match std::fs::read_to_string(&path) {
+        Ok(text) => match notchforge_core::config::Config::from_toml(&text) {
+            Ok(cfg) => {
+                send(Command::UpdateConfig(Box::new(cfg)));
+                show_settings_soon();
+            }
+            Err(e) => alert("Import settings", &format!("That file is not a valid settings file: {e}")),
+        },
+        Err(e) => alert("Import settings", &format!("Could not read the file: {e}")),
+    }
+}
+
 pub fn open_config_file() {
     with_app(|a| {
         crate::sharing::open_path(&a.paths.config_file);

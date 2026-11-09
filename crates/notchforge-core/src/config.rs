@@ -403,6 +403,9 @@ pub struct ControlsConfig {
     /// Turn Focus on while a calendar meeting is in its join window, off
     /// again when it ends (uses the shortcuts above).
     pub auto_focus_meetings: bool,
+    /// Daily Focus window `(start_hour, end_hour)`; 24-hour local time,
+    /// `(0, 0)` disables it. Works like auto-focus meetings.
+    pub focus_schedule: Option<(u8, u8)>,
     /// Display mode changes revert automatically unless confirmed in time.
     pub resolution_confirm_secs: u64,
 }
@@ -455,6 +458,7 @@ impl Default for ControlsConfig {
             focus_on_shortcut: "NotchForge Focus On".to_owned(),
             focus_off_shortcut: "NotchForge Focus Off".to_owned(),
             auto_focus_meetings: false,
+            focus_schedule: None,
             resolution_confirm_secs: 15,
         }
     }

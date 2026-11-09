@@ -48,6 +48,10 @@ pub enum Command {
     ResolvePermission(String),
     /// Dismiss every notification from an app (by rule key).
     DismissApp(String),
+    /// Never show this app again (its notification rule turns off).
+    MuteApp(String),
+    /// Bring back what Clear All removed.
+    UndoClearNotifications,
     ClearNotifications,
     MarkAllRead,
     TrayAdd(Vec<PathBuf>),
@@ -131,6 +135,8 @@ pub struct Snapshot {
     pub usage: AgentUsage,
     /// Agents working right now (a fresh status line or quota poll), wing order.
     pub agent_active: Vec<AgentActive>,
+    /// Focus rounds finished today (pomodoro).
+    pub pomodoro_rounds: u8,
     /// Ringing now, the one shown first at the front.
     pub calls: Vec<Call>,
     /// The call you picked up.
@@ -233,6 +239,16 @@ pub struct Engine {
     last_peek_ms: i64,
     /// Snoozed notifications: (due at, the notification to bring back).
     snoozed: Vec<(i64, NewNotification)>,
+    /// What Clear All removed, for a short window of undo.
+    cleared: Vec<(i64, NewNotification)>,
+    /// Pomodoro focus rounds completed today (local day).
+    pomodoro_rounds: (i64, u8),
+}
+
+/// The branch of the git repo at `dir`, from `.git/HEAD` (no subprocess).
+fn git_branch(dir: &str) -> Option<String> {
+    let head = std::fs::read_to_string(std::path::Path::new(dir).join(".git").join("HEAD")).ok()?;
+    head.trim().strip_prefix("ref: refs/heads/").map(str::to_owned)
 }
 
 impl Engine {
@@ -268,6 +284,8 @@ impl Engine {
             generation: 0,
             last_peek_ms: i64::MIN / 2,
             snoozed: Vec::new(),
+            cleared: Vec::new(),
+            pomodoro_rounds: (0, 0),
         };
         (engine, EngineHandle { commands: cmd_tx })
     }
@@ -338,6 +356,12 @@ impl Engine {
                             } else {
                                 (c.break_ms, "Break".into())
                             };
+                            // A finished work round just rolled into its break.
+                            if !next_work {
+                                let day = now_ms() / 86_400_000;
+                                let count = if self.pomodoro_rounds.0 == day { self.pomodoro_rounds.1 + 1 } else { 1 };
+                                self.pomodoro_rounds = (day, count);
+                            }
                             *t = TimerState {
                                 label,
                                 ends_at_ms: now_ms() + duration,
@@ -461,6 +485,10 @@ impl Engine {
                     usage
                 }
             },
+            pomodoro_rounds: {
+                let day = now_ms() / 86_400_000;
+                if self.pomodoro_rounds.0 == day { self.pomodoro_rounds.1 } else { 0 }
+            },
             agent_active: {
                 let now = now_ms();
                 s.usage
@@ -472,6 +500,13 @@ impl Engine {
                         agent: l.agent,
                         context_percent: l.context_percent,
                         project: l.project.clone(),
+                        branch: s
+                            .usage
+                            .running
+                            .iter()
+                            .find(|r| r.agent == l.agent)
+                            .and_then(|r| r.dir.as_deref())
+                            .and_then(git_branch),
                     })
                     .collect()
             },
@@ -564,8 +599,53 @@ impl Engine {
                 self.state.pipeline.dismiss_app(&key);
                 true
             }
+            Command::MuteApp(key) => {
+                // The app's rule goes off and the config is saved + broadcast,
+                // exactly like a settings change.
+                let mut cfg = (*self.config()).clone();
+                cfg.notifications.apps.entry(key).or_default().enabled = false;
+                self.apply_command(Command::UpdateConfig(Box::new(cfg)));
+                true
+            }
             Command::ClearNotifications => {
+                let now = now_ms();
+                // Keep 30 minutes of undo: what was cleared, ready to restore.
+                self.cleared = self
+                    .state
+                    .pipeline
+                    .ranked()
+                    .into_iter()
+                    .map(|n| {
+                        (
+                            now,
+                            NewNotification {
+                                app: n.app,
+                                origin: n.origin,
+                                kind: n.kind,
+                                priority: Some(n.priority),
+                                title: n.title,
+                                subtitle: n.subtitle,
+                                body: n.body,
+                                timestamp_ms: n.timestamp_ms,
+                                thread: n.thread,
+                                url: n.url,
+                                tokens: None,
+                            },
+                        )
+                    })
+                    .collect();
                 self.state.pipeline.clear();
+                true
+            }
+            Command::UndoClearNotifications => {
+                if self.cleared.is_empty() {
+                    return false;
+                }
+                let cfg = self.config();
+                let flags = PipelineFlags { paused: self.state.paused, focus_active: self.state.focus.active == Some(true) };
+                for (_, n) in std::mem::take(&mut self.cleared) {
+                    self.state.pipeline.ingest(n, &cfg.notifications, flags, now_ms());
+                }
                 true
             }
             Command::MarkAllRead => self.state.pipeline.mark_all_read(),
@@ -1021,6 +1101,14 @@ impl Engine {
     }
 
     fn ingest(&mut self, n: NewNotification) -> bool {
+        // A CLI timer request: start the countdown, show nothing.
+        if n.thread.as_deref() == Some("notchforge-timer") {
+            let Ok(ms) = n.body.parse::<i64>() else { return false };
+            if ms < 1000 {
+                return false;
+            }
+            return self.apply_command(Command::StartTimer { duration_ms: ms, label: n.title });
+        }
         // Token usage reported along with an event is telemetry, not a message
         // the notch should show: route it to the usage provider instead.
         if let Some(usage) = &n.tokens {

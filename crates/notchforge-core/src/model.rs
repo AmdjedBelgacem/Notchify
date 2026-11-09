@@ -379,6 +379,17 @@ pub struct TokenCounts {
 }
 
 impl TokenCounts {
+    /// A rough dollar cost at listed prices, blended per token kind. Cache
+    /// reads count at a tenth — providers bill them that way. The rates are
+    /// published list prices (USD per million tokens) and drift; the figure
+    /// is an estimate, labelled as one.
+    pub fn estimated_cost_cents(&self, in_rate: f64, out_rate: f64) -> u64 {
+        let m = 1_000_000.0;
+        ((self.input as f64 * in_rate + self.output as f64 * out_rate + self.cache_read as f64 * in_rate * 0.1)
+            / m
+            * 100.0) as u64
+    }
+
     /// Input and output: what the page's main figures count.
     pub fn main(&self) -> u64 {
         self.input + self.output
@@ -423,6 +434,9 @@ pub struct UsageSession {
 pub struct UsageRange {
     pub label: String,
     pub counts: TokenCounts,
+    /// Rough dollar estimate at list prices, computed with the range's
+    /// blended agent mix. Labelled "≈" wherever shown.
+    pub cost_cents: u64,
     /// Tokens per hour or day, oldest first; the inner vector is per agent in
     /// [`UsageAgent::ALL`] order.
     pub bars: Vec<Vec<u64>>,
@@ -465,6 +479,9 @@ pub struct RunningSession {
     pub working: bool,
     #[serde(default)]
     pub model: String,
+    /// The session's working directory, when the agent's log said so.
+    #[serde(default)]
+    pub dir: Option<String>,
     /// When the session's first line was logged.
     #[serde(default)]
     pub started_ms: i64,
@@ -535,6 +552,8 @@ pub struct AgentActive {
     pub agent: UsageAgent,
     pub context_percent: Option<u8>,
     pub project: Option<String>,
+    /// The project's git branch, read from its working directory.
+    pub branch: Option<String>,
 }
 
 /// Name a limit by its window: 300 min is the session, 10080 the week.

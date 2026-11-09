@@ -291,6 +291,9 @@ impl MenuBar {
             crate::app::send(notchforge_core::engine::Command::CancelTimer);
         });
         menu.addItem(&cancel_timer);
+        menu.addItem(&menu_item(mtm, &targets, "Undo Clear All", "", || {
+            crate::app::send(notchforge_core::engine::Command::UndoClearNotifications);
+        }));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         let shelve = menu_item(mtm, &targets, "Shelve Clipboard", "⌃⌥C", || {
             with_controller(|c| c.capture_clipboard());

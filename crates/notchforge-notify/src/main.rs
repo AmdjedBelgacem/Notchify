@@ -52,6 +52,8 @@ struct Args {
     source: Option<String>,
     kind: Option<String>,
     json_arg: Option<String>,
+    /// Start a timer from a natural duration ("25m", "1h30m", "90 s").
+    timer: Option<String>,
     /// Reported token usage (see the usage ingest).
     input: Option<u64>,
     output: Option<u64>,
@@ -83,6 +85,7 @@ fn parse() -> Result<Option<Args>, String> {
                 a.cache_write = Some(value("--cache-write")?.parse().map_err(|_| "invalid --cache-write")?)
             }
             "--model" => a.model = Some(value("--model")?),
+    "--timer" => a.timer = Some(value("--timer")?),
             "--best-effort" => a.best_effort = true,
             "-h" | "--help" => return Ok(None),
             // A bare JSON argument (the Codex CLI `notify` hook passes one).
@@ -228,9 +231,35 @@ fn main() -> ExitCode {
     } else {
         None
     };
+    // A timer request rides the same delivery: the engine recognizes the
+    // thread and starts the countdown instead of showing a notification.
+    if let Some(spec) = args.timer.clone() {
+        let (ms, label) = match parse_duration(&spec) {
+            Some(v) => v,
+            None => return fail(format!("could not read the duration: {spec}"), args.best_effort),
+        };
+        let body = serde_json::json!({
+            "source": "notchforge",
+            "kind": "Info",
+            "thread": "notchforge-timer",
+            "title": label,
+            "body": ms.to_string(),
+        })
+        .to_string();
+        return deliver(&args, &body);
+    }
     let body = match build_body(&args, stdin.as_deref()) {
         Ok(b) => b.to_string(),
         Err(e) => return fail(e, args.best_effort),
+    };
+    deliver(&args, &body)
+}
+
+/// Send the body through the transports (HTTP, socket, inbox).
+fn deliver(args: &Args, body: &str) -> ExitCode {
+    let fail = |msg: String, best_effort: bool| {
+        eprintln!("notchforge-notify: {msg}");
+        if best_effort { ExitCode::SUCCESS } else { ExitCode::FAILURE }
     };
     let port =
         args.port.or_else(|| std::env::var("NOTCHFORGE_PORT").ok().and_then(|p| p.parse().ok())).unwrap_or(47815);
@@ -240,17 +269,60 @@ fn main() -> ExitCode {
         query.push(format!("source={}", percent_encode(s)));
     }
     let query = if query.is_empty() { String::new() } else { format!("?{}", query.join("&")) };
-
-    let http = send_http(port, token.as_deref(), &query, &body);
+    let http = send_http(port, token.as_deref(), &query, body);
     if http.is_ok() {
         return ExitCode::SUCCESS;
     }
-    if send_socket(&body).is_ok() {
+    if send_socket(body).is_ok() {
         return ExitCode::SUCCESS;
     }
-    match append_inbox(&body) {
+    match append_inbox(body) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => fail(format!("could not deliver ({}; inbox: {e})", http.err().unwrap_or_default()), args.best_effort),
+    }
+}
+
+/// "25m" / "1h30m" / "90s" / "25 min" → (ms, label).
+fn parse_duration(spec: &str) -> Option<(i64, String)> {
+    let mut total = 0i64;
+    let mut parts = Vec::new();
+    let mut num = String::new();
+    let mut unit = String::new();
+    let mut found = false;
+    for c in spec.chars().chain(std::iter::once(' ')) {
+        if c.is_ascii_digit() {
+            if !unit.is_empty() {
+                let (ms, name) = push_part(&num, &unit)?;
+                total += ms;
+                parts.push(format!("{num}{name}"));
+                num.clear();
+                unit.clear();
+            }
+            num.push(c);
+        } else if c.is_alphabetic() {
+            unit.push(c);
+        } else if !num.is_empty() && !unit.is_empty() {
+            let (ms, name) = push_part(&num, &unit)?;
+            total += ms;
+            parts.push(format!("{num}{name}"));
+            num.clear();
+            unit.clear();
+            found = true;
+        }
+    }
+    if !found && total == 0 {
+        return None;
+    }
+    Some((total, parts.join(" ")))
+}
+
+fn push_part(num: &str, unit: &str) -> Option<(i64, &'static str)> {
+    let n: i64 = num.parse().ok()?;
+    match unit.trim_start().to_lowercase().as_str() {
+        u if u.starts_with('h') => Some((n * 3_600_000, "h")),
+        u if u.starts_with('m') => Some((n * 60_000, "m")),
+        u if u.starts_with('s') => Some((n * 1_000, "s")),
+        _ => None,
     }
 }
 
@@ -267,6 +339,16 @@ mod tests {
         assert_eq!(v["hook_event_name"], "Stop");
         assert!(build_body(&Args::default(), None).is_err());
         assert!(build_body(&Args::default(), Some("[1]")).is_err());
+    }
+
+    #[test]
+    fn timer_specs_parse() {
+        assert_eq!(parse_duration("25m"), Some((25 * 60_000, "25m".into())));
+        assert_eq!(parse_duration("1h30m"), Some((90 * 60_000, "1h 30m".into())));
+        assert_eq!(parse_duration("90s"), Some((90_000, "90s".into())));
+        assert_eq!(parse_duration("25 min"), Some((25 * 60_000, "25m".into())));
+        assert_eq!(parse_duration("banana"), None);
+        assert_eq!(parse_duration(""), None);
     }
 
     #[test]

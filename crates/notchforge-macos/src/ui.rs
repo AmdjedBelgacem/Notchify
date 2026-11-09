@@ -180,19 +180,22 @@ impl Palette {
     /// gradients that are drawn as raw colours.
     pub fn for_theme(high_contrast: bool, accent: &str) -> Self {
         let (s, t) = if high_contrast { (0.85, 0.7) } else { (0.62, 0.42) };
-        let accent_color = match accent {
-            "sunset" => rgba(1.0, 0.45, 0.18, 1.0),
-            "ocean" => rgba(0.25, 0.62, 1.0, 1.0),
-            "violet" => rgba(0.62, 0.4, 1.0, 1.0),
-            "forest" => rgba(0.3, 0.8, 0.5, 1.0),
-            _ => NSColor::controlAccentColor(),
-        };
-        let accent_rgb = match accent {
-            "sunset" => (1.0, 0.45, 0.18),
-            "ocean" => (0.25, 0.62, 1.0),
-            "violet" => (0.62, 0.4, 1.0),
-            "forest" => (0.3, 0.8, 0.5),
-            _ => (1.0, 0.62, 0.04), // the board's orange
+        fn hex(h: &str) -> Option<(f64, f64, f64)> {
+            let h = h.trim_start_matches('#');
+            if h.len() != 6 || !h.chars().all(|c| c.is_ascii_hexdigit()) {
+                return None;
+            }
+            let v = |i: usize| -> Option<f64> { Some(u8::from_str_radix(&h[i..i + 2], 16).ok()? as f64 / 255.0) };
+            Some((v(0)?, v(2)?, v(4)?))
+        }
+        let custom = accent.strip_prefix('#').and_then(hex);
+        let (accent_color, accent_rgb) = match (custom, accent) {
+            (Some((r, g, b)), _) => (rgba(r, g, b, 1.0), (r, g, b)),
+            (None, "sunset") => (rgba(1.0, 0.45, 0.18, 1.0), (1.0, 0.45, 0.18)),
+            (None, "ocean") => (rgba(0.25, 0.62, 1.0, 1.0), (0.25, 0.62, 1.0)),
+            (None, "violet") => (rgba(0.62, 0.4, 1.0, 1.0), (0.62, 0.4, 1.0)),
+            (None, "forest") => (rgba(0.3, 0.8, 0.5, 1.0), (0.3, 0.8, 0.5)),
+            _ => (NSColor::controlAccentColor(), (1.0, 0.62, 0.04)), // the board's orange
         };
         Self {
             primary: rgba(1.0, 1.0, 1.0, 0.96),

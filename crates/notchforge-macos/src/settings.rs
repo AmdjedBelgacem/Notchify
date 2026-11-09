@@ -1317,6 +1317,8 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 Some("Settings are stored in a TOML file you can edit by hand."),
                 None,
                 vec![
+                    ("Export…", false, Box::new(app::export_config)),
+                    ("Import…", false, Box::new(app::import_config)),
                     ("Open Config File", false, Box::new(app::open_config_file)),
                     ("Open Logs", false, Box::new(app::open_logs)),
                     (
@@ -1366,6 +1368,18 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 ACCENTS.iter().position(|a| *a == c.appearance.accent).unwrap_or(0),
                 move |cfg, i| cfg.appearance.accent = ACCENTS[i].to_owned(),
             );
+            form.text(
+                "Custom accent (hex)",
+                &c.appearance.accent,
+                "#5A8DFF",
+                true,
+                |cfg, v| {
+                    if v.starts_with('#') {
+                        cfg.appearance.accent = v;
+                    }
+                },
+            );
+            form.note("A hex colour becomes the accent; empty presets win only when the field is not a hex value. The popup switches back to a preset.");
         }
         Pane::Notifications => {
             form.begin("Behaviour");
@@ -1809,6 +1823,36 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 Some("Turns Focus on 15 minutes before a calendar meeting and off when it ends."),
                 c.controls.auto_focus_meetings,
                 |cfg, on| cfg.controls.auto_focus_meetings = on,
+            );
+            const HOURS: [&str; 25] = [
+                "off", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
+                "17", "18", "19", "20", "21", "22", "23",
+            ];
+            let (from, to) = c.controls.focus_schedule.unwrap_or((0, 0));
+            let to_idx = |h: u8| if c.controls.focus_schedule.is_none() { 0 } else { h as usize + 1 };
+            let f0 = from;
+            let t0 = to;
+            form.popup(
+                "Focus from",
+                &HOURS,
+                to_idx(f0),
+                {
+                    let to = t0;
+                    move |cfg, i| {
+                        cfg.controls.focus_schedule = if i == 0 { None } else { Some((i as u8 - 1, to)) };
+                    }
+                },
+            );
+            form.popup(
+                "Focus until",
+                &HOURS,
+                to_idx(t0),
+                {
+                    let from = f0;
+                    move |cfg, i| {
+                        cfg.controls.focus_schedule = if i == 0 { None } else { Some((from, i as u8 - 1)) };
+                    }
+                },
             );
             form.begin("Focus");
             form.text("“Focus on” shortcut", &c.controls.focus_on_shortcut, "Shortcut name", false, |cfg, v| {

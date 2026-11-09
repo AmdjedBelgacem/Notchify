@@ -175,6 +175,8 @@ struct SessionInfo {
     ended_ms: Option<i64>,
     /// The agent, for sessions known only from their hooks (no token log).
     hook_agent: Option<UsageAgent>,
+    /// The session's working directory, for the git branch in the wing.
+    dir: Option<String>,
 }
 
 impl SessionInfo {
@@ -359,6 +361,19 @@ fn agent_key(agent: UsageAgent) -> &'static str {
         UsageAgent::Gemini => "gemini",
         UsageAgent::Qoder => "qoder",
         UsageAgent::Antigravity => "antigravity",
+    }
+}
+
+/// Published list prices (USD per million tokens), in / out. Rough by
+/// design: they drift and blends differ; the figure is an estimate.
+fn agent_rates(agent: UsageAgent) -> (f64, f64) {
+    match agent {
+        UsageAgent::ClaudeCode => (3.0, 15.0),
+        UsageAgent::Codex => (1.25, 10.0),
+        UsageAgent::OpenCode => (3.0, 15.0),
+        UsageAgent::Gemini => (1.25, 10.0),
+        UsageAgent::Qoder => (1.0, 5.0),
+        UsageAgent::Antigravity => (2.0, 12.0),
     }
 }
 
@@ -868,6 +883,16 @@ impl Scanner {
         list.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.project.cmp(&b.project)));
         list.truncate(TOP_SESSIONS);
         out.sessions = list;
+        // The blend matters: each record costs at its agent's list rates.
+        let mut cents = 0u64;
+        for r in self.records.values() {
+            if r.ts_ms < start_ms {
+                continue;
+            }
+            let (in_rate, out_rate) = agent_rates(r.agent);
+            cents += r.counts.estimated_cost_cents(in_rate, out_rate);
+        }
+        out.cost_cents = cents;
         out
     }
 
@@ -964,6 +989,7 @@ impl Scanner {
                         // (the transcript's last write lands just after it).
                         working: now_ms - s.last_ms <= RUNNING_MS && s.stopped_ms.is_none_or(|t| s.last_ms > t + 5_000),
                         model: model_label(&s.model),
+                        dir: s.dir.clone(),
                         started_ms: s.first_ms,
                         turn_started_ms: s.turn_start_ms,
                         last_ms: s.last_ms,

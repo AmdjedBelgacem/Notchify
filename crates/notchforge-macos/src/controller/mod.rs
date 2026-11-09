@@ -181,6 +181,17 @@ pub struct Controller {
     observers: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>>,
 }
 
+/// The local hour of day (0–23).
+fn local_hour(now_ms: i64) -> u8 {
+    // SAFETY: localtime_r works on caller-owned structs.
+    unsafe {
+        let t = (now_ms / 1000) as libc::time_t;
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        tm.tm_hour.clamp(0, 23) as u8
+    }
+}
+
 fn timings(cfg: &Config) -> Timings {
     Timings {
         hover_intent: Duration::from_millis(cfg.general.hover_delay_ms),
@@ -1513,6 +1524,13 @@ impl Controller {
         self.panel.makeFirstResponder(Some(&field));
     }
 
+    /// The reply bar's field, for the canned-reply chips.
+    pub fn reply_field_for_canned(&self) -> Retained<objc2_app_kit::NSTextField> {
+        let field = self.views.borrow().expanded.reply_field();
+        self.panel.makeFirstResponder(Some(&field));
+        field
+    }
+
     /// Deliver the typed reply through the native banner's own field. When the
     /// banner is gone, fall back to bringing the app forward.
     pub fn send_reply(&self) {
@@ -1695,7 +1713,7 @@ impl Controller {
     /// the ones who turned it on.
     fn auto_focus_meeting(&self, snap: &Snapshot) {
         let cfg = self.config.borrow().clone();
-        if !cfg.controls.auto_focus_meetings {
+        if !cfg.controls.auto_focus_meetings && cfg.controls.focus_schedule.is_none() {
             return;
         }
         let now = now_ms();
@@ -1703,7 +1721,23 @@ impl Controller {
             .calendar
             .events
             .iter()
-            .any(|e| now + 15 * 60_000 >= e.starts_at_ms && now <= e.ends_at_ms);
+            .any(|e| now + 15 * 60_000 >= e.starts_at_ms && now <= e.ends_at_ms)
+            || cfg
+                .controls
+                .focus_schedule
+                .map(|(from, to)| {
+                    if from == to {
+                        return false;
+                    }
+                    // Local hour of day; a window may span midnight.
+                    let hour = local_hour(now);
+                    if from < to {
+                        (from..to).contains(&hour)
+                    } else {
+                        hour >= from || hour < to
+                    }
+                })
+                .unwrap_or(false);
         if in_meeting == self.meeting_focus.get() {
             return;
         }

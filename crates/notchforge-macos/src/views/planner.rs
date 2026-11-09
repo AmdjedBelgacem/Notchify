@@ -96,6 +96,7 @@ pub struct PlannerPage {
     plans_head: Retained<FlippedView>,
     plan_rows: Retained<FlippedView>,
     plan_field: Retained<NSTextField>,
+    pomodoro_label: Retained<NSTextField>,
     notes_tile: Retained<FlippedView>,
     note_text: Retained<NSTextView>,
     note_hint: Retained<NSTextField>,
@@ -142,8 +143,11 @@ impl PlannerPage {
         }
         field_box.addSubview(&symbol_view(mtm, "plus", 10.0, &white(0.6), rect(8.0, 9.0, 12.0, 12.0), ""));
         let plan_field = NSTextField::textFieldWithString(&ns(""), mtm);
-        plan_field.setFrame(rect(24.0, 6.0, module_w - 2.0 * INSET - 28.0, 18.0));
+        plan_field.setFrame(rect(24.0, 6.0, module_w - 2.0 * INSET - 150.0, 18.0));
         plan_field.setPlaceholderString(Some(&ns("Add a plan")));
+        let pomodoro_label = label(mtm, "", &font(11.0, Weight::Medium), &p.secondary, rect(module_w - 2.0 * INSET - 130.0, 6.0, 110.0, 16.0));
+        pomodoro_label.setAlignment(NSTextAlignment::Right);
+        field_box.addSubview(&pomodoro_label);
         plan_field.setBordered(false);
         plan_field.setBezeled(false);
         plan_field.setDrawsBackground(false);
@@ -206,6 +210,7 @@ impl PlannerPage {
             plans_head,
             plan_rows,
             plan_field,
+            pomodoro_label,
             notes_tile,
             note_text,
             note_hint,
@@ -273,6 +278,12 @@ impl PlannerPage {
         self.done.borrow_mut().retain(|id| cal.reminders.iter().any(|r| &r.id == id));
         self.render_day(cal, snap.now_ms);
         self.render_plans(cal, snap.now_ms);
+        if snap.pomodoro_rounds > 0 {
+            crate::ui::set_text(
+                &self.pomodoro_label,
+                &format!("{} pomodoro{} today", snap.pomodoro_rounds, if snap.pomodoro_rounds == 1 { "" } else { "s" }),
+            );
+        }
     }
 
     /// A plan was added here: show it until Reminders lists it.

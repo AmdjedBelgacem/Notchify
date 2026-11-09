@@ -737,6 +737,32 @@ impl ExpandedView {
             reply_field.setAction(Some(crate::ui::ActionTarget::action()));
         }
         reply_bar.addSubview(&reply_field);
+        // Canned replies: one tap drops the common answer into the field.
+        for (i, canned) in ["👍", "🙏", "✅"].iter().enumerate() {
+            let tip = format!("Quick reply: {canned}");
+            let canned = canned.to_string();
+            let t = reply_targets.add(mtm, move |_| {
+                crate::app::with_controller(|c| {
+                    let field = c.reply_field_for_canned();
+                    let current = field.stringValue().to_string();
+                    crate::ui::set_text(&field, &format!("{current}{canned}"));
+                });
+            });
+            let chip = symbol_button(
+                mtm,
+                match i {
+                    0 => "hand.thumbsup.fill",
+                    1 => "hand.wave.fill",
+                    _ => "checkmark.circle.fill",
+                },
+                11.0,
+                &tip,
+                &p.secondary,
+                &t,
+                rect(258.0 + i as f64 * 26.0, 5.0, 22.0, 18.0),
+            );
+            reply_bar.addSubview(&chip);
+        }
         let send = pill_button(
             mtm,
             "Send",
@@ -1490,10 +1516,20 @@ impl ExpandedView {
         let overlay = click_overlay(mtm, &open, rect(0.0, 0.0, w, frame.size.height), &format!("Open {}", n.title));
         let text = n.plain_text();
         let eng = self.engine.clone();
+        let eng2 = self.engine.clone();
+        let rule = n.app.rule_key();
+        let app_name = n.app.display_name.clone();
         let entries: Vec<(&str, Action)> = vec![
             ("Open", Box::new(open_fn2)),
             ("Copy", Box::new(move || crate::sharing::copy_text(&text))),
             ("Dismiss", Box::new(move || eng.send(Command::DismissNotification(id)))),
+            (
+                "Never show this app",
+                Box::new(move || {
+                    eng2.send(Command::MuteApp(rule.clone()));
+                    tracing::info!(app = %app_name, "app muted from the notification row");
+                }),
+            ),
         ];
         // SAFETY: the menu's targets are kept alive by `row_targets`.
         unsafe { overlay.setMenu(Some(&self.menu(entries))) };

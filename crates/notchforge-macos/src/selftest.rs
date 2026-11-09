@@ -1254,6 +1254,7 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
             session("website", UsageAgent::ClaudeCode, "Sonnet 5.5", 52, 31_000),
             session("kolchihna", UsageAgent::OpenCode, "Nemotron 3.5", 41, 23_000),
         ],
+        cost_cents: 12_300,
     };
     AgentUsage {
         loaded: true,
@@ -1301,6 +1302,7 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
                     last_ms: now - 12_000,
                     recent_turns: vec![150, 230, 110, 400, 210, 190, 280, 240],
                     activity: Some("Running cargo test".into()),
+                    dir: None,
                 },
                 RunningSession {
                     agent: UsageAgent::Codex,
@@ -1314,6 +1316,7 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
                     last_ms: now - 5_000,
                     recent_turns: vec![280, 320, 300, 260],
                     activity: Some("Editing auth.rs".into()),
+                    dir: None,
                 },
                 RunningSession {
                     agent: UsageAgent::OpenCode,
@@ -1327,6 +1330,7 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
                     last_ms: now - 20_000,
                     recent_turns: vec![460, 520, 480],
                     activity: Some("Running npm test".into()),
+                    dir: None,
                 },
             ]
         },
