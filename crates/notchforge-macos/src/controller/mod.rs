@@ -134,6 +134,12 @@ pub struct Controller {
     wing_override: Cell<(u8, i64)>,
     /// Re-checks menu bar occupancy while the wings are visible.
     wing_timer: RefCell<Option<Retained<NSTimer>>>,
+    /// Watches the Desktop so screenshots land in the tray.
+    screenshot_watcher: RefCell<crate::screenshots::Watcher>,
+    /// Set while auto-focus turned Focus on for a meeting (so it comes off
+    /// when the meeting ends, and only if we were the ones turning it on).
+    meeting_focus: Cell<bool>,
+    screenshot_timer: RefCell<Option<Retained<NSTimer>>>,
     /// Set while a pass-through click's synthetic down/up is in flight, so the
     /// global monitor ignores our own events.
     repost_click: Cell<bool>,
@@ -237,7 +243,7 @@ impl Controller {
         }
         let panel = NotchPanel::create(mtm, frame, &root);
         let shape = layout.shape(LayoutKind::Collapsed);
-        let palette = Palette::new(config.appearance.high_contrast || system_increase_contrast());
+        let palette = Palette::for_theme(config.appearance.high_contrast || system_increase_contrast(), &config.appearance.accent);
 
         let this = Rc::new(Self {
             mtm,
@@ -260,6 +266,9 @@ impl Controller {
             wing_chevrons: Cell::new(0),
             wing_override: Cell::new((0, 0)),
             wing_timer: RefCell::new(None),
+            screenshot_watcher: RefCell::new(crate::screenshots::Watcher::new(now_ms())),
+            meeting_focus: Cell::new(false),
+            screenshot_timer: RefCell::new(None),
             repost_click: Cell::new(false),
             ax_note_logged: Cell::new(false),
             reply_to: RefCell::new(None),
@@ -960,7 +969,7 @@ impl Controller {
 
     fn rebuild_views(&self) {
         let cfg = self.config.borrow().clone();
-        *self.palette.borrow_mut() = Palette::new(cfg.appearance.high_contrast || system_increase_contrast());
+        *self.palette.borrow_mut() = Palette::for_theme(cfg.appearance.high_contrast || system_increase_contrast(), &cfg.appearance.accent);
         for v in self.views.borrow().all() {
             v.removeFromSuperview();
         }
@@ -1302,6 +1311,38 @@ impl Controller {
 
     /// Re-render the music page from the current snapshot (after a local
     /// choice such as switching the playlist source).
+    /// The magnifier toggled the search overlay; opening focuses the field.
+    pub fn media_search_toggled(&self, opening: bool) {
+        self.views.borrow().expanded.media.set_search_open(opening);
+    }
+
+    /// Enter in the search field: find it on YouTube (off-thread), show the
+    /// results on the main thread.
+    pub fn media_do_search(&self) {
+        let query = self.views.borrow().expanded.media.search_query();
+        let query = query.trim().to_owned();
+        if query.is_empty() {
+            return;
+        }
+        tracing::info!(query, "searching YouTube from the notch");
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("search runtime");
+            let http = reqwest::Client::builder()
+                .user_agent(concat!("NotchForge/", env!("CARGO_PKG_VERSION")))
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .expect("http");
+            let results = rt.block_on(notchforge_providers::media::youtube::search_list(&http, &query));
+            dispatch2::DispatchQueue::main().exec_async(move || {
+                crate::app::with_controller(|c| c.media_search_done(results));
+            });
+        });
+    }
+
+    pub fn media_search_done(&self, results: Vec<notchforge_core::model::UpNextVideo>) {
+        self.views.borrow().expanded.media.set_search_results(results);
+    }
+
     /// The sources bar pinned a player: the music page follows it.
     pub fn media_pin_source(&self, player: MediaPlayer) {
         self.views.borrow().expanded.show_tab(crate::views::expanded::Tab::Media);
@@ -1360,6 +1401,37 @@ impl Controller {
         self.native_drag.set(false);
         self.handle(Event::DragExited);
         self.views.borrow().expanded.set_drop_highlight(false);
+    }
+
+    /// Every few seconds: shelve the Desktop's new screenshots.
+    fn poll_screenshots(&self) {
+        if !self.config.borrow().tray.screenshots {
+            if let Some(t) = self.screenshot_timer.borrow_mut().take() {
+                t.invalidate();
+            }
+            return;
+        }
+        let found = self.screenshot_watcher.borrow_mut().scan();
+        if !found.is_empty() {
+            tracing::info!(count = found.len(), "screenshots shelved into the tray");
+            self.files_dropped(found);
+        }
+    }
+
+    /// Start (or restart) the screenshot watcher; the poll stops itself when
+    /// the config turns it off.
+    pub fn start_screenshot_timer(&self) {
+        if self.screenshot_timer.borrow().is_some() {
+            return;
+        }
+        let block = RcBlock::new(|_t: NonNull<NSTimer>| {
+            crate::app::with_controller(|c| c.poll_screenshots());
+        });
+        // SAFETY: documented NSTimer API; the block is copied by the timer.
+        let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(5.0, true, &block) };
+        // SAFETY: valid timer and run loop.
+        unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes) };
+        *self.screenshot_timer.borrow_mut() = Some(timer);
     }
 
     pub fn files_dropped(&self, paths: Vec<PathBuf>) {
@@ -1594,6 +1666,7 @@ impl Controller {
             self.last_playing_ms.set(now_ms());
         }
         self.sync_calls(&snap);
+        self.auto_focus_meeting(&snap);
         self.render_small(&snap);
         self.refresh_wing_mask();
         self.sync_mirrors(&snap);
@@ -1603,6 +1676,43 @@ impl Controller {
         self.expanded_dirty.set(true);
         if self.kind.get() == LayoutKind::Expanded {
             self.render_expanded(false);
+        }
+    }
+
+    /// While a meeting is in its join window, keep Focus on (the same 15
+    /// minutes the Join pill shows); when it ends, hand Focus back if we were
+    /// the ones who turned it on.
+    fn auto_focus_meeting(&self, snap: &Snapshot) {
+        let cfg = self.config.borrow().clone();
+        if !cfg.controls.auto_focus_meetings {
+            return;
+        }
+        let now = now_ms();
+        let in_meeting = snap
+            .calendar
+            .events
+            .iter()
+            .any(|e| now + 15 * 60_000 >= e.starts_at_ms && now <= e.ends_at_ms);
+        if in_meeting == self.meeting_focus.get() {
+            return;
+        }
+        let on = crate::controls::focus::toggle(
+            Some(in_meeting),
+            &cfg.controls.focus_on_shortcut,
+            &cfg.controls.focus_off_shortcut,
+        );
+        match on {
+            Ok(_) => {
+                tracing::info!(focus_on = in_meeting, "auto-focus follows the calendar meeting");
+                self.meeting_focus.set(in_meeting);
+            }
+            Err(e) => {
+                // The shortcuts are not set up: give up until the config or
+                // the calendar changes, and say so once.
+                if !self.meeting_focus.get() {
+                    tracing::warn!(error = %e, "auto-focus could not run the Focus shortcuts");
+                }
+            }
         }
     }
 

@@ -20,12 +20,27 @@ impl MediaPage {
     }
 
     pub(super) fn render_playlists(&self, media: &MediaState) {
+        let (searching, show_lyrics) = {
+            let st = self.state.borrow();
+            (st.searching, st.show_lyrics)
+        };
         let player = self.list_player(media);
-        seg_style(&self.seg_spotify, "Spotify", player == MediaPlayer::Spotify);
-        seg_style(&self.seg_music, "Music", player == MediaPlayer::Music);
-        seg_style(&self.seg_up_next, "Up next", player == MediaPlayer::Browser);
+        seg_style(&self.seg_spotify, "Spotify", !searching && !show_lyrics && player == MediaPlayer::Spotify);
+        seg_style(&self.seg_music, "Music", !searching && !show_lyrics && player == MediaPlayer::Music);
+        seg_style(&self.seg_up_next, "Up next", !searching && !show_lyrics && player == MediaPlayer::Browser);
+        seg_style(&self.seg_lyrics, "Lyrics", show_lyrics && !searching);
         self.seg_up_next.setEnabled(!media.up_next.is_empty());
 
+        if searching {
+            self.render_search();
+            return;
+        }
+        self.search_field.setHidden(true);
+        self.list_scroll.setFrame(rect(6.0, 48.0, self.list_width, self.list_height()));
+        if show_lyrics {
+            self.render_lyrics(media);
+            return;
+        }
         // The Up next list replaces the playlist table while a YouTube video
         // is the featured track.
         if player == MediaPlayer::Browser {
@@ -320,5 +335,189 @@ impl MediaPage {
             self.list_doc.addSubview(&row);
         }
         self.list_doc.scrollPoint(NSPoint::new(0.0, 0.0));
+    }
+
+    /// The lyrics of the featured track; the tick keeps the playing line lit.
+    fn render_lyrics(&self, media: &MediaState) {
+        let mtm = self.mtm;
+        let lyrics = media.lyrics.clone();
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        if let Some(l) = &lyrics {
+            for (ms, line) in &l.lines {
+                ms.hash(&mut h);
+                line.hash(&mut h);
+            }
+            l.plain.hash(&mut h);
+        }
+        let key = h.finish();
+        {
+            let st = self.state.borrow();
+            if st.lyrics_key == key {
+                return;
+            }
+        }
+        {
+            let mut st = self.state.borrow_mut();
+            st.lyrics_key = key;
+            st.lyric_rows.clear();
+            st.lyric_labels.clear();
+            st.lyric_active = -1;
+            st.lyrics = lyrics.clone();
+        }
+        self.row_targets.clear();
+        remove_all_subviews(&self.list_doc);
+        self.list_message.setHidden(true);
+        self.list_action.setHidden(true);
+        let lines: &[(i64, String)] = lyrics.as_ref().map(|l| l.lines.as_slice()).unwrap_or(&[]);
+        if lines.is_empty() {
+            self.list_scroll.setHidden(true);
+            set_text(&self.list_message, "No lyrics found for this track.");
+            self.list_message.setHidden(false);
+            return;
+        }
+        self.list_scroll.setHidden(false);
+        let w = self.list_width;
+        let visible_h = self.list_height();
+        let row_h = 30.0_f64.min((visible_h / lines.len() as f64).max(20.0));
+        let doc_h = (lines.len() as f64 * row_h).max(visible_h);
+        self.list_doc.setFrame(rect(0.0, 0.0, w, doc_h));
+        let dim = rgba(1.0, 1.0, 1.0, 0.45);
+        let plain = lyrics.as_ref().is_some_and(|l| l.plain);
+        for (i, (ms, line)) in lines.iter().enumerate() {
+            let is_gap = line.trim().is_empty() || line.trim().chars().all(|c| matches!(c, '♪' | '♫'));
+            let text = if is_gap { "· · ·".to_owned() } else { line.clone() };
+            let lbl = label(
+                mtm,
+                &text,
+                &font(if plain { 12.5 } else { 13.0 }, Weight::Medium),
+                &dim,
+                rect(16.0, i as f64 * row_h, w - 32.0, row_h),
+            );
+            lbl.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByWordWrapping);
+            lbl.setMaximumNumberOfLines(2);
+            self.list_doc.addSubview(&lbl);
+            let mut st = self.state.borrow_mut();
+            st.lyric_rows.push((*ms, i));
+            st.lyric_labels.push(lbl.clone());
+        }
+        self.list_doc.scrollPoint(NSPoint::new(0.0, 0.0));
+    }
+
+    /// Light the lyric line that is playing right now (runs at 1 Hz).
+    pub(super) fn tick_lyrics(&self) {
+        let (lyrics, rows, active) = {
+            let st = self.state.borrow();
+            (st.lyrics.clone(), st.lyric_rows.clone(), st.lyric_active)
+        };
+        let Some(lyrics) = lyrics else { return };
+        let Some(n) = self.state.borrow().now.clone() else { return };
+        let position_ms = (n.position_at(now_ms()).unwrap_or(0.0) * 1000.0).round() as i64;
+        let want = if lyrics.plain { -1 } else { lyrics.line_at(position_ms).map(|i| i as isize).unwrap_or(-1) };
+        if want == active {
+            return;
+        }
+        self.state.borrow_mut().lyric_active = want;
+        let lit = rgba(1.0, 1.0, 1.0, 1.0);
+        let dim = rgba(1.0, 1.0, 1.0, 0.45);
+        let row_h = 30.0_f64.min((self.list_height() / rows.len().max(1) as f64).max(20.0));
+        for (i, (_at, row_index)) in rows.iter().enumerate() {
+            let Some(lbl) = self.state.borrow().lyric_labels.get(*row_index).cloned() else { continue };
+            let on = i as isize == want;
+            lbl.setTextColor(Some(if on { &lit } else { &dim }));
+            if on {
+                let y = i as f64 * row_h;
+                self.list_doc.scrollPoint(NSPoint::new(0.0, (y - row_h * 2.0).max(0.0)));
+            }
+        }
+    }
+
+    /// The search overlay: a field above the list, results as rows.
+    fn render_search(&self) {
+        let mtm = self.mtm;
+        self.list_message.setHidden(true);
+        self.list_action.setHidden(true);
+        self.search_field.setHidden(false);
+        // The list slides under the field.
+        let lh = self.list_height() - 30.0;
+        self.list_scroll.setFrame(rect(6.0, 76.0, self.list_width, lh));
+        let results = self.state.borrow().search_results.clone();
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for v in &results {
+            v.url.hash(&mut h);
+        }
+        let key = h.finish();
+        if self.state.borrow().playlists_key == key {
+            return;
+        }
+        self.state.borrow_mut().playlists_key = key;
+        self.row_targets.clear();
+        remove_all_subviews(&self.list_doc);
+        if results.is_empty() {
+            self.list_scroll.setHidden(true);
+            set_text(&self.list_message, "Type and press Enter to search YouTube.");
+            self.list_message.setHidden(false);
+            return;
+        }
+        self.list_scroll.setHidden(false);
+        let w = self.list_width;
+        let visible_h = lh;
+        let row_h = if results.len() as f64 >= VISIBLE_ROWS {
+            visible_h / VISIBLE_ROWS
+        } else {
+            (visible_h / results.len() as f64).min(MAX_ROW_H)
+        };
+        let doc_h = (results.len() as f64 * row_h).max(visible_h);
+        self.list_doc.setFrame(rect(0.0, 0.0, w, doc_h));
+        for (i, v) in results.iter().enumerate() {
+            let row = shape_view(self.mtm, rect(0.0, i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
+            let cy = (row_h - 40.0) / 2.0;
+            let cover = shape_view(mtm, rect(8.0, cy, 40.0, 40.0), &rgb8(MediaPlayer::Browser.color()), 8.0);
+            cover.addSubview(&symbol_view(
+                mtm,
+                "play.fill",
+                15.0,
+                &rgba(1.0, 1.0, 1.0, 0.92),
+                rect(11.0, 11.0, 18.0, 18.0),
+                &v.title,
+            ));
+            row.addSubview(&cover);
+            let ty = (row_h - 33.0) / 2.0;
+            row.addSubview(&label(
+                mtm,
+                &v.title,
+                &font(13.0, Weight::Medium),
+                &self.p.primary,
+                rect(58.0, ty, w - 66.0, 18.0),
+            ));
+            row.addSubview(&label(
+                mtm,
+                &v.author,
+                &font(11.5, Weight::Regular),
+                &rgba(1.0, 1.0, 1.0, 0.74),
+                rect(58.0, ty + 18.0, w - 66.0, 15.0),
+            ));
+            let url = v.url.clone();
+            let t = self.row_targets.add(mtm, move |_| {
+                glue::control(MediaPlayer::Browser, MediaAction::Navigate(url.clone()));
+                crate::app::with_controller(|c| c.media_search_toggled(false));
+            });
+            row.addSubview(&click_overlay(mtm, &t, rect(0.0, 0.0, w, row_h), &format!("Play {}", v.title)));
+            set_accessibility_label(&row, &format!("Play {}, {}", v.title, v.author));
+            self.list_doc.addSubview(&row);
+        }
+        self.list_doc.scrollPoint(NSPoint::new(0.0, 0.0));
+    }
+
+    /// Close the search overlay and show the library again.
+    pub(super) fn close_search(&self) {
+        {
+            let mut st = self.state.borrow_mut();
+            st.searching = false;
+            st.search_results.clear();
+            st.playlists_key = 0;
+        }
+        self.search_field.setHidden(true);
+        self.list_scroll.setFrame(rect(6.0, 48.0, self.list_width, self.list_height()));
+        crate::app::with_controller(|c| c.media_rerender());
     }
 }

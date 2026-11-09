@@ -32,6 +32,7 @@ use crate::ui::{
 use notchforge_core::engine::Snapshot;
 use notchforge_core::model::{
     AudioState, MediaAction, MediaPlayer, MediaState, NowPlaying, PlaybackState, Playlist, PlaylistStatus,
+    UpNextVideo,
 };
 use notchforge_core::provider::ProviderCommand;
 use notchforge_core::time::now_ms;
@@ -106,6 +107,20 @@ struct PageState {
     art_path: Option<PathBuf>,
     playlists_key: u64,
     sources_key: u64,
+    /// The Lyrics view is showing (instead of playlists / up next).
+    show_lyrics: bool,
+    /// The search field is open; results replace the list.
+    searching: bool,
+    search_results: Vec<UpNextVideo>,
+    /// Lyrics rows as built: (start ms, row index) for the tick's highlight.
+    lyric_rows: Vec<(i64, usize)>,
+    /// The row labels, parallel to `lyric_rows`, for retinting.
+    lyric_labels: Vec<Retained<NSTextField>>,
+    /// The lyrics being shown (cloned for the tick's position math).
+    lyrics: Option<notchforge_core::model::Lyrics>,
+    /// Highlighted lyrics row (-1 = none).
+    lyric_active: isize,
+    lyrics_key: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -164,6 +179,8 @@ pub struct MediaPage {
     seg_spotify: Retained<NSButton>,
     seg_up_next: Retained<NSButton>,
     seg_music: Retained<NSButton>,
+    seg_lyrics: Retained<NSButton>,
+    search_field: Retained<NSTextField>,
     list_scroll: Retained<NSScrollView>,
     list_doc: Retained<FlippedView>,
     list_width: f64,
@@ -597,8 +614,8 @@ impl MediaPage {
             l.setCornerRadius(20.0);
             l.setMasksToBounds(true);
         }
-        // Three sources across the tile's width: there's no room for a title beside them.
-        let seg_w = (rw - 20.0 - 4.0) / 3.0;
+        // Four sources across the tile's width, plus the search toggle.
+        let seg_w = (rw - 20.0 - 4.0 - 26.0) / 4.0;
         let seg_track = shape_view(mtm, rect(10.0, 10.0, rw - 20.0, 28.0), &white(0.12), 14.0);
         let pick = |player: MediaPlayer| {
             let st = state.clone();
@@ -648,10 +665,71 @@ impl MediaPage {
             &t,
             rect(2.0 + 2.0 * seg_w, 2.0, seg_w, 24.0),
         );
+        let t = targets.add(mtm, {
+            let st = state.clone();
+            move |_: Option<&AnyObject>| {
+                let mut st = st.borrow_mut();
+                st.show_lyrics = !st.show_lyrics;
+                st.searching = false;
+                st.playlists_key = 0;
+                drop(st);
+                crate::app::with_controller(|c| c.media_rerender());
+            }
+        });
+        let seg_lyrics = pill_button(
+            mtm,
+            "Lyrics",
+            None,
+            &font(12.0, Weight::Semibold),
+            &p.primary,
+            &white(0.0),
+            12.0,
+            &t,
+            rect(2.0 + 3.0 * seg_w, 2.0, seg_w, 24.0),
+        );
+        let t = targets.add(mtm, {
+            let st = state.clone();
+            move |_: Option<&AnyObject>| {
+                let opening = {
+                    let mut st = st.borrow_mut();
+                    st.searching = !st.searching;
+                    st.show_lyrics = false;
+                    st.playlists_key = 0;
+                    st.searching
+                };
+                crate::app::with_controller(|c| c.media_search_toggled(opening));
+            }
+        });
+        let search_toggle = symbol_button(
+            mtm,
+            "magnifyingglass",
+            11.0,
+            "Play something from YouTube",
+            &p.secondary,
+            &t,
+            rect(rw - 20.0 - 26.0 + 4.0, 8.0, 20.0, 20.0),
+        );
+        // The field lives beside the segments and only shows while searching.
+        let search_target = crate::ui::ActionTarget::new(mtm, |_| {
+            crate::app::with_controller(|c| c.media_do_search());
+        });
+        let search_field = NSTextField::initWithFrame(NSTextField::alloc(mtm), rect(10.0, 40.0, rw - 20.0 - 34.0, 24.0));
+        // SAFETY: target kept alive by the caller (Targets).
+        unsafe {
+            search_field.setTarget(Some(search_target.as_any()));
+            search_field.setAction(Some(crate::ui::ActionTarget::action()));
+        }
+        search_field.setPlaceholderString(Some(&objc2_foundation::NSString::from_str(
+            "Search YouTube — Enter plays it here",
+        )));
+        search_field.setHidden(true);
         seg_track.addSubview(&seg_spotify);
         seg_track.addSubview(&seg_music);
         seg_track.addSubview(&seg_up_next);
+        seg_track.addSubview(&seg_lyrics);
         card.addSubview(&seg_track);
+        card.addSubview(&search_toggle);
+        card.addSubview(&search_field);
 
         let lh = ph - 48.0 - 6.0;
         let list_doc = FlippedView::new(mtm, rect(0.0, 0.0, rw - 12.0, lh));
@@ -733,6 +811,8 @@ impl MediaPage {
             seg_spotify,
             seg_up_next,
             seg_music,
+            seg_lyrics,
+            search_field,
             list_scroll,
             list_doc,
             list_width: rw - 12.0,
@@ -765,7 +845,53 @@ impl MediaPage {
     }
 
     /// Refresh the time-dependent bits (progress, clocks, play button).
+    /// The list area's height (the scroll view's frame when not searching).
+    pub(super) fn list_height(&self) -> f64 {
+        self.list_scroll.frame().size.height
+    }
+
+    /// Show or hide the search overlay; opening focuses the field.
+    pub fn set_search_open(&self, opening: bool) {
+        if !opening {
+            self.close_search();
+            return;
+        }
+        {
+            let mut st = self.state.borrow_mut();
+            st.searching = true;
+            st.search_results.clear();
+            st.playlists_key = 0;
+        }
+        self.list_scroll.setFrame(rect(6.0, 76.0, self.list_width, self.list_height() - 30.0));
+        self.list_scroll.setHidden(false);
+        self.list_message.setHidden(true);
+        self.list_action.setHidden(true);
+        let field = self.search_field.clone();
+        crate::app::with_controller(|c| {
+            c.panel.makeFirstResponder(Some(&field));
+        });
+    }
+
+    /// The text currently in the search field.
+    pub fn search_query(&self) -> String {
+        self.search_field.stringValue().to_string()
+    }
+
+    /// Search results came back: show them.
+    pub fn set_search_results(&self, results: Vec<UpNextVideo>) {
+        {
+            let mut st = self.state.borrow_mut();
+            st.searching = true;
+            st.search_results = results;
+            st.playlists_key = 0;
+        }
+        self.list_scroll.setHidden(false);
+        self.list_message.setHidden(true);
+        self.render_playlists(&notchforge_core::model::MediaState::default());
+    }
+
     pub fn tick(&self) {
+        self.tick_lyrics();
         let st = self.state.borrow();
         let Some(n) = st.now.as_ref() else { return };
         set_button_symbol(

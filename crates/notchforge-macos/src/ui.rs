@@ -161,6 +161,8 @@ pub fn rgb8((r, g, b): (u8, u8, u8)) -> Retained<NSColor> {
 #[derive(Clone)]
 pub struct Palette {
     pub primary: Retained<NSColor>,
+    /// The accent as raw components, for gradient layers.
+    pub accent_rgb: (f64, f64, f64),
     pub secondary: Retained<NSColor>,
     pub tertiary: Retained<NSColor>,
     pub accent: Retained<NSColor>,
@@ -171,12 +173,33 @@ pub struct Palette {
 
 impl Palette {
     pub fn new(high_contrast: bool) -> Self {
+        Self::for_theme(high_contrast, "system")
+    }
+
+    /// The palette with an accent theme applied. `accent_rgb` feeds the glow
+    /// gradients that are drawn as raw colours.
+    pub fn for_theme(high_contrast: bool, accent: &str) -> Self {
         let (s, t) = if high_contrast { (0.85, 0.7) } else { (0.62, 0.42) };
+        let accent_color = match accent {
+            "sunset" => rgba(1.0, 0.45, 0.18, 1.0),
+            "ocean" => rgba(0.25, 0.62, 1.0, 1.0),
+            "violet" => rgba(0.62, 0.4, 1.0, 1.0),
+            "forest" => rgba(0.3, 0.8, 0.5, 1.0),
+            _ => NSColor::controlAccentColor(),
+        };
+        let accent_rgb = match accent {
+            "sunset" => (1.0, 0.45, 0.18),
+            "ocean" => (0.25, 0.62, 1.0),
+            "violet" => (0.62, 0.4, 1.0),
+            "forest" => (0.3, 0.8, 0.5),
+            _ => (1.0, 0.62, 0.04), // the board's orange
+        };
         Self {
             primary: rgba(1.0, 1.0, 1.0, 0.96),
             secondary: rgba(1.0, 1.0, 1.0, s),
             tertiary: rgba(1.0, 1.0, 1.0, t),
-            accent: NSColor::controlAccentColor(),
+            accent: accent_color,
+            accent_rgb,
             warning: rgba(1.0, 0.62, 0.2, 1.0),
             success: rgba(0.3, 0.85, 0.45, 1.0),
             card: rgba(1.0, 1.0, 1.0, if high_contrast { 0.14 } else { 0.07 }),

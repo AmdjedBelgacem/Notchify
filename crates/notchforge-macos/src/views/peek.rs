@@ -67,7 +67,8 @@ impl PeekView {
         glow.setFrame(rect(0.0, 0.0, w, h));
         glow.setStartPoint(NSPoint::new(0.0, 1.0));
         glow.setEndPoint(NSPoint::new(0.42, 1.0 - 0.84));
-        set_gradient(&glow, &[(1.0, 0.62, 0.04, 0.22), (1.0, 0.62, 0.04, 0.0)]);
+        let (r, g, b) = p.accent_rgb;
+        set_gradient(&glow, &[(r, g, b, 0.24), (r, g, b, 0.0)]);
         crate::ui::fade_in_below(&glow, nh, 18.0);
         if let Some(l) = root.layer() {
             l.addSublayer(&glow);
@@ -200,7 +201,7 @@ impl PeekView {
             Some(AuthTarget::Agent(_) | AuthTarget::ToolPermission(_)) => ("Allow", Some("Deny")),
             Some(AuthTarget::Spotify) => ("Cancel", None),
             None if replyable => ("Reply", Some("Open")),
-            None => ("Open", None),
+            None => ("Open", Some("Snooze")),
         };
         let f = font(12.5, Weight::Semibold);
         let measure = |t: &str| (crate::ui::text_width(&attributed(t, &f, &p.primary)) + 24.0).ceil();
@@ -283,7 +284,11 @@ impl PeekView {
                 open_notification(&n);
                 true
             }
-            _ => true,
+            (PeekButton::Secondary, None) => {
+                // Snooze: hide it for half an hour, then it peeks again.
+                crate::app::send(notchforge_core::engine::Command::SnoozeNotification(n.id));
+                true
+            }
         }
     }
 }

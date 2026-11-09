@@ -42,7 +42,15 @@ pub fn parse_up_next(html: &str, watching: &str) -> Vec<UpNextVideo> {
 /// Find a video by a title, for browsers whose tabs we cannot read: the
 /// window title ("Song - YouTube") is all we have. Best effort.
 pub async fn search_first(http: &reqwest::Client, query: &str) -> Option<UpNextVideo> {
-    let url = reqwest::Url::parse_with_params("https://www.youtube.com/results", &[("search_query", query)]).ok()?;
+    search_list(http, query).await.into_iter().next()
+}
+
+/// The page's results, capped at eight.
+pub async fn search_list(http: &reqwest::Client, query: &str) -> Vec<UpNextVideo> {
+    let Some(url) = reqwest::Url::parse_with_params("https://www.youtube.com/results", &[("search_query", query)]).ok()
+    else {
+        return Vec::new();
+    };
     let resp = match http
         .get(url)
         .header("Cookie", "SOCS=CAI; CONSENT=YES+cb")
@@ -52,19 +60,34 @@ pub async fn search_first(http: &reqwest::Client, query: &str) -> Option<UpNextV
         .await
     {
         Ok(r) => r,
-        Err(_) => return None,
+        Err(_) => return Vec::new(),
     };
-    let Ok(html) = resp.text().await else { return None };
-    parse_search(&html)
+    let Ok(html) = resp.text().await else { return Vec::new() };
+    parse_search_list(&html)
 }
 
 /// The first video of a results page. Pure and tested.
 pub fn parse_search(html: &str) -> Option<UpNextVideo> {
-    let data = extract_initial_data(html)?;
-    let value = serde_json::from_str::<serde_json::Value>(&data).ok()?;
+    parse_search_list(html).into_iter().next()
+}
+
+/// Every video on a results page (deduped, at most eight). Pure and tested.
+pub fn parse_search_list(html: &str) -> Vec<UpNextVideo> {
+    let Some(data) = extract_initial_data(html) else { return Vec::new() };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&data) else { return Vec::new() };
     let mut pairs = Vec::new();
     collect_renderers(&value, &mut pairs);
-    pairs.into_iter().next().map(|(_, v)| v)
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (_, v) in pairs {
+        if seen.insert(v.url.clone()) {
+            out.push(v);
+        }
+        if out.len() >= 8 {
+            break;
+        }
+    }
+    out
 }
 
 /// Slice out the `ytInitialData` JSON object.

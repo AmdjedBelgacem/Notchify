@@ -17,6 +17,7 @@
 
 pub mod browser;
 pub mod script;
+pub mod lrclib;
 pub mod spotify;
 pub mod youtube;
 
@@ -195,6 +196,8 @@ struct Session {
     yt_resolved: Option<(String, youtube::UpNextVideo)>,
     /// The browser currently making sound: navigation targets its tab.
     browser_bundle: Option<&'static str>,
+    /// The track lyrics were last fetched for (`title|artist`).
+    lyrics_for: Option<String>,
     /// The playing page's timeline (browser pid, element), found once via
     /// Accessibility and read on every poll.
     web_slider: Option<(i32, crate::sys::ax::WebSlider)>,
@@ -280,6 +283,40 @@ impl Session {
         let _ = tokio::fs::create_dir_all(&dir).await;
         let url = format!("https://www.google.com/s2/favicons?domain={domain}&sz=128");
         download(&self.http, &url, &dir.join(format!("site-{key}.jpg"))).await
+    }
+
+    /// Fetch lyrics for the featured track, once per track (LRCLIB has no
+    /// quota but there is no point refetching either). `None` clears when
+    /// nothing is playing.
+    async fn refresh_lyrics(&mut self) {
+        let Some(n) = self.state.primary().cloned() else {
+            if self.state.lyrics.is_some() {
+                self.state.lyrics = None;
+            }
+            self.lyrics_for = None;
+            return;
+        };
+        let artist = if n.artist.is_empty() { n.subtitle() } else { n.artist.clone() };
+        // A browser track's "artist" is a site name — search the title alone.
+        let artist = if artist.eq_ignore_ascii_case("playing audio")
+            || artist.to_lowercase().contains("youtube")
+            || artist.is_empty()
+        {
+            String::new()
+        } else {
+            artist
+        };
+        let key = format!("{}|{artist}", n.title);
+        if self.lyrics_for.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        if n.title.trim().is_empty() || n.title.starts_with("Playing from") {
+            self.state.lyrics = None;
+            self.lyrics_for = None;
+            return;
+        }
+        self.lyrics_for = Some(key);
+        self.state.lyrics = lrclib::fetch(&self.http, &n.title, &artist).await;
     }
 
     /// Refresh Spotify's play queue, at most every 30 s and only while
@@ -687,6 +724,7 @@ impl Provider for MediaProvider {
                 queue_at: None,
                 yt_resolved: None,
                 browser_bundle: None,
+                lyrics_for: None,
                 web_slider: None,
                 web_slider_miss: None,
                 web_last: None,
@@ -699,6 +737,7 @@ impl Provider for MediaProvider {
             loop {
                 s.refresh_queue().await;
                 let started = s.read_players(ctx.config().media.browser_audio).await;
+                s.refresh_lyrics().await;
                 for p in started {
                     s.reload_playlists(p, &ctx, true);
                 }

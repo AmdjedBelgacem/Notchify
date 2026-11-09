@@ -48,6 +48,8 @@ show_wings = true
 # spans cannot be checked, so the wings stay hidden altogether.
 dodge_menu_bar = true
 high_contrast = false
+# Accent colour: system, sunset, ocean, violet or forest.
+accent = "system"
 
 [providers]
 battery = true
@@ -140,6 +142,8 @@ enabled = false
 # Keep tray contents across restarts (files are referenced, never copied).
 persist = false
 max_items = 50
+# Every screenshot lands in the tray automatically.
+screenshots = true
 
 [controls]
 brightness = true
@@ -151,6 +155,8 @@ focus_on_shortcut = "NotchForge Focus On"
 focus_off_shortcut = "NotchForge Focus Off"
 # Resolution changes revert automatically unless confirmed within this time.
 resolution_confirm_secs = 15
+# Focus on 15 minutes before a meeting, off when it ends (uses the shortcuts above).
+auto_focus_meetings = false
 
 [media]
 # Show the playing track's cover (left) and an equaliser (right) beside the

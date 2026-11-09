@@ -269,6 +269,14 @@ impl MenuBar {
                 });
             }));
         }
+        for (work, brk, label) in [(25, 5, "Pomodoro 25 / 5"), (50, 10, "Pomodoro 50 / 10")] {
+            timer_menu.addItem(&menu_item(mtm, &targets, label, "", move || {
+                crate::app::send(notchforge_core::engine::Command::StartPomodoro {
+                    work_ms: work * 60_000,
+                    break_ms: brk * 60_000,
+                });
+            }));
+        }
         timer_root.setSubmenu(Some(&timer_menu));
         menu.addItem(&timer_root);
         let cancel_timer = menu_item(mtm, &targets, "Cancel Timer", "", || {

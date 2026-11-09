@@ -3,6 +3,8 @@
 //! * ⌃⌥N — show or hide the panel (the shortcut shown in the menu bar extra).
 //! * ⌃⌥C — shelve the clipboard's text or link into the tray.
 //! * ⌃⌥Y / ⌃⌥D — allow / deny the coding agent's waiting tool request.
+//! * ⌃⌥M — mute or unmute the microphone.
+//! * ⌃⌥T — start a 5-minute timer.
 
 use std::ffi::c_void;
 
@@ -62,6 +64,10 @@ const KEY_C: u32 = 0x08;
 const KEY_Y: u32 = 0x10;
 /// `kVK_ANSI_D`.
 const KEY_D: u32 = 0x02;
+/// `kVK_ANSI_M`.
+const KEY_M: u32 = 0x2E;
+/// `kVK_ANSI_T`.
+const KEY_T: u32 = 0x11;
 
 /// `kEventParamDirectObject` and `typeEventHotKeyID`.
 const PARAM_DIRECT_OBJECT: u32 = u32::from_be_bytes(*b"----");
@@ -96,6 +102,15 @@ unsafe extern "C" fn on_hot_key(_next: *mut c_void, event: *mut c_void, _user: *
         }
         3 | 4 => {
             crate::app::with_controller(|c| c.answer_pending_permission(user == 3));
+        }
+        5 => {
+            crate::app::with_controller(|c| c.toggle_mic());
+        }
+        6 => {
+            crate::app::send(notchforge_core::engine::Command::StartTimer {
+                duration_ms: 5 * 60_000,
+                label: "5 min".into(),
+            });
         }
         _ => {}
     }
@@ -141,4 +156,6 @@ pub fn install() {
     register(KEY_C, 2);
     register(KEY_Y, 3);
     register(KEY_D, 4);
+    register(KEY_M, 5);
+    register(KEY_T, 6);
 }

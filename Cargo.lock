@@ -704,6 +704,7 @@ dependencies = [
  "objc2-quartz-core",
  "objc2-service-management",
  "objc2-user-notifications",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

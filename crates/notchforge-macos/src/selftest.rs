@@ -1573,6 +1573,7 @@ fn board_snapshots(
         bytes: None,
         added_at_ms: now,
         text: None,
+        pinned: false,
     };
     let link = TrayItem {
         id: TrayItemId(4),
@@ -1582,6 +1583,7 @@ fn board_snapshots(
         bytes: Some(51),
         added_at_ms: now,
         text: Some("https://github.com/notchforge/notchforge".into()),
+        pinned: false,
     };
     overview.tray = vec![link, item(1, report, false), item(2, mockup, false), item(3, dir.join("Assets"), true)];
     overview.focus = FocusState { active: Some(true), mode_name: Some("Do Not Disturb".into()) };
@@ -1684,6 +1686,7 @@ fn board_snapshots(
             notchforge_core::model::QueueTrack { title: "Slow Light".into(), artist: "Neon Harbor".into() },
             notchforge_core::model::QueueTrack { title: "Meridian".into(), artist: "Kite Machine".into() },
         ],
+        lyrics: None,
         up_next: vec![notchforge_core::model::UpNextVideo {
             title: "Daft Punk - One More Time".into(),
             author: "Daft Punk".into(),
@@ -1779,6 +1782,7 @@ fn sample_media() -> notchforge_core::model::MediaState {
         running: vec![MediaPlayer::Spotify],
         browser_denied: None,
         up_next: Vec::new(),
+        lyrics: None,
         spotify_queue: vec![notchforge_core::model::QueueTrack {
             title: "Next track".into(),
             artist: "NotchForge".into(),

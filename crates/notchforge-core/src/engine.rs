@@ -41,6 +41,8 @@ pub const LOW_DEVICE_BATTERY: u8 = 15;
 #[derive(Debug, Clone)]
 pub enum Command {
     DismissNotification(NotificationId),
+    /// Hide a notification and bring it back after a snooze.
+    SnoozeNotification(NotificationId),
     /// A held tool-permission request was answered in the notch: drop its prompt.
     ResolvePermission(String),
     /// Dismiss every notification from an app (by rule key).
@@ -50,6 +52,8 @@ pub enum Command {
     TrayAdd(Vec<PathBuf>),
     /// Shelve the clipboard's text (or link) into the tray.
     TrayAddText(Box<String>),
+    /// Pin or unpin a tray item (pinned ones never age out).
+    TrayTogglePin(TrayItemId),
     TrayRemove(TrayItemId),
     TrayClear,
     SetPaused(bool),
@@ -104,6 +108,8 @@ pub enum Command {
         duration_ms: i64,
         label: String,
     },
+    /// A pomodoro cycle: focus and break lengths that roll into each other.
+    StartPomodoro { work_ms: i64, break_ms: i64 },
     /// Cancel the running timer.
     CancelTimer,
 }
@@ -222,6 +228,8 @@ pub struct Engine {
     commands: mpsc::UnboundedReceiver<Command>,
     generation: u64,
     last_peek_ms: i64,
+    /// Snoozed notifications: (due at, the notification to bring back).
+    snoozed: Vec<(i64, NewNotification)>,
 }
 
 impl Engine {
@@ -256,6 +264,7 @@ impl Engine {
             commands: cmd_rx,
             generation: 0,
             last_peek_ms: i64::MIN / 2,
+            snoozed: Vec::new(),
         };
         (engine, EngineHandle { commands: cmd_tx })
     }
@@ -271,13 +280,18 @@ impl Engine {
         let mut dirty = false;
         loop {
             let deadline = last_publish + COALESCE;
-            // A running timer wakes the engine when it ends.
+            // A running timer wakes the engine when it ends; so does the
+            // earliest snoozed notification.
             let timer_end = self
                 .state
                 .timer
                 .as_ref()
                 .filter(|t| !t.expired)
                 .map(|t| std::time::Duration::from_millis((t.ends_at_ms - now_ms()).max(50) as u64));
+            let snooze_end = self
+                .snoozed
+                .first()
+                .map(|(due, _)| std::time::Duration::from_millis((due - now_ms()).max(50) as u64));
             tokio::select! {
                 biased;
                 _ = shutdown.wait() => break,
@@ -295,30 +309,92 @@ impl Engine {
                     }
                 } => {
                     if let Some(t) = self.state.timer.as_mut().filter(|t| !t.expired) {
-                        t.expired = true;
+                        let mut phase_note = None;
+                        // A pomodoro never sits expired: it rolls into the
+                        // next phase and keeps counting.
+                        if let Some(c) = t.pomodoro.clone() {
+                            let (next_work, round, title, body) = if t.phase_work {
+                                let mins = c.break_ms / 60_000;
+                                (
+                                    false,
+                                    t.round,
+                                    format!("Focus round {} done", t.round + 1),
+                                    format!("Take {mins} min — the break is running."),
+                                )
+                            } else {
+                                let mins = c.work_ms / 60_000;
+                                (
+                                    true,
+                                    t.round + 1,
+                                    format!("Break over — round {}", t.round + 2),
+                                    format!("Back to focus for {mins} min."),
+                                )
+                            };
+                            let (duration, label) = if next_work {
+                                (c.work_ms, format!("Focus {}", round + 1))
+                            } else {
+                                (c.break_ms, "Break".into())
+                            };
+                            *t = TimerState {
+                                label,
+                                ends_at_ms: now_ms() + duration,
+                                duration_ms: duration,
+                                expired: false,
+                                pomodoro: Some(c),
+                                phase_work: next_work,
+                                round,
+                            };
+                            phase_note = Some((title, body));
+                        } else {
+                            t.expired = true;
+                        }
                         dirty = true;
                         let label = t.label.clone();
                         let mins = t.duration_ms / 60_000;
                         let summary = if mins >= 1 { format!("{mins} min") } else { "timer".into() };
+                        let is_pomodoro = phase_note.is_some();
+                        let (title, body) =
+                            phase_note.take().unwrap_or((format!("Timer done — {summary}"), String::new()));
                         self.ingest(NewNotification {
                             app: crate::apps::AppRef {
                                 known: None,
                                 bundle_id: None,
-                                display_name: "Timer".into(),
+                                display_name: if is_pomodoro { "Pomodoro" } else { "Timer" }.into(),
                                 platform: None,
                             },
                             origin: Origin::Internal,
                             kind: NotificationKind::TaskFinished,
                             priority: Some(Priority::High),
-                            title: format!("Timer done — {summary}"),
+                            title,
                             subtitle: Some(label),
-                            body: String::new(),
+                            body,
                             timestamp_ms: now_ms(),
                             thread: None,
                             url: None,
                             tokens: None,
                         });
                     }
+                }
+                _ = async {
+                    match snooze_end {
+                        Some(d) => tokio::time::sleep(d).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    let now = now_ms();
+                    let mut woken = Vec::new();
+                    self.snoozed.retain(|(due, n)| {
+                        if *due <= now + 50 {
+                            woken.push(n.clone());
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    for n in woken {
+                        self.ingest(n);
+                    }
+                    dirty = true;
                 }
                 else => break,
             }
@@ -469,6 +545,11 @@ impl Engine {
                 self.persist_tray();
                 added > 0 || !self.state.tray.items().is_empty()
             }
+            Command::TrayTogglePin(id) => {
+                let changed = self.state.tray.toggle_pin(id);
+                self.persist_tray();
+                changed
+            }
             Command::TrayAddText(text) => {
                 let changed = self.state.tray.add_text(*text, cfg.tray.max_items, now_ms());
                 self.persist_tray();
@@ -516,10 +597,49 @@ impl Engine {
             Command::Inject(n) => self.ingest(*n),
             Command::StartTimer { duration_ms, label } => {
                 let ends_at_ms = now_ms() + duration_ms;
-                self.state.timer = Some(TimerState { label, ends_at_ms, duration_ms, expired: false });
+                self.state.timer =
+                    Some(TimerState { label, ends_at_ms, duration_ms, expired: false, ..Default::default() });
+                true
+            }
+            Command::StartPomodoro { work_ms, break_ms } => {
+                let ends_at_ms = now_ms() + work_ms;
+                self.state.timer = Some(TimerState {
+                    label: "Focus 1".into(),
+                    ends_at_ms,
+                    duration_ms: work_ms,
+                    expired: false,
+                    pomodoro: Some(crate::model::PomodoroCycle { work_ms, break_ms }),
+                    phase_work: true,
+                    round: 0,
+                });
                 true
             }
             Command::CancelTimer => self.state.timer.take().is_some(),
+            Command::SnoozeNotification(id) => {
+                // Dismiss now, re-ingest the same content when the snooze is
+                // up (the pipeline re-ranks and re-peeks it like anything new).
+                const SNOOZE_MS: i64 = 30 * 60_000;
+                let Some(n) = self.state.pipeline.get(id).cloned() else { return false };
+                if !self.state.pipeline.dismiss(id) {
+                    return false;
+                }
+                let due = now_ms() + SNOOZE_MS;
+                let again = NewNotification {
+                    app: n.app,
+                    origin: n.origin,
+                    kind: n.kind,
+                    priority: Some(n.priority),
+                    title: n.title,
+                    subtitle: n.subtitle,
+                    body: n.body,
+                    timestamp_ms: n.timestamp_ms,
+                    thread: n.thread,
+                    url: n.url,
+                    tokens: None,
+                };
+                self.snoozed.push((due, again));
+                true
+            }
             Command::Provider(c) => {
                 // No receivers just means the relevant provider is disabled.
                 let _ = self.provider_commands.send(c);
@@ -1126,6 +1246,38 @@ mod tests {
         e.apply_command(Command::TrayRemove(snap.tray[0].id));
         assert!(e.snapshot().tray.is_empty());
         let _ = std::fs::remove_file(f);
+    }
+
+    #[test]
+    fn snooze_hides_then_reschedules() {
+        let (mut e, _h, rec, _tx) = engine();
+        e.apply_event(ProviderEvent::Notification(agent_note("later")));
+        let id = e.snapshot().notifications[0].id;
+        assert!(e.apply_command(Command::SnoozeNotification(id)));
+        // Hidden right away.
+        assert!(e.snapshot().notifications.is_empty());
+        // And queued: the engine wakes for it after the snooze.
+        assert_eq!(e.snoozed.len(), 1);
+        assert_eq!(e.snoozed[0].1.title, "later");
+        assert!(e.snoozed[0].0 > now_ms());
+        // An unknown id is a no-op.
+        assert!(!e.apply_command(Command::SnoozeNotification(NotificationId(99_999))));
+        assert_eq!(e.snoozed.len(), 1);
+        let _ = rec;
+    }
+
+    #[test]
+    fn pomodoro_starts_in_focus() {
+        let (mut e, _h, _rec, _tx) = engine();
+        assert!(e.apply_command(Command::StartPomodoro { work_ms: 25 * 60_000, break_ms: 5 * 60_000 }));
+        let t = e.snapshot().timer.expect("timer");
+        assert_eq!(t.label, "Focus 1");
+        assert!(t.pomodoro.is_some());
+        assert!(t.phase_work);
+        assert_eq!(t.round, 0);
+        // Cancel stops the whole cycle.
+        assert!(e.apply_command(Command::CancelTimer));
+        assert!(e.snapshot().timer.is_none());
     }
 
     fn track(player: MediaPlayer, state: PlaybackState, at: i64) -> NowPlaying {

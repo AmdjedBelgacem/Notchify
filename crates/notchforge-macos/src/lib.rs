@@ -20,6 +20,7 @@ pub mod ffi;
 pub mod glass;
 #[cfg(target_os = "macos")]
 pub mod hotkey;
+pub mod screenshots;
 #[cfg(target_os = "macos")]
 pub mod icons;
 #[cfg(target_os = "macos")]

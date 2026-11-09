@@ -54,11 +54,12 @@ impl Tray {
                     bytes,
                     added_at_ms: now_ms,
                     text: None,
+                    pinned: false,
                 },
             );
             added += 1;
         }
-        self.items.truncate(max_items);
+        self.trim(max_items);
         added
     }
 
@@ -77,9 +78,19 @@ impl Tray {
         }
         // The first line stands in for the name; a bare URL names itself.
         let name = single_line(&trimmed, 48);
+        // History cap: at most 8 unpinned text items, oldest dropped first.
+        const MAX_TEXTS: usize = 8;
+        let mut texts = self.items.iter().filter(|i| i.text.is_some() && !i.pinned).count();
+        while texts >= MAX_TEXTS {
+            let Some(pos) = self.items.iter().rposition(|i| i.text.is_some() && !i.pinned) else { break };
+            self.items.remove(pos);
+            texts -= 1;
+        }
         self.next_id += 1;
+        let first_unpinned =
+            self.items.iter().position(|i| !i.pinned).unwrap_or(self.items.len());
         self.items.insert(
-            0,
+            first_unpinned,
             TrayItem {
                 id: TrayItemId(self.next_id),
                 path: PathBuf::new(),
@@ -88,10 +99,29 @@ impl Tray {
                 bytes: Some(trimmed.len() as u64),
                 added_at_ms: now_ms,
                 text: Some(trimmed),
+                pinned: false,
             },
         );
-        self.items.truncate(max_items);
+        self.trim(max_items);
         true
+    }
+
+    /// Pin or unpin an item; pinned ones float to the top. Returns the new
+    /// state.
+    pub fn toggle_pin(&mut self, id: TrayItemId) -> bool {
+        let Some(item) = self.items.iter_mut().find(|i| i.id == id) else { return false };
+        item.pinned = !item.pinned;
+        true
+    }
+
+    /// Keep the pinned items and the newest `max_items` of the rest.
+    fn trim(&mut self, max_items: usize) {
+        if self.items.len() <= max_items {
+            return;
+        }
+        let (pinned, rest): (Vec<_>, Vec<_>) = self.items.drain(..).partition(|i| i.pinned);
+        let keep = rest.into_iter().take(max_items.max(pinned.len()) - pinned.len().min(max_items));
+        self.items = pinned.into_iter().chain(keep).collect();
     }
 
     /// Is this a shelved link (a bare http(s) URL)?
@@ -115,11 +145,11 @@ impl Tray {
         self.items.iter().find(|i| i.id == id)
     }
 
-    /// Remove items whose file no longer exists. Text items stay. Returns
-    /// `true` if anything changed.
+    /// Remove items whose file no longer exists. Text items and pinned ones
+    /// stay. Returns `true` if anything changed.
     pub fn prune_missing(&mut self) -> bool {
         let before = self.items.len();
-        self.items.retain(|i| i.text.is_some() || i.path.exists());
+        self.items.retain(|i| i.text.is_some() || i.pinned || i.path.exists());
         before != self.items.len()
     }
 
@@ -260,6 +290,7 @@ mod tests {
             bytes: None,
             added_at_ms: 0,
             text: Some("https://example.com".into()),
+            pinned: false,
         })));
         // Text items survive pruning (their "path" is empty).
         assert!(!t.prune_missing());

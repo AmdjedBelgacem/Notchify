@@ -349,6 +349,9 @@ pub fn run(boot: Boot) -> Result<(), String> {
 
     let controller = Controller::new(mtm, boot.config.clone(), boot.engine.clone())?;
     controller.install();
+    if boot.config.tray.screenshots {
+        controller.start_screenshot_timer();
+    }
     let menubar = MenuBar::new(mtm);
     menubar.set_visible(boot.config.general.show_menu_bar_icon);
 

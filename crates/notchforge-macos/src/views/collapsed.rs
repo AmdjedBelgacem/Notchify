@@ -316,8 +316,10 @@ impl CollapsedView {
             self.art.setHidden(true);
             self.art_box.setHidden(true);
             self.set_equalizer(false, &p.success, false);
-            set_symbol(&self.left_icon, "timer", 12.0, "Timer");
-            self.left_icon.setContentTintColor(Some(&p.warning));
+            // A pomodoro's break gets its own colour and symbol.
+            let on_break = timer.pomodoro.is_some() && !timer.phase_work;
+            set_symbol(&self.left_icon, if on_break { "cup.and.saucer.fill" } else { "timer" }, 12.0, "Timer");
+            self.left_icon.setContentTintColor(Some(if on_break { &p.success } else { &p.warning }));
             self.left_icon.setHidden(false);
             self.left_text.setHidden(true);
             self.right_icon.setHidden(true);

@@ -1538,6 +1538,21 @@ impl ExpandedView {
                 name.setAlignment(NSTextAlignment::Center);
                 name.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingMiddle);
                 tile.addSubview(&name);
+                let pin_id = item.id;
+                let pinned = item.pinned;
+                let pt = self._targets.add(mtm, move |_| {
+                    crate::app::send(notchforge_core::engine::Command::TrayTogglePin(pin_id));
+                });
+                let pin = symbol_button(
+                    mtm,
+                    if pinned { "pin.fill" } else { "pin" },
+                    9.0,
+                    if pinned { "Unpin" } else { "Keep forever" },
+                    &p.secondary,
+                    &pt,
+                    rect(cw - 16.0, 2.0, 14.0, 14.0),
+                );
+                tile.addSubview(&pin);
                 self.tray_doc.addSubview(&tile);
                 continue;
             }

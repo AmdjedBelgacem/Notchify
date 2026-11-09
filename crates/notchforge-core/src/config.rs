@@ -121,6 +121,8 @@ pub struct AppearanceConfig {
     pub dodge_menu_bar: bool,
     /// Respect "Increase contrast" by using brighter secondary text.
     pub high_contrast: bool,
+    /// Accent colour theme: "system", "sunset", "ocean", "violet" or "forest".
+    pub accent: String,
 }
 
 impl Default for AppearanceConfig {
@@ -135,6 +137,7 @@ impl Default for AppearanceConfig {
             show_wings: true,
             dodge_menu_bar: true,
             high_contrast: false,
+            accent: "system".to_owned(),
         }
     }
 }
@@ -374,11 +377,13 @@ pub struct TrayConfig {
     /// Keep tray contents across restarts.
     pub persist: bool,
     pub max_items: usize,
+    /// New screenshots land in the tray automatically.
+    pub screenshots: bool,
 }
 
 impl Default for TrayConfig {
     fn default() -> Self {
-        Self { persist: false, max_items: 50 }
+        Self { persist: false, max_items: 50, screenshots: true }
     }
 }
 
@@ -393,6 +398,9 @@ pub struct ControlsConfig {
     pub focus_on_shortcut: String,
     /// Name of the Shortcuts.app shortcut that turns Focus off.
     pub focus_off_shortcut: String,
+    /// Turn Focus on while a calendar meeting is in its join window, off
+    /// again when it ends (uses the shortcuts above).
+    pub auto_focus_meetings: bool,
     /// Display mode changes revert automatically unless confirmed in time.
     pub resolution_confirm_secs: u64,
 }
@@ -444,6 +452,7 @@ impl Default for ControlsConfig {
             focus: true,
             focus_on_shortcut: "NotchForge Focus On".to_owned(),
             focus_off_shortcut: "NotchForge Focus Off".to_owned(),
+            auto_focus_meetings: false,
             resolution_confirm_secs: 15,
         }
     }

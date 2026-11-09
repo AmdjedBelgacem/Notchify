@@ -1358,6 +1358,14 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             form.switch("High contrast text", None, c.appearance.high_contrast, |cfg, on| {
                 cfg.appearance.high_contrast = on
             });
+            const ACCENTS: [&str; 5] = ["system", "sunset", "ocean", "violet", "forest"];
+            const ACCENT_NAMES: [&str; 5] = ["System", "Sunset", "Ocean", "Violet", "Forest"];
+            form.popup(
+                "Accent",
+                &ACCENT_NAMES,
+                ACCENTS.iter().position(|a| *a == c.appearance.accent).unwrap_or(0),
+                move |cfg, i| cfg.appearance.accent = ACCENTS[i].to_owned(),
+            );
         }
         Pane::Notifications => {
             form.begin("Behaviour");
@@ -1778,12 +1786,24 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 c.tray.persist,
                 |cfg, on| cfg.tray.persist = on,
             );
+            form.switch(
+                "Screenshots go to the tray",
+                Some("Every screenshot on the Desktop appears in the tray, ready to drag out."),
+                c.tray.screenshots,
+                |cfg, on| cfg.tray.screenshots = on,
+            );
         }
         Pane::Controls => {
             form.begin("Show");
             form.switch("Brightness slider", None, c.controls.brightness, |cfg, on| cfg.controls.brightness = on);
             form.switch("Volume slider", None, c.controls.volume, |cfg, on| cfg.controls.volume = on);
             form.switch("Resolution switcher", None, c.controls.resolution, |cfg, on| cfg.controls.resolution = on);
+            form.switch(
+                "Focus during meetings",
+                Some("Turns Focus on 15 minutes before a calendar meeting and off when it ends."),
+                c.controls.auto_focus_meetings,
+                |cfg, on| cfg.controls.auto_focus_meetings = on,
+            );
             form.begin("Focus");
             form.text("“Focus on” shortcut", &c.controls.focus_on_shortcut, "Shortcut name", false, |cfg, v| {
                 cfg.controls.focus_on_shortcut = v

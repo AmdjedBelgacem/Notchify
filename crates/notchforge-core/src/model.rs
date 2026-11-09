@@ -705,6 +705,9 @@ pub struct TrayItem {
     /// leave this `None`; text items carry an empty `path`.
     #[serde(default)]
     pub text: Option<String>,
+    /// Pinned text snippets never age out of the tray.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -1130,6 +1133,23 @@ pub struct TimerState {
     pub duration_ms: i64,
     /// Fired (waiting to be dismissed).
     pub expired: bool,
+    /// A pomodoro cycle: when set, expiring rolls straight into the next
+    /// phase (focus → break → focus …) instead of waiting to be dismissed.
+    #[serde(default)]
+    pub pomodoro: Option<PomodoroCycle>,
+    /// Which phase a pomodoro is in right now.
+    #[serde(default)]
+    pub phase_work: bool,
+    /// How many focus rounds of this pomodoro have completed.
+    #[serde(default)]
+    pub round: u8,
+}
+
+/// Focus / break lengths of a pomodoro cycle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PomodoroCycle {
+    pub work_ms: i64,
+    pub break_ms: i64,
 }
 
 /// Calendar accounts ("connections") and upcoming events.
@@ -1195,6 +1215,45 @@ pub struct MediaState {
     /// Spotify's play queue (Web API; needs a sign-in). Empty otherwise.
     #[serde(default)]
     pub spotify_queue: Vec<QueueTrack>,
+    /// Lyrics for the current track (LRCLIB), fetched once per track.
+    #[serde(default)]
+    pub lyrics: Option<Lyrics>,
+}
+
+/// A song's lyrics: timestamped lines (milliseconds, for sync) or, when the
+/// source had no timings, an untimed block.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Lyrics {
+    /// `(at_ms, line)` sorted by time; empty for a plain block.
+    #[serde(default)]
+    pub lines: Vec<(i64, String)>,
+    /// True when there were no timestamps (display without highlighting).
+    #[serde(default)]
+    pub plain: bool,
+}
+
+impl Lyrics {
+    /// The line playing at `position_ms`: the last one that started at or
+    /// before it, ignoring empty (instrumental gap) lines.
+    pub fn line_at(&self, position_ms: i64) -> Option<usize> {
+        if self.plain {
+            return None;
+        }
+        self.lines
+            .iter()
+            .rposition(|(at, text)| *at <= position_ms && !line_is_gap(text))
+    }
+
+    /// Is any part of the song on screen at `position_ms`?
+    pub fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+}
+
+/// Instrumental-gap lines (`♪` and blanks) never highlight.
+fn line_is_gap(line: &str) -> bool {
+    let t = line.trim();
+    t.is_empty() || t.chars().all(|c| matches!(c, '♪' | '♫' | '·' | '…'))
 }
 
 impl MediaState {

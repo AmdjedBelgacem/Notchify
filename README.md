@@ -29,31 +29,39 @@ It surfaces:
   the reply is typed into the app's own notification banner, so Discord &
   friends deliver it through their normal session. The banner must still be on
   screen (it is, right after the message arrives); keep banners enabled for
-  apps you want to answer.
+  apps you want to answer. Any ordinary peek can be **snoozed** — it hides for
+  half an hour and comes back.
 - **Weather**: current conditions, high and low, and the next 5 hours (Open-Meteo,
   free with no key).
+- **Auto-Focus during meetings.** With one switch, Focus turns on 15 minutes
+  before a calendar meeting starts and off when it ends (via the Shortcuts app,
+  which the Focus toggle already uses).
 - **Calendar & reminders.** Your upcoming events from every connected calendar
   account (iCloud, Google, Exchange, subscribed) on the Overview card — via
   EventKit, read-only. Meetings show a **Join** button for the 15 minutes
   before they start, and open the meeting link straight away. Incomplete
   reminders due soon appear too, with a **Done** button that ticks them off.
-- **Timers.** Start 1 / 5 / 10 / 25 / 45-minute timers from the menu bar (or
-  notchforge-notify); the collapsed notch counts down in the wing and gives a
-  peek when time is up.
+- **Timers & pomodoro.** Start 1 / 5 / 10 / 25 / 45-minute timers from the
+  menu bar, or a full **Pomodoro cycle** (25/5, 50/10) that rolls from focus
+  into break and back on its own — the wing shows the phase, with a coffee cup
+  during breaks. A quick timer is always one **⌃⌥T** away.
 - **Microphone mute.** A one-click mute for the default microphone sits beside
   the volume slider in Quick controls (it hides itself when there is nothing
-  to mute).
+  to mute) — or press **⌃⌥M** anywhere.
 - **Rain soon.** The weather provider watches Open-Meteo's 15-minute
   precipitation series and drops a "Rain in ~N min" peek when rain is about to
   start — at most once every three hours.
 - **Clipboard shelf.** Press **⌃⌥C** (or use the menu bar's *Shelve Clipboard*)
-  to pin the clipboard's text or link into the tray, where it survives with
-  your files; click it again to put it back on the clipboard.
+  to pin the clipboard's text or link into the tray — the shelf keeps the last
+  eight, and any entry can be **pinned** with its corner button so it never
+  ages out. Click an entry to put it back on the clipboard.
 - **Batteries**: your Mac's, plus AirPods (left, right and case),
   Magic Keyboard, Mouse, Trackpad and other HID accessories.
 - **A temporary file tray.** Drag files onto the notch, then drag them back out
-  to anywhere, AirDrop them, reveal them in Finder or copy their paths. Shelved
-  clipboard text and links (⌃⌥C) live here too, and persist across restarts.
+  to anywhere, AirDrop them, reveal them in Finder or copy their paths. Every
+  **screenshot you take lands in the tray automatically** (macOS marks them —
+  any name, any language). Shelved clipboard text and links (⌃⌥C) live here
+  too, with pinned snippets kept forever.
 - **A wing chevron, like the notch's own hidden-items arrow.** macOS reserves
   menu-bar space only for the hardware notch, so nothing can make it move
   items aside for an app — instead the island does what the system does for
@@ -64,6 +72,8 @@ It surfaces:
   then it tucks itself back in.
 - **Quick controls**: brightness, volume, display resolution (with a safe
   automatic revert) and a Focus / Do Not Disturb toggle.
+- **Accent themes.** The glow, buttons and highlights follow an accent of your
+  choice — System, Sunset, Ocean, Violet or Forest — in Settings › Appearance.
 - **Audio & music.** Shows the current output device and what it can do
   (Bluetooth · 48 kHz · 24-bit · Stereo…), lets you switch outputs, and lists
   which apps are playing sound and through which device. Spotify and Apple
@@ -80,7 +90,11 @@ It surfaces:
   be read are handled: a `… - YouTube` page title is enough — the video is
   found by its title, which fills the name, the thumbnail and the **Up next**
   recommendations. This covers feed autoplay too, where the video plays right
-  on youtube.com and the tab's URL never changes.
+  on youtube.com and the tab's URL never changes. Clicking an **Up next**
+  suggestion plays it in the same tab, and the **magnifier on the music page**
+  searches YouTube so anything can be played from the notch. **Lyrics** (via
+  LRCLIB, free and keyless) show for the playing song with the current line
+  lit and scrolling.
 - **Agents that finished.** Hooks report every finished turn, and a session
   watcher says when a coding-agent CLI (Claude Code, Codex, OpenCode, Cursor
   Agent, Gemini CLI…) ends, with no setup. **Settings › Coding Agents** connects
