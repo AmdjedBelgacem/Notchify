@@ -100,6 +100,9 @@ impl Provider for BatteryProvider {
             let mut last: Option<BatteryStatus> = None;
             // Charge alerts: one per crossing, never more than every 4 hours.
             let mut last_alert: Option<std::time::Instant> = None;
+            // Disk pressure: checked hourly, one warning per 12 hours.
+            let mut disk_checked = Option::<std::time::Instant>::None;
+            let mut disk_alerted = Option::<std::time::Instant>::None;
             loop {
                 let b = read().await?;
                 let interval = if b.present { POLL } else { POLL_NO_BATTERY };
@@ -115,12 +118,91 @@ impl Provider for BatteryProvider {
                         }
                     }
                 }
+                // The boot disk filling up is noticed in the same breath.
+                let now = std::time::Instant::now();
+                let due = disk_checked.is_none_or(|t| t.elapsed() > Duration::from_secs(3600));
+                if due {
+                    disk_checked = Some(now);
+                    if disk_alerted.is_none_or(|t| t.elapsed() > Duration::from_secs(12 * 3600)) {
+                        if let Some(free_gb) = boot_disk_free_gb() {
+                            if free_gb <= 10.0 {
+                                disk_alerted = Some(now);
+                                let n = NewNotification {
+                                    app: AppRef { known: None, bundle_id: None, display_name: "Storage".into(), platform: None },
+                                    origin: Origin::Internal,
+                                    kind: NotificationKind::Info,
+                                    priority: Some(Priority::Normal),
+                                    title: format!("Disk almost full — {free_gb:.0} GB left"),
+                                    subtitle: None,
+                                    body: "macOS gets unhappy below 10 GB; clear some space soon.".into(),
+                                    timestamp_ms: notchforge_core::time::now_ms(),
+                                    thread: Some("disk".into()),
+                                    url: None,
+                                    tokens: None,
+                                };
+                                if !ctx.emit(ProviderEvent::Notification(n)).await {
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                }
                 if ctx.sleep_or_refresh(interval).await == Wake::Shutdown {
                     return Ok(());
                 }
             }
         })
     }
+}
+
+/// Free space on the boot disk, in GB.
+fn boot_disk_free_gb() -> Option<f64> {
+    #[repr(C)]
+    struct StatFs {
+        f_bsize: u64,
+        f_frsize: u64,
+        f_blocks: u64,
+        f_bfree: u64,
+        f_bavail: u64,
+        f_files: u64,
+        f_ffree: u64,
+        f_fsid: [u32; 2],
+        f_owner: u32,
+        f_type: u32,
+        f_flags: u32,
+        f_fssubtype: u32,
+        f_fstypename: [u8; 16],
+        f_mntonname: [u8; 1024],
+        f_mntfromname: [u8; 1024],
+        f_reserved: [u64; 8],
+    }
+    unsafe extern "C" {
+        fn statfs(path: *const std::ffi::c_char, buf: *mut StatFs) -> i32;
+    }
+    let path = std::ffi::CString::new("/").ok()?;
+    let mut buf = StatFs {
+        f_bsize: 0,
+        f_frsize: 0,
+        f_blocks: 0,
+        f_bfree: 0,
+        f_bavail: 0,
+        f_files: 0,
+        f_ffree: 0,
+        f_fsid: [0; 2],
+        f_owner: 0,
+        f_type: 0,
+        f_flags: 0,
+        f_fssubtype: 0,
+        f_fstypename: [0; 16],
+        f_mntonname: [0; 1024],
+        f_mntfromname: [0; 1024],
+        f_reserved: [0; 8],
+    };
+    // SAFETY: a valid path and a correctly sized out-buffer.
+    if unsafe { statfs(path.as_ptr(), &mut buf) } != 0 {
+        return None;
+    }
+    Some(buf.f_bavail as f64 * buf.f_frsize as f64 / 1e9)
 }
 
 /// Low or full on battery power: "plug in" below 20%, "unplug" above 80%

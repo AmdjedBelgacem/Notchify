@@ -1405,13 +1405,24 @@ impl Controller {
 
     /// Every few seconds: shelve the Desktop's new screenshots.
     fn poll_screenshots(&self) {
-        if !self.config.borrow().tray.screenshots {
+        let cfg = self.config.borrow();
+        if !cfg.tray.screenshots && !cfg.tray.downloads {
+            drop(cfg);
             if let Some(t) = self.screenshot_timer.borrow_mut().take() {
                 t.invalidate();
             }
             return;
         }
-        let found = self.screenshot_watcher.borrow_mut().scan();
+        let allow = (cfg.tray.screenshots, cfg.tray.downloads);
+        drop(cfg);
+        let mut found = self.screenshot_watcher.borrow_mut().scan();
+        // A downloads-only or screenshots-only configuration drops the rest.
+        if !allow.0 {
+            found.retain(|p| p.parent().is_none_or(|d| d.file_name().is_none_or(|n| n != "Desktop")));
+        }
+        if !allow.1 {
+            found.retain(|p| p.parent().is_none_or(|d| d.file_name().is_none_or(|n| n != "Downloads")));
+        }
         if !found.is_empty() {
             tracing::info!(count = found.len(), "screenshots shelved into the tray");
             self.files_dropped(found);

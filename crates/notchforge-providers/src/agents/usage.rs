@@ -282,6 +282,8 @@ pub struct ClaudeStatus {
     pub gauges: Vec<LimitGauge>,
     pub context_percent: Option<u8>,
     pub project: Option<String>,
+    /// The status line was written recently: the agent is working right now.
+    pub fresh: bool,
 }
 
 /// Parse the status line's JSON. A window whose reset time has passed is gone.
@@ -309,6 +311,7 @@ pub fn parse_claude_status(text: &str, now_ms: i64) -> Option<ClaudeStatus> {
             .or(v.get("cwd"))
             .and_then(|d| d.as_str())
             .map(project_name),
+        fresh: false,
     })
 }
 
@@ -899,6 +902,8 @@ impl Scanner {
                 gauges,
                 // The status line's exact figure, else what the logs show.
                 context_percent: s.and(status.context_percent).or(s.and_then(|r| r.context_percent)),
+                // The status line only updates while a turn is running.
+                active_ms: status.fresh.then_some(now_ms),
             });
         }
         if codex_found {
@@ -916,6 +921,8 @@ impl Scanner {
                 project: s.map(|r| r.project.clone()),
                 gauges,
                 context_percent: s.and_then(|r| r.context_percent),
+                // Codex logs a turn only when it turns: a recent log IS work.
+                active_ms: s.map(|_| now_ms),
             });
         }
         out
@@ -1048,6 +1055,7 @@ fn read_claude_status(data_dir: &Path, now_ms: i64) -> Option<ClaudeStatus> {
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .is_some_and(|d| now_ms - d.as_millis() as i64 <= STATUS_FRESH_MS);
+    status.fresh = fresh;
     if !fresh {
         status.context_percent = None;
     }

@@ -523,6 +523,18 @@ pub struct AgentLimits {
     pub project: Option<String>,
     pub gauges: Vec<LimitGauge>,
     pub context_percent: Option<u8>,
+    /// When the agent last showed activity (status line written, quota
+    /// polled): a "working now" signal for the wing. `None` = idle.
+    #[serde(default)]
+    pub active_ms: Option<i64>,
+}
+
+/// An agent that is working right now (for the collapsed wing).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct AgentActive {
+    pub agent: UsageAgent,
+    pub context_percent: Option<u8>,
+    pub project: Option<String>,
 }
 
 /// Name a limit by its window: 300 min is the session, 10080 the week.
@@ -678,6 +690,14 @@ pub struct Weather {
     pub unit: TemperatureUnit,
     pub hourly: Vec<HourlyForecast>,
     pub fetched_at_ms: i64,
+    /// Today's sun times, "HH:MM" local, when the provider reports them.
+    #[serde(default)]
+    pub sunrise: Option<String>,
+    #[serde(default)]
+    pub sunset: Option<String>,
+    /// European AQI (0–100+); shown as a word, not a number soup.
+    #[serde(default)]
+    pub aqi: Option<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -907,6 +927,18 @@ pub struct AudioState {
     pub sources: Vec<AudioSource>,
     /// Per-app audio activity needs macOS 14.2+; older systems only report devices.
     pub sources_supported: bool,
+    /// Microphones (input devices), default first.
+    #[serde(default)]
+    pub inputs: Vec<InputDevice>,
+}
+
+/// A microphone (input device).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct InputDevice {
+    pub uid: String,
+    pub name: String,
+    pub transport: AudioTransport,
+    pub is_default: bool,
 }
 
 impl AudioState {
@@ -1525,6 +1557,7 @@ mod tests {
                 device_uids: vec![],
             }],
             sources_supported: true,
+        inputs: Vec::new(),
         };
         assert_eq!(state.route_label(&state.sources[0]), "AirPods Pro");
         assert_eq!(MediaPlayer::from_bundle_id("COM.SPOTIFY.CLIENT"), Some(MediaPlayer::Spotify));

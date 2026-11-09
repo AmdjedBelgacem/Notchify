@@ -144,6 +144,8 @@ persist = false
 max_items = 50
 # Every screenshot lands in the tray automatically.
 screenshots = true
+# Finished downloads land in the tray automatically.
+downloads = true
 
 [controls]
 brightness = true

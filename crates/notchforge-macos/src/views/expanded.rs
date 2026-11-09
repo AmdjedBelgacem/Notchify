@@ -1095,6 +1095,36 @@ impl ExpandedView {
             &p.primary,
             rect(12.0, 64.0, wc - 24.0, 15.0),
         ));
+        // Sun times and air quality fill the corner when they exist.
+        let extras = {
+            let mut parts = Vec::new();
+            if let Some(rise) = &w.sunrise {
+                parts.push(format!("↑{rise}"));
+            }
+            if let Some(set) = &w.sunset {
+                parts.push(format!("↓{set}"));
+            }
+            if let Some(aqi) = w.aqi {
+                let word = match aqi {
+                    0..=20 => "Air excellent",
+                    21..=40 => "Air good",
+                    41..=60 => "Air moderate",
+                    61..=80 => "Air poor",
+                    _ => "Air very poor",
+                };
+                parts.push(word.to_owned());
+            }
+            parts.join("  ·  ")
+        };
+        if !extras.is_empty() {
+            self.weather_card.addSubview(&label(
+                mtm,
+                &extras,
+                &font(10.5, Weight::Regular),
+                &p.secondary,
+                rect(wc / 2.0, 64.0, wc / 2.0 - 12.0, 15.0),
+            ));
+        }
         // The next event takes the bottom row when there is one.
         let cal = &snap.calendar;
         let next_event = cal.granted && (!cal.events.is_empty() || !cal.reminders.is_empty());

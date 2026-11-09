@@ -379,11 +379,13 @@ pub struct TrayConfig {
     pub max_items: usize,
     /// New screenshots land in the tray automatically.
     pub screenshots: bool,
+    /// Finished downloads land in the tray automatically.
+    pub downloads: bool,
 }
 
 impl Default for TrayConfig {
     fn default() -> Self {
-        Self { persist: false, max_items: 50, screenshots: true }
+        Self { persist: false, max_items: 50, screenshots: true, downloads: true }
     }
 }
 

@@ -14,7 +14,10 @@
 //! README "Known limitations".
 
 use crate::util::{normalize_address, parse_percent, run_command};
-use notchforge_core::model::{BatteryComponent, DeviceBattery, DeviceKind, ProviderStatus};
+use notchforge_core::apps::AppRef;
+use notchforge_core::model::{
+    BatteryComponent, DeviceBattery, DeviceKind, NewNotification, NotificationKind, Origin, Priority, ProviderStatus,
+};
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
 };
@@ -147,6 +150,7 @@ impl Provider for BluetoothProvider {
             let mut last_profiler: Option<Instant> = None;
             let mut last_poll: Option<Instant>;
             let mut last_sent: Option<Vec<DeviceBattery>> = None;
+            let mut connect_alerts: Vec<(String, Instant)> = Vec::new();
             loop {
                 let now = Instant::now();
                 if last_profiler.is_none_or(|t| now - t >= PROFILER_INTERVAL) {
@@ -174,6 +178,53 @@ impl Provider for BluetoothProvider {
                     };
                 last_poll = Some(Instant::now());
                 let merged = merge(profiler_devices.clone(), ioreg);
+                // A familiar device appearing with a battery is a connect:
+                // say so, at most once an hour per device.
+                let mut connected = Vec::new();
+                for d in &merged {
+                    let known = last_sent
+                        .as_ref()
+                        .is_some_and(|prev| prev.iter().any(|p| p.id == d.id));
+                    if !known && !d.levels.is_empty() {
+                        // The main level if the device reports one (left
+                        // bud for AirPods, case ignored).
+                        let level = d
+                            .levels
+                            .iter()
+                            .find(|(c, _)| *c == BatteryComponent::Main)
+                            .or_else(|| d.levels.first())
+                            .map(|(_, v)| *v);
+                        connected.push((d.id.clone(), d.name.clone(), level));
+                    }
+                }
+                {
+                    for (id, name, level) in connected {
+                        let quiet = connect_alerts.iter_mut().find(|(k, _)| *k == id);
+                        if quiet.as_ref().is_some_and(|(_, at)| at.elapsed() < Duration::from_secs(3600)) {
+                            continue;
+                        }
+                        match quiet {
+                            Some(slot) => slot.1 = Instant::now(),
+                            None => connect_alerts.push((id.clone(), Instant::now())),
+                        }
+                        let n = NewNotification {
+                            app: AppRef { known: None, bundle_id: None, display_name: "Bluetooth".into(), platform: None },
+                            origin: Origin::Internal,
+                            kind: NotificationKind::Info,
+                            priority: Some(Priority::Low),
+                            title: format!("{name} connected"),
+                            subtitle: level.map(|l| format!("{l}% battery")),
+                            body: String::new(),
+                            timestamp_ms: notchforge_core::time::now_ms(),
+                            thread: Some("bt-connect".into()),
+                            url: None,
+                            tokens: None,
+                        };
+                        if !ctx.emit(ProviderEvent::Notification(n)).await {
+                            return Ok(());
+                        }
+                    }
+                }
                 if last_sent.as_ref() != Some(&merged) {
                     last_sent = Some(merged.clone());
                     if !ctx.emit(ProviderEvent::Devices(merged)).await {

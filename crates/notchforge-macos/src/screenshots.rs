@@ -26,11 +26,29 @@ fn is_screenshot(path: &std::path::Path) -> bool {
     n >= 0
 }
 
-/// The Desktop directories to watch: the user's own.
-fn desktops() -> Vec<PathBuf> {
-    match std::env::var_os("HOME") {
-        Some(home) => vec![PathBuf::from(home).join("Desktop")],
-        None => Vec::new(),
+/// The directories to watch: the user's own Desktop (screenshots) and
+/// Downloads (new files, once they stopped growing).
+fn watched_dirs() -> Vec<(PathBuf, Kind)> {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return Vec::new() };
+    vec![(home.join("Desktop"), Kind::Screenshot), (home.join("Downloads"), Kind::Download)]
+}
+
+enum Kind {
+    /// Only files carrying the screenshot xattr.
+    Screenshot,
+    /// Any finished file (browser partials skipped by extension).
+    Download,
+}
+
+impl Kind {
+    fn accepts(&self, path: &std::path::Path) -> bool {
+        match self {
+            Kind::Screenshot => is_screenshot(path),
+            Kind::Download => !matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("download") | Some("crdownload") | Some("part") | Some("partial")
+            ),
+        }
     }
 }
 
@@ -46,10 +64,11 @@ impl Watcher {
         Self { seen: HashSet::new(), since_ms: now_ms }
     }
 
-    /// Scan the Desktops; returns screenshots not seen before.
+    /// Scan the watched directories; returns new files worth shelving.
+    /// Downloads must have sat still for a few seconds (no partials).
     pub fn scan(&mut self) -> Vec<PathBuf> {
         let mut found = Vec::new();
-        for dir in desktops() {
+        for (dir, kind) in watched_dirs() {
             let Ok(entries) = std::fs::read_dir(&dir) else { continue };
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -57,14 +76,26 @@ impl Watcher {
                     continue;
                 }
                 self.seen.insert(path.clone());
-                let fresh = entry
-                    .metadata()
+                let Ok(meta) = entry.metadata() else { continue };
+                let modified = meta
+                    .modified()
                     .ok()
-                    .and_then(|m| m.modified().ok())
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
-                if fresh >= self.since_ms && is_screenshot(&path) {
+                if modified < self.since_ms {
+                    continue;
+                }
+                if matches!(kind, Kind::Download)
+                    && std::time::SystemTime::now()
+                        .duration_since(meta.modified().unwrap_or(std::time::UNIX_EPOCH))
+                        .is_ok_and(|d| d < std::time::Duration::from_secs(10))
+                {
+                    // Still being written: forget it so the next scan can take it.
+                    self.seen.remove(&path);
+                    continue;
+                }
+                if kind.accepts(&path) {
                     found.push(path);
                 }
             }

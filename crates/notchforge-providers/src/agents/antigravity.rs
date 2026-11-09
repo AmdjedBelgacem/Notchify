@@ -18,6 +18,7 @@
 
 use crate::agents::usage::parse_time;
 use notchforge_core::model::{AgentLimits, LimitGauge, ProviderStatus, UsageAgent};
+use notchforge_core::time::now_ms;
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
 };
@@ -191,6 +192,7 @@ fn to_limits(plan: &PlanStatus, models: &[ModelConfig]) -> AgentLimits {
         project: None,
         gauges,
         context_percent: None,
+        active_ms: Some(now_ms()),
     }
 }
 
@@ -232,6 +234,7 @@ impl Provider for AntigravityProvider {
                                 project: None,
                                 gauges: Vec::new(),
                                 context_percent: None,
+                                active_ms: None,
                             }))
                             .await;
                         continue;
@@ -257,6 +260,7 @@ impl Provider for AntigravityProvider {
                                 project: None,
                                 gauges: Vec::new(),
                                 context_percent: None,
+                                active_ms: None,
                             }))
                             .await;
                     }

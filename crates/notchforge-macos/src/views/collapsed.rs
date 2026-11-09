@@ -349,6 +349,31 @@ impl CollapsedView {
             return;
         }
 
+        // An agent working right now: its name and context use.
+        if let Some(a) = snap.agent_active.first() {
+            self.art.setHidden(true);
+            self.art_box.setHidden(true);
+            self.set_equalizer(false, &p.success, false);
+            set_symbol(&self.left_icon, "sparkles", 12.0, "Agent working");
+            self.left_icon.setContentTintColor(Some(&p.accent));
+            self.left_icon.setHidden(false);
+            self.left_text.setHidden(true);
+            self.right_icon.setHidden(true);
+            let text = match (a.project.as_deref(), a.context_percent) {
+                (Some(project), Some(ctx)) => {
+                    let name = project.rsplit('/').next().unwrap_or(project);
+                    format!("{name} {ctx}%")
+                }
+                (Some(project), None) => project.rsplit('/').next().unwrap_or(project).to_owned(),
+                (None, Some(ctx)) => format!("{} {ctx}%", a.agent.display_name()),
+                (None, None) => a.agent.display_name().to_owned(),
+            };
+            set_text(&self.right_text, &text);
+            set_accessibility_label(&self.right_text, &format!("{} is working", a.agent.display_name()));
+            self.right_text.setHidden(false);
+            return;
+        }
+
         // A meeting about to start: the countdown until it does. Sits below
         // timers and calls, above the regular wings.
         let now = notchforge_core::time::now_ms();

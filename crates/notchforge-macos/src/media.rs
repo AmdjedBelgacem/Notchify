@@ -57,6 +57,11 @@ pub fn set_output(uid: &str) {
     send(ProviderCommand::SetOutputDevice(uid.to_owned()));
 }
 
+/// Make this device (by UID) the default microphone.
+pub fn set_input(uid: &str) {
+    send(ProviderCommand::SetInputDevice(uid.to_owned()));
+}
+
 /// Launch a player (used by the empty state's "Open Spotify" buttons).
 pub fn open_player(player: MediaPlayer) {
     let ws = NSWorkspace::sharedWorkspace();

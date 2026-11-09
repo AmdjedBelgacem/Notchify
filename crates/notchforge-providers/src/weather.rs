@@ -77,6 +77,10 @@ struct Hourly {
 struct Daily {
     temperature_2m_max: Vec<f32>,
     temperature_2m_min: Vec<f32>,
+    #[serde(default)]
+    sunrise: Vec<String>,
+    #[serde(default)]
+    sunset: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,7 +102,7 @@ pub fn forecast_url(cfg: &WeatherConfig, at: Coordinates) -> String {
          &current=temperature_2m,apparent_temperature,weather_code,is_day\
          &hourly=temperature_2m,weather_code,precipitation_probability\
          &minutely_15=precipitation&forecast_minutely_15=12\
-         &daily=temperature_2m_max,temperature_2m_min&forecast_days=2&timezone=auto",
+         &daily=temperature_2m_max,temperature_2m_min,sunrise,sunset&forecast_days=2&timezone=auto",
         cfg.api_base, at.latitude, at.longitude
     );
     if cfg.unit == TemperatureUnit::Fahrenheit {
@@ -139,7 +143,15 @@ pub fn parse_forecast(json: &[u8], place: &str, unit: TemperatureUnit) -> Result
         unit,
         hourly,
         fetched_at_ms: now_ms(),
+        sunrise: f.daily.sunrise.first().map(|t| iso_to_hm(t)),
+        sunset: f.daily.sunset.first().map(|t| iso_to_hm(t)),
+        aqi: None,
     })
+}
+
+/// "2026-11-10T06:52" → "06:52".
+fn iso_to_hm(iso: &str) -> String {
+    iso.get(11..16).unwrap_or(iso).to_owned()
 }
 
 /// Minutes until rain starts, from the 15-minute precipitation series.
@@ -176,6 +188,13 @@ fn rain_alert(mins: u8, place: &str) -> ProviderEvent {
         tokens: None,
     };
     ProviderEvent::Notification(n)
+}
+
+/// The current European AQI from Open-Meteo's air-quality API. Best effort.
+async fn fetch_aqi(client: &reqwest::Client, url: &str) -> Option<u8> {
+    let resp = client.get(url).timeout(Duration::from_secs(8)).send().await.ok()?;
+    let v: serde_json::Value = resp.json().await.ok()?;
+    v.get("current")?.get("european_aqi")?.as_f64().map(|a| a.round().clamp(0.0, 150.0) as u8)
 }
 
 pub struct WeatherProvider;
@@ -254,6 +273,8 @@ impl Provider for WeatherProvider {
                 .build()
                 .map_err(ProviderError::other)?;
             let mut resolver = Resolver { client: client.clone(), cached: None };
+            // Air quality rides along, refreshed at most every 30 minutes.
+            let mut aqi_at: Option<std::time::Instant> = None;
             let mut last_fetch: Option<std::time::Instant>;
             // One "rain soon" peek per storm, never more than every 3 hours.
             let mut last_rain_alert: Option<std::time::Instant> = None;
@@ -271,7 +292,17 @@ impl Provider for WeatherProvider {
                     .bytes()
                     .await
                     .map_err(ProviderError::other)?;
-                let weather = parse_forecast(&body, &place, cfg.unit).map_err(ProviderError::Other)?;
+                let mut weather = parse_forecast(&body, &place, cfg.unit).map_err(ProviderError::Other)?;
+                if aqi_at.is_none_or(|t| t.elapsed() > Duration::from_secs(1800)) {
+                    aqi_at = Some(std::time::Instant::now());
+                    let aqi_url = format!(
+                        "https://air-quality-api.open-meteo.com/v1/air-quality?latitude={:.4}&longitude={:.4}&current=european_aqi",
+                        coords.latitude, coords.longitude
+                    );
+                    if let Some(aqi) = fetch_aqi(&client, &aqi_url).await {
+                        weather.aqi = Some(aqi);
+                    }
+                }
                 last_fetch = Some(std::time::Instant::now());
                 ctx.set_status(ProviderStatus::Running).await;
                 if !ctx.emit(ProviderEvent::Weather(weather)).await {

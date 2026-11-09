@@ -225,6 +225,25 @@ mod mac {
     }
 
     pub fn read() -> Read {
+        let mut inputs = Vec::new();
+        let default_in = ca::default_input();
+        for id in ca::device_ids() {
+            if ca::input_channels(id) == 0
+                || ca::get::<u32>(id, ca::global(ca::kAudioDevicePropertyIsHidden)).unwrap_or(0) != 0
+            {
+                continue;
+            }
+            let Some(uid) = ca::device_uid(id) else { continue };
+            inputs.push(notchforge_core::model::InputDevice {
+                uid: uid.clone(),
+                name: ca::get_string(id, ca::global(ca::kAudioObjectPropertyName)).unwrap_or_else(|| "Microphone".into()),
+                transport: ca::get::<u32>(id, ca::global(ca::kAudioDevicePropertyTransportType))
+                    .map(AudioTransport::from_fourcc)
+                    .unwrap_or_default(),
+                is_default: default_in == Some(id),
+            });
+        }
+        inputs.sort_by_key(|i| !i.is_default);
         let default = ca::default_output();
         let me = std::process::id() as i32;
         let mut uid_of: HashMap<ca::AudioObjectID, String> = HashMap::new();
@@ -276,7 +295,7 @@ mod mac {
             })
             .collect();
         Read {
-            state: AudioState { devices, sources: group_sources(raw), sources_supported },
+            state: AudioState { devices, sources: group_sources(raw), sources_supported, inputs },
             process_objects,
             device_objects,
         }
@@ -285,6 +304,11 @@ mod mac {
     pub fn set_output(uid: &str) -> Result<(), String> {
         let dev = ca::find_device_by_uid(uid).ok_or_else(|| format!("no output device {uid}"))?;
         ca::set_default_output(dev).map_err(|s| format!("CoreAudio error {s}"))
+    }
+
+    pub fn set_input(uid: &str) -> Result<(), String> {
+        let dev = ca::find_device_by_uid(uid).ok_or_else(|| format!("no input device {uid}"))?;
+        ca::set_default_input(dev).map_err(|s| format!("CoreAudio error {s}"))
     }
 }
 
@@ -316,6 +340,14 @@ impl Provider for AudioProvider {
                         _ = tokio::time::sleep(FALLBACK_POLL) => {}
                         cmd = ctx.next_command() => match cmd {
                             None => return Ok(()),
+                            Some(notchforge_core::provider::ProviderCommand::SetInputDevice(uid)) => {
+                                let res = tokio::task::spawn_blocking(move || mac::set_input(&uid))
+                                    .await
+                                    .unwrap_or(Err("task failed".into()));
+                                if let Err(e) = res {
+                                    tracing::warn!(error = %e, "could not switch microphone");
+                                }
+                            }
                             Some(notchforge_core::provider::ProviderCommand::SetOutputDevice(uid)) => {
                                 let res = tokio::task::spawn_blocking(move || mac::set_output(&uid))
                                     .await

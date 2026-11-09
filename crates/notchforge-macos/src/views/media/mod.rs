@@ -97,6 +97,7 @@ struct PageState {
     featured: Featured,
     now: Option<NowPlaying>,
     devices: Vec<(String, String, String, bool)>,
+    inputs: Vec<(String, String, bool)>,
     chosen_list_player: Option<MediaPlayer>,
     /// The player the user picked in the sources bar (or via the segments):
     /// the card and the controls follow it until they pick another one or it
@@ -170,6 +171,7 @@ pub struct MediaPage {
     open_music: Retained<NSButton>,
 
     output_button: Retained<NSButton>,
+    input_button: Retained<NSButton>,
     volume: Retained<ThinSlider>,
 
     caps: Retained<NSTextField>,
@@ -591,6 +593,22 @@ impl MediaPage {
         );
         make_card(&output_button, &white(0.16), 15.0);
         player.addSubview(&output_button);
+        let st = state.clone();
+        let t = targets.add(mtm, move |sender: Option<&AnyObject>| {
+            let Some(b) = sender.and_then(|s| s.downcast_ref::<NSButton>()) else { return };
+            input_menu(b, &st.borrow().inputs);
+        });
+        let input_button = symbol_button(
+            mtm,
+            "mic.fill",
+            14.0,
+            "Microphone",
+            &p.primary,
+            &t,
+            rect(output_right - 66.0, volume_y - 1.0, 30.0, 30.0),
+        );
+        make_card(&input_button, &white(0.16), 15.0);
+        player.addSubview(&input_button);
 
         // ── other apps making sound, and the output's format ──
         let by = ph - 12.0 - 24.0;
@@ -804,6 +822,7 @@ impl MediaPage {
             open_spotify,
             open_music,
             output_button,
+            input_button,
             volume,
             caps,
             sources,
@@ -1139,6 +1158,11 @@ impl MediaPage {
     fn render_output(&self, audio: &AudioState) {
         self.state.borrow_mut().devices =
             audio.devices.iter().map(|d| (d.uid.clone(), d.name.clone(), d.capabilities(), d.is_default)).collect();
+        self.state.borrow_mut().inputs =
+            audio.inputs.iter().map(|d| (d.uid.clone(), d.name.clone(), d.is_default)).collect();
+        let mic = audio.inputs.iter().find(|d| d.is_default);
+        set_button_symbol(&self.input_button, "mic.fill", 14.0, &format!("Microphone: {}", mic.map_or("None", |d| d.name.as_str())));
+        self.input_button.setEnabled(!audio.inputs.is_empty());
         let name = audio.default_device().map_or("No output", |d| d.name.as_str());
         let symbol = audio.default_device().map_or("airplayaudio", |d| d.symbol());
         set_button_symbol(&self.output_button, symbol, 14.0, &format!("Output: {name}"));
@@ -1281,6 +1305,34 @@ impl MediaPage {
 }
 
 /// The "Output" pill's menu: every output, with its capabilities.
+fn input_menu(anchor: &NSButton, devices: &[(String, String, bool)]) {
+    let mtm = MainThreadMarker::from(anchor);
+    let menu = NSMenu::new(mtm);
+    menu.setAutoenablesItems(false);
+    // Targets must outlive the menu's tracking; the menu is modal, so a local
+    // store dropped after `popUp…` returns is enough.
+    let targets = Targets::default();
+    for (uid, name, is_default) in devices {
+        let uid = uid.clone();
+        let t = targets.add(mtm, move |_| glue::set_input(&uid));
+        let item = NSMenuItem::new(mtm);
+        item.setTitle(&NSString::from_str(name));
+        item.setState(if *is_default {
+            objc2_app_kit::NSControlStateValueOn
+        } else {
+            objc2_app_kit::NSControlStateValueOff
+        });
+        item.setEnabled(!*is_default);
+        // SAFETY: valid target/selector; the target lives in `targets`.
+        unsafe {
+            item.setTarget(Some(t.as_any()));
+            item.setAction(Some(crate::ui::ActionTarget::action()));
+        }
+        menu.addItem(&item);
+    }
+    menu.popUpMenuPositioningItem_atLocation_inView(None, NSPoint::new(0.0, anchor.frame().size.height + 4.0), Some(anchor));
+}
+
 fn output_menu(anchor: &NSButton, devices: &[(String, String, String, bool)]) {
     let mtm = MainThreadMarker::from(anchor);
     let menu = NSMenu::new(mtm);

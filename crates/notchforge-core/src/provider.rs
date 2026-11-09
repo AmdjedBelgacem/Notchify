@@ -107,6 +107,8 @@ pub enum ProviderCommand {
     ReloadPlaylists,
     /// Make this device (by UID) the default output.
     SetOutputDevice(String),
+    /// Make this device (by UID) the default microphone.
+    SetInputDevice(String),
     /// Start the Spotify Web API sign-in flow (opens the browser).
     SpotifyConnect,
     /// Give up a sign-in that is waiting on the browser.

@@ -229,6 +229,16 @@ pub fn output_channels(dev: AudioObjectID) -> u32 {
     get_bytes(dev, output(kAudioDevicePropertyStreamConfiguration)).map(|b| buffer_list_channels(&b)).unwrap_or(0)
 }
 
+pub fn input_channels(dev: AudioObjectID) -> u32 {
+    get_bytes(dev, input(kAudioDevicePropertyStreamConfiguration)).map(|b| buffer_list_channels(&b)).unwrap_or(0)
+}
+
+/// Make `dev` the default microphone.
+pub fn set_default_input(dev: AudioObjectID) -> Result<(), OSStatus> {
+    let status = set::<u32>(kAudioObjectSystemObject, global(kAudioHardwarePropertyDefaultInputDevice), dev);
+    if status != 0 { Err(status) } else { Ok(()) }
+}
+
 /// `AudioValueRange`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]

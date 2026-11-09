@@ -971,6 +971,9 @@ fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core
         })
         .collect(),
         fetched_at_ms: now,
+        sunrise: Some("06:52".into()),
+        sunset: Some("17:31".into()),
+        aqi: Some(28),
     });
     fake.devices = vec![
         DeviceBattery {
@@ -1269,7 +1272,7 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
                 running: true,
                 project: Some("Notchify".into()),
                 gauges: vec![gauge("Session", 42, 130), gauge("Week", 83, 3 * 1440)],
-                context_percent: Some(18),
+                context_percent: Some(18), active_ms: None,
             },
             AgentLimits {
                 agent: UsageAgent::Codex,
@@ -1278,7 +1281,7 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
                 running: true,
                 project: Some("api-server".into()),
                 gauges: vec![gauge("Session", 12, 271), gauge("Week", 36, 5 * 1440)],
-                context_percent: Some(64),
+                context_percent: Some(64), active_ms: None,
             },
         ],
         running: {
@@ -1620,6 +1623,7 @@ fn board_snapshots(
             })
             .collect(),
         sources_supported: true,
+        inputs: vec![notchforge_core::model::InputDevice { uid: "mic-1".into(), name: "MacBook Pro Microphone".into(), transport: AudioTransport::BuiltIn, is_default: true }],
     };
     let cover = dir.join("afterglow.png");
     if let Some(png) = art_png(

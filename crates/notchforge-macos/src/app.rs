@@ -349,7 +349,7 @@ pub fn run(boot: Boot) -> Result<(), String> {
 
     let controller = Controller::new(mtm, boot.config.clone(), boot.engine.clone())?;
     controller.install();
-    if boot.config.tray.screenshots {
+    if boot.config.tray.screenshots || boot.config.tray.downloads {
         controller.start_screenshot_timer();
     }
     let menubar = MenuBar::new(mtm);

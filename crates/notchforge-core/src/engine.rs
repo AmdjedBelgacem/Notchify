@@ -13,7 +13,8 @@ use crate::calls::{
 };
 use crate::config::{Config, Paths};
 use crate::model::{
-    AUTH_THREAD_AGENT, AUTH_THREAD_PERMISSION, AUTH_THREAD_SPOTIFY, AgentLimits, AgentUsage, AudioState, BatteryStatus,
+    AUTH_THREAD_AGENT, AUTH_THREAD_PERMISSION, AUTH_THREAD_SPOTIFY, AgentActive, AgentLimits, AgentUsage, AudioState,
+    BatteryStatus,
     CalendarState, DeviceBattery, FocusState, MediaPlayer, MediaState, NewNotification, Notification, NotificationId,
     NotificationKind, Origin, PlaylistStatus, Priority, ProviderStatus, TimerState, TrayItem, TrayItemId, UsageAgent,
     Weather,
@@ -128,6 +129,8 @@ pub struct Snapshot {
     pub audio: AudioState,
     pub media: MediaState,
     pub usage: AgentUsage,
+    /// Agents working right now (a fresh status line or quota poll), wing order.
+    pub agent_active: Vec<AgentActive>,
     /// Ringing now, the one shown first at the front.
     pub calls: Vec<Call>,
     /// The call you picked up.
@@ -457,6 +460,20 @@ impl Engine {
                     }
                     usage
                 }
+            },
+            agent_active: {
+                let now = now_ms();
+                s.usage
+                    .limits
+                    .iter()
+                    .chain(s.antigravity_limits.iter())
+                    .filter(|l| l.running && l.active_ms.is_some_and(|ms| now - ms <= 120_000))
+                    .map(|l| AgentActive {
+                        agent: l.agent,
+                        context_percent: l.context_percent,
+                        project: l.project.clone(),
+                    })
+                    .collect()
             },
             calls: s.calls.clone(),
             active_call: s.active_call.clone(),

@@ -1787,6 +1787,12 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 |cfg, on| cfg.tray.persist = on,
             );
             form.switch(
+                "Downloads go to the tray",
+                Some("A finished download appears in the tray, ready to drag anywhere."),
+                c.tray.downloads,
+                |cfg, on| cfg.tray.downloads = on,
+            );
+            form.switch(
                 "Screenshots go to the tray",
                 Some("Every screenshot on the Desktop appears in the tray, ready to drag out."),
                 c.tray.screenshots,

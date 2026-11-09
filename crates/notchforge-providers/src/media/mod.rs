@@ -883,7 +883,7 @@ impl Provider for MediaProvider {
                         apply_playlists(&mut s.state, (MediaPlayer::Spotify, signed_out, vec![]));
                         s.playlists_loaded_ms.remove(&MediaPlayer::Spotify);
                     }
-                    Wake::Command(ProviderCommand::SetOutputDevice(_)) => {}
+                    Wake::Command(ProviderCommand::SetOutputDevice(_) | ProviderCommand::SetInputDevice(_)) => {}
                     Wake::Command(ProviderCommand::Usage { .. } | ProviderCommand::AgentHook(_)) => {}
                 }
             }
