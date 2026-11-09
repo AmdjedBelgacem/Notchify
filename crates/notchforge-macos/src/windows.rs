@@ -85,7 +85,19 @@ pub fn fullscreen_covers(windows: &[WindowInfo], screen: &ScreenInfo) -> bool {
             && w.bounds.y <= f.y + 1.0
             && w.bounds.max_x() >= f.max_x() - 1.0
             && w.bounds.max_y() >= f.max_y() - 1.0
+            && is_regular_app(w.pid)
     })
+}
+
+/// The window's owner is a real, front-facing app. Background helpers —
+/// automation overlays, capture daemons, menu-bar extras — can span the whole
+/// screen at layer 0 without being fullscreen apps; activation policy tells
+/// them apart (agents run as accessory/prohibited, real apps as regular).
+fn is_regular_app(pid: i32) -> bool {
+    let apps = objc2_app_kit::NSWorkspace::sharedWorkspace().runningApplications();
+    apps.iter()
+        .find(|a| a.processIdentifier() == pid)
+        .is_some_and(|a| a.activationPolicy() == objc2_app_kit::NSApplicationActivationPolicy::Regular)
 }
 
 /// The frames of status items (Wi-Fi, battery, clock side, any menu bar
