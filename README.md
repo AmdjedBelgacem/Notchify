@@ -104,7 +104,8 @@ It surfaces:
   Codex CLI logs, from OpenCode's local database, and from any agent that
   reports usage through the transports (`notchforge-notify --source gemini
   --input 1200 --output 340 --model …`). Only counts, models, times and
-  project names are kept; it shows tokens rather than money. **Antigravity**
+  project names are kept; it shows tokens rather than money, plus a rough
+  list-price **estimate** (≈) per range. **Antigravity**
   is read live from its own language server while it runs — plan prompt
   credits and per-model quota rings with their reset times. Gemini CLI and
   Qoder record no usage on disk, so they count when something reports them.
