@@ -30,7 +30,10 @@ It surfaces:
   friends deliver it through their normal session. The banner must still be on
   screen (it is, right after the message arrives); keep banners enabled for
   apps you want to answer. Any ordinary peek can be **snoozed** — it hides for
-  half an hour and comes back.
+  half an hour and comes back — or right-clicked into **Dismiss** and
+  **Never show this app**; the reply bar carries **canned replies**
+  (👍 🙏 ✅), and everything that got through keeps a **searchable History**
+  under the list.
 - **Weather**: current conditions, high and low, and the next 5 hours (Open-Meteo,
   free with no key).
 - **Auto-Focus during meetings.** With one switch, Focus turns on 15 minutes
@@ -58,9 +61,11 @@ It surfaces:
 - **Batteries**: your Mac's, plus AirPods (left, right and case),
   Magic Keyboard, Mouse, Trackpad and other HID accessories.
 - **A temporary file tray.** Drag files onto the notch, then drag them back out
-  to anywhere, AirDrop them, reveal them in Finder or copy their paths. Every
-  **screenshot you take lands in the tray automatically** (macOS marks them —
-  any name, any language). Shelved clipboard text and links (⌃⌥C) live here
+  to anywhere, AirDrop them, reveal them in Finder or copy their paths. Tray
+  tiles right-click into Open / **Quick Look** / **Copy Text** (built-in
+  **Vision OCR**, with a Shortcuts action as fallback) / AirDrop / Remove.
+  Finished **downloads** join the tray too. Every **screenshot you take lands
+  in the tray automatically** (macOS marks them — any name, any language). Shelved clipboard text and links (⌃⌥C) live here
   too, with pinned snippets kept forever.
 - **A wing chevron, like the notch's own hidden-items arrow.** macOS reserves
   menu-bar space only for the hardware notch, so nothing can make it move
