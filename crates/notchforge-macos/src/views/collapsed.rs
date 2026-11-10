@@ -349,16 +349,13 @@ impl CollapsedView {
             return;
         }
 
-        // An agent working right now: its name and context use.
+        // An agent working right now: its name and context use. It renders in
+        // whichever wing is free (menu bar items may occupy one side), so the
+        // whole message fits in one wing either way.
         if let Some(a) = snap.agent_active.first() {
             self.art.setHidden(true);
             self.art_box.setHidden(true);
             self.set_equalizer(false, &p.success, false);
-            set_symbol(&self.left_icon, "sparkles", 12.0, "Agent working");
-            self.left_icon.setContentTintColor(Some(&p.accent));
-            self.left_icon.setHidden(false);
-            self.left_text.setHidden(true);
-            self.right_icon.setHidden(true);
             let text = match (a.project.as_deref(), a.context_percent) {
                 (Some(project), Some(ctx)) => {
                     let name = project.rsplit('/').next().unwrap_or(project);
@@ -372,9 +369,33 @@ impl CollapsedView {
                 (None, Some(ctx)) => format!("{} {ctx}%", a.agent.display_name()),
                 (None, None) => a.agent.display_name().to_owned(),
             };
-            set_text(&self.right_text, &text);
-            set_accessibility_label(&self.right_text, &format!("{} is working", a.agent.display_name()));
-            self.right_text.setHidden(false);
+            let spoken = format!("{} is working", a.agent.display_name());
+            let use_left = opts.mask & WING_LEFT != 0;
+            if use_left {
+                // Left wing: sparkle icon + the status text.
+                set_symbol(&self.left_icon, "sparkles", 12.0, "Agent working");
+                self.left_icon.setContentTintColor(Some(&p.accent));
+                self.left_icon.setHidden(false);
+                set_text(&self.left_text, &text);
+                set_accessibility_label(&self.left_text, &spoken);
+                self.left_text.setHidden(false);
+                self.right_icon.setHidden(true);
+                self.right_text.setHidden(true);
+            } else if opts.mask & WING_RIGHT != 0 {
+                // Right wing only: the status text, right-aligned.
+                self.left_icon.setHidden(true);
+                self.left_text.setHidden(true);
+                self.right_icon.setHidden(true);
+                set_text(&self.right_text, &text);
+                set_accessibility_label(&self.right_text, &spoken);
+                self.right_text.setHidden(false);
+            } else {
+                // Both wings dodged: nothing renders here.
+                self.left_icon.setHidden(true);
+                self.left_text.setHidden(true);
+                self.right_icon.setHidden(true);
+                self.right_text.setHidden(true);
+            }
             return;
         }
 

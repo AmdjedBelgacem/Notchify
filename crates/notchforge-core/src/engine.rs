@@ -164,6 +164,7 @@ impl Snapshot {
             || !self.calls.is_empty()
             || self.active_call.is_some()
             || !self.tray.is_empty()
+            || !self.agent_active.is_empty()
             || (media && (self.media.is_playing() || self.audio.is_playing()))
             || self.battery.as_ref().is_some_and(|b| b.charging || b.is_low())
     }
@@ -1417,6 +1418,24 @@ mod tests {
         assert!(!e.apply_command(Command::SnoozeNotification(NotificationId(99_999))));
         assert_eq!(e.snoozed.len(), 1);
         let _ = rec;
+    }
+
+    #[test]
+    fn a_working_agent_warrants_wings() {
+        let (mut e, _h, _rec, _tx) = engine();
+        // agent_active is derived at publish time; drive it through the
+        // limits event the Antigravity provider emits.
+        e.apply_event(ProviderEvent::Limits(AgentLimits {
+            agent: UsageAgent::Antigravity,
+            connected: true,
+            plan: Some("Pro".into()),
+            running: true,
+            project: None,
+            gauges: Vec::new(),
+            context_percent: Some(34),
+            active_ms: Some(now_ms()),
+        }));
+        assert!(e.snapshot().wants_wings(), "the agent wing shows even with nothing else on");
     }
 
     #[test]

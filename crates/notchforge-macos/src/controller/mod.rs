@@ -570,14 +570,19 @@ impl Controller {
         // Per-side content, mirroring views/collapsed.rs.
         let low = snap.battery.as_ref().is_some_and(|b| b.is_low());
         let call_wing = snap.active_call.is_some() || !snap.calls.is_empty();
-        let left = call_wing
+        // An agent working now warrants a wing on either side (the render
+        // picks whichever is free).
+        let agent_wing = !snap.agent_active.is_empty();
+        let left = agent_wing
+            || call_wing
             || playing.is_some()
             || browser.is_some()
             || recent_paused.is_some()
             || low
             || snap.battery.as_ref().is_some_and(|b| b.present && b.charging)
             || !snap.tray.is_empty();
-        let right = call_wing
+        let right = agent_wing
+            || call_wing
             || snap.unread > 0
             || snap.focus.active == Some(true)
             || (snap.unread == 0 && (playing.is_some() || browser.is_some() || recent_paused.is_some()));
