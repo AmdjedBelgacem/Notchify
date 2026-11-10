@@ -456,7 +456,18 @@ pub fn recognise(app: &AppRef, title: &str, subtitle: Option<&str>, body: &str) 
 /// Words a banner's buttons use for answering a call.
 pub const ANSWER_WORDS: &[&str] = &["accept", "answer", "join", "pick up", "accepter", "répondre", "rejoindre"];
 /// Words a banner's buttons use to expand an inline reply field.
-pub const REPLY_WORDS: &[&str] = &["reply", "répondre", "answer", "respond"];
+pub const REPLY_WORDS: &[&str] = &[
+    "reply",
+    "répondre",
+    "answer",
+    "respond",
+    // Social platforms label their inline reply fields and buttons variously:
+    // Facebook's banner says "Reply", Instagram's says "Send message",
+    // WhatsApp/Discord sometimes "Message" or "Answer".
+    "send message",
+    "message",
+    "respond",
+];
 /// Words for ending a call in progress, surest first. "Leave" alone is tried
 /// only after these, since other buttons use it too.
 pub const HANG_UP_WORDS: &[&str] =
@@ -475,6 +486,18 @@ pub fn action_matches(name: &str, words: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn social_banner_reply_words() {
+        // Facebook's banner button, Instagram's "Send message" field, and the
+        // French localization all match; unrelated buttons don't.
+        assert!(action_matches("Reply", REPLY_WORDS));
+        assert!(action_matches("Send message", REPLY_WORDS));
+        assert!(action_matches("Reply to Alice", REPLY_WORDS));
+        assert!(action_matches("Répondre", REPLY_WORDS));
+        assert!(!action_matches("Mark as read", REPLY_WORDS));
+        assert!(!action_matches("Like", REPLY_WORDS));
+    }
 
     fn app(bundle: &str) -> AppRef {
         AppRef { known: None, bundle_id: Some(bundle.to_owned()), display_name: bundle.to_owned(), platform: None }

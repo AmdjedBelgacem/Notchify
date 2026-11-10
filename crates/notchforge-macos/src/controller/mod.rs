@@ -1519,7 +1519,9 @@ impl Controller {
     /// panel. Called from the peek and notification-row Reply buttons.
     pub fn start_reply(&self, id: notchforge_core::model::NotificationId) {
         let Some(n) = self.snapshot.borrow().notifications.iter().find(|n| n.id == id).cloned() else { return };
-        let pressed = crate::accessibility::press_banner_reply(&n.title);
+        // Web pushes (Instagram/Facebook in a browser) live in the browser's
+        // own banners, not Notification Center's — search both.
+        let pressed = crate::accessibility::press_banner_reply_in(n.app.bundle_id.as_deref(), &n.title);
         tracing::info!(pressed, app = %n.app.display_name, "reply started");
         if !matches!(self.machine.borrow().state(), State::Expanded) {
             self.handle(Event::Click); // peek/hover pins the panel
@@ -1546,12 +1548,18 @@ impl Controller {
         if text.is_empty() {
             return;
         }
-        let delivered = crate::accessibility::fill_banner_reply(&n.title, &text);
+        let delivered = crate::accessibility::fill_banner_reply_in(n.app.bundle_id.as_deref(), &n.title, &text);
         tracing::info!(delivered, app = %n.app.display_name, len = text.len(), "reply sent");
         if !delivered {
-            // The banner expired while typing: the app itself is the fallback.
-            if let Some(b) = n.app.bundle_id.as_deref() {
+            // The banner expired while typing: land in the conversation —
+            // the notification's own link first (Facebook/Instagram ones
+            // point at the thread), else the app itself.
+            if let Some(url) = n.url.as_deref().filter(|u| !u.is_empty()) {
+                crate::sharing::open_url(url);
+            } else if let Some(b) = n.app.bundle_id.as_deref() {
                 crate::sharing::open_app(b);
+            } else if let Some(site) = notchforge_core::sites::site_from_text(&n.app.display_name) {
+                let _ = crate::sharing::open_url(&format!("https://{}", site.hosts[0]));
             }
         }
         let field = self.views.borrow().expanded.reply_field();

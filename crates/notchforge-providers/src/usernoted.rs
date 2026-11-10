@@ -354,6 +354,39 @@ mod tests {
     }
 
     #[test]
+    fn social_media_messages_classify_for_reply() {
+        // Instagram's native macOS app is rare: its notifications arrive via
+        // a browser (Safari/Chrome), carrying the platform name in the text.
+        let rec = DecodedRecord {
+            title: "Instagram".into(),
+            subtitle: Some("alice_smith".into()),
+            body: "sent you a message".into(),
+            ..Default::default()
+        };
+        let n = to_notification("com.google.Chrome", rec, &[]);
+        assert_eq!(n.app.known, Some(KnownApp::Instagram), "web hint resolves the platform");
+        assert_eq!(n.kind, NotificationKind::Message, "classified reply-able");
+        assert_eq!(n.origin, Origin::NotificationCenterDb);
+        assert_eq!(n.app.category(), AppCategory::Messaging);
+
+        // Facebook / Messenger native + web shapes.
+        let rec = DecodedRecord { title: "Messenger".into(), body: "Bob: see you then".into(), ..Default::default() };
+        let n = to_notification("com.facebook.Messenger", rec, &[]);
+        assert_eq!(n.app.known, Some(KnownApp::Facebook));
+        assert_eq!(n.kind, NotificationKind::Message);
+
+        let rec = DecodedRecord {
+            title: "Facebook".into(),
+            subtitle: Some("2 new messages".into()),
+            body: "".into(),
+            ..Default::default()
+        };
+        let n = to_notification("com.google.Chrome", rec, &[]);
+        assert_eq!(n.app.known, Some(KnownApp::Facebook));
+        assert_eq!(n.kind, NotificationKind::Message);
+    }
+
+    #[test]
     fn agent_kind_inference() {
         assert_eq!(infer_agent_kind("Build failed"), NotificationKind::Error);
         assert_eq!(infer_agent_kind("Task complete"), NotificationKind::TaskFinished);

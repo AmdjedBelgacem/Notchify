@@ -25,9 +25,12 @@ It surfaces:
   agent sends something, the notch asks **Allow / Deny** and remembers your answer.
 - **Messaging notifications** from WhatsApp, Discord, Instagram, Facebook
   and Messenger, Messages, Slack, Telegram and Signal, read from Notification
-  Center — and you can **answer them from the notch**: a Reply box opens and
-  the reply is typed into the app's own notification banner, so Discord &
-  friends deliver it through their normal session. The banner must still be on
+  Center — and you can **answer them from the notch, like on a phone**: a
+  Reply box opens (with canned replies) and the reply is typed into the
+  app's own notification banner, so Discord & friends deliver it through
+  their normal session. Banners that arrive in a **browser** (Instagram and
+  Facebook web pushes) are found there too, and if the banner is already
+  gone the reply falls back to opening the conversation itself. The banner must still be on
   screen (it is, right after the message arrives); keep banners enabled for
   apps you want to answer. Any ordinary peek can be **snoozed** — it hides for
   half an hour and comes back — or right-clicked into **Dismiss** and

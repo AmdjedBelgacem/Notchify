@@ -607,13 +607,17 @@ pub fn open_banner(title: &str) -> bool {
 /// Press the button or action on the native banner titled `title` whose name
 /// matches `words`. Returns whether one was found and pressed.
 pub fn press_banner_button(title: &str, words: &[&str]) -> bool {
+    press_banner_button_in(nc_pid().unwrap_or(0), title, words)
+}
+
+/// Search one process's windows for a banner button matching `words`.
+pub fn press_banner_button_in(pid: i32, title: &str, words: &[&str]) -> bool {
     let mut pressed = false;
     // SAFETY: AX calls on objects we own or borrow from owned arrays.
     unsafe {
-        if AXIsProcessTrusted() == 0 {
+        if AXIsProcessTrusted() == 0 || pid == 0 {
             return false;
         }
-        let Some(pid) = nc_pid() else { return false };
         let Some(app) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return false };
         let Some(windows) = copy_attr(app.as_ptr(), "AXWindows") else { return false };
         for i in 0..CFArrayGetCount(windows.as_ptr()) {
@@ -723,7 +727,22 @@ pub fn status_item_rects(primary_h: f64) -> Vec<Rect> {
 /// expands the app's inline reply field (macOS keeps the banner on screen
 /// while that field is open). `false` when there is no such banner or button.
 pub fn press_banner_reply(title: &str) -> bool {
-    press_banner_button(title, notchforge_core::calls::REPLY_WORDS)
+    press_banner_reply_in(None, title)
+}
+
+/// The same, but also searching an app's own banners first (web pushes from
+/// Chrome-style browsers are windows of the browser process, not of
+/// Notification Center). `bundle` narrows that search to the right browser.
+pub fn press_banner_reply_in(bundle: Option<&str>, title: &str) -> bool {
+    let words = notchforge_core::calls::REPLY_WORDS;
+    if let Some(bundle) = bundle {
+        for pid in running_pids(bundle) {
+            if press_banner_button_in(pid, title, words) {
+                return true;
+            }
+        }
+    }
+    press_banner_button(title, words)
 }
 
 /// Deliver a reply typed in the notch: find the banner with its reply field
@@ -731,13 +750,36 @@ pub fn press_banner_reply(title: &str) -> bool {
 /// it and confirm. The originating app sends the message through its own UI —
 /// there is no public API to deliver a reply directly.
 pub fn fill_banner_reply(title: &str, text: &str) -> bool {
+    fill_banner_reply_in(None, title, text)
+}
+
+/// Deliver a reply through an app's own banner (web pushes). Falls back to
+/// Notification Center like [`fill_banner_reply`].
+pub fn fill_banner_reply_in(bundle: Option<&str>, title: &str, text: &str) -> bool {
+    if let Some(bundle) = bundle {
+        for pid in running_pids(bundle) {
+            if fill_banner_reply_in_pid(pid, title, text) {
+                return true;
+            }
+        }
+    }
+    fill_banner_reply_in_pid(nc_pid().unwrap_or(0), title, text)
+}
+
+/// The running pids of an app (by bundle id) — a browser delivering web
+/// pushes owns its banners.
+fn running_pids(bundle: &str) -> Vec<i32> {
+    let apps = objc2_app_kit::NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(bundle));
+    apps.iter().map(|a| a.processIdentifier()).collect()
+}
+
+fn fill_banner_reply_in_pid(pid: i32, title: &str, text: &str) -> bool {
     let mut delivered = false;
     // SAFETY: AX calls on objects we own or borrow from owned arrays.
     unsafe {
-        if AXIsProcessTrusted() == 0 {
+        if AXIsProcessTrusted() == 0 || pid == 0 {
             return false;
         }
-        let Some(pid) = nc_pid() else { return false };
         let Some(app) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return false };
         let Some(windows) = copy_attr(app.as_ptr(), "AXWindows") else { return false };
         for i in 0..CFArrayGetCount(windows.as_ptr()) {
