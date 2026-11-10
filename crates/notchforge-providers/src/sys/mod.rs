@@ -6,6 +6,7 @@ pub mod ax;
 #[cfg(target_os = "macos")]
 pub mod cf;
 #[cfg(target_os = "macos")]
+pub mod cmio;
 pub mod coreaudio;
 #[cfg(target_os = "macos")]
 pub mod iokit;

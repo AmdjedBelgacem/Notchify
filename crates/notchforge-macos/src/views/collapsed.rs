@@ -362,9 +362,10 @@ impl CollapsedView {
             let text = match (a.project.as_deref(), a.context_percent) {
                 (Some(project), Some(ctx)) => {
                     let name = project.rsplit('/').next().unwrap_or(project);
+                    let dirty = if a.dirty { "●" } else { "" };
                     match &a.branch {
-                        Some(b) => format!("{name} ⎇{b} {ctx}%"),
-                        None => format!("{name} {ctx}%"),
+                        Some(b) => format!("{name} ⎇{b}{dirty} {ctx}%"),
+                        None => format!("{name}{dirty} {ctx}%"),
                     }
                 }
                 (Some(project), None) => project.rsplit('/').next().unwrap_or(project).to_owned(),

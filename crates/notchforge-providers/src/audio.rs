@@ -355,8 +355,14 @@ impl Provider for AudioProvider {
                 let mut ducked: Option<f32> = None;
                 loop {
                     let r = tokio::task::spawn_blocking(mac::read).await.map_err(ProviderError::other)?;
-                    let mic_live = tokio::task::spawn_blocking(mac::mic_live).await.unwrap_or(false);
-                    let duck_volume = mac::apply_duck(mic_live, ducked.take());
+                    // A call is a live microphone OR a live camera (the
+                    // same signal macOS draws its pill from).
+                    let in_call = tokio::task::spawn_blocking(|| {
+                        mac::mic_live() || crate::sys::cmio::camera_in_use()
+                    })
+                    .await
+                    .unwrap_or(false);
+                    let duck_volume = mac::apply_duck(in_call, ducked.take());
                     ducked = duck_volume;
                     listeners.track(&r.process_objects, &r.device_objects);
                     if last.as_ref() != Some(&r.state) {

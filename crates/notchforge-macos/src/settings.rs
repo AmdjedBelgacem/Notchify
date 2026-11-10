@@ -611,6 +611,31 @@ impl Form<'_> {
 
     /// The board's pop-up: a dark rounded pill with the current value and a
     /// chevron; clicking opens a menu of the options.
+    /// A colour well bound to a hex accent. Changes commit like any other
+    /// control; a non-hex result is rounded to the nearest hex by the caller.
+    fn color_well(&self, title: &str, value: &str, set: impl Fn(&mut Config, String) + 'static) {
+        let (row, w, h) = self.half_tile();
+        self.put_texts(&row, title, None, w - 48.0 - 70.0, h);
+        let well_frame = rect(w - 16.0 - 56.0, (h - 28.0) / 2.0, 56.0, 28.0);
+        let well = objc2_app_kit::NSColorWell::colorWellWithStyle(objc2_app_kit::NSColorWellStyle::Default, self.mtm);
+        well.setFrame(well_frame);
+        well.setColor(&crate::ui::hex_to_color(value));
+        let draft = self.draft.clone();
+        let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
+            if let Some(w) = sender.and_then(|sl| sl.downcast_ref::<objc2_app_kit::NSColorWell>()) {
+                let hex = crate::ui::color_to_hex(&w.color());
+                set(&mut draft.borrow_mut(), hex);
+                Self::commit(&draft);
+            }
+        });
+        // SAFETY: target kept alive by `targets`.
+        unsafe {
+            well.setTarget(Some(t.as_any()));
+            well.setAction(Some(crate::ui::ActionTarget::action()));
+        }
+        row.addSubview(&well);
+    }
+
     fn popup(&self, title: &str, options: &[&str], selected: usize, set: impl Fn(&mut Config, usize) + 'static) {
         use objc2_app_kit::{NSCellImagePosition, NSMenu, NSMenuItem};
         let (row, w, h) = self.half_tile();
@@ -1380,6 +1405,7 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 },
             );
             form.note("A hex colour becomes the accent; empty presets win only when the field is not a hex value. The popup switches back to a preset.");
+            form.color_well("Pick an accent", &c.appearance.accent, |cfg, hex| cfg.appearance.accent = hex);
         }
         Pane::Notifications => {
             form.begin("Behaviour");

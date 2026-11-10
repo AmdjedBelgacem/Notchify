@@ -21,6 +21,7 @@ pub mod glass;
 #[cfg(target_os = "macos")]
 pub mod hotkey;
 pub mod screenshots;
+pub mod vision;
 #[cfg(target_os = "macos")]
 pub mod icons;
 #[cfg(target_os = "macos")]

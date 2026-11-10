@@ -54,6 +54,10 @@ struct Args {
     json_arg: Option<String>,
     /// Start a timer from a natural duration ("25m", "1h30m", "90 s").
     timer: Option<String>,
+    /// Add a reminder (`--remind "Call mom"`); `--when` sets it
+    /// ("in 20m", "at 17:00", "tomorrow 9am" -> next occurrence).
+    remind: Option<String>,
+    when: Option<String>,
     /// Reported token usage (see the usage ingest).
     input: Option<u64>,
     output: Option<u64>,
@@ -86,6 +90,8 @@ fn parse() -> Result<Option<Args>, String> {
             }
             "--model" => a.model = Some(value("--model")?),
     "--timer" => a.timer = Some(value("--timer")?),
+    "--remind" => a.remind = Some(value("--remind")?),
+    "--when" => a.when = Some(value("--when")?),
             "--best-effort" => a.best_effort = true,
             "-h" | "--help" => return Ok(None),
             // A bare JSON argument (the Codex CLI `notify` hook passes one).
@@ -231,6 +237,27 @@ fn main() -> ExitCode {
     } else {
         None
     };
+    // A reminder rides the same delivery: the engine hands it to the
+    // calendar provider (EventKit), which saves it and refreshes the list.
+    if let Some(text) = args.remind.clone() {
+        let due_ms = match args.when.as_deref() {
+            None => None,
+            Some(spec) => match parse_when(spec) {
+                Some(v) => Some(v),
+                None => return fail(format!("could not read the time: {spec}"), args.best_effort),
+            },
+        };
+        let mut body = serde_json::json!({
+            "source": "notchforge",
+            "kind": "Info",
+            "thread": "notchforge-remind",
+            "title": text,
+        });
+        if let Some(ms) = due_ms {
+            body["body"] = serde_json::json!(ms.to_string());
+        }
+        return deliver(&args, &body.to_string());
+    }
     // A timer request rides the same delivery: the engine recognizes the
     // thread and starts the countdown instead of showing a notification.
     if let Some(spec) = args.timer.clone() {
@@ -279,6 +306,54 @@ fn deliver(args: &Args, body: &str) -> ExitCode {
     match append_inbox(body) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => fail(format!("could not deliver ({}; inbox: {e})", http.err().unwrap_or_default()), args.best_effort),
+    }
+}
+
+/// "in 20m" / "at 17:00" / "17:00" → absolute epoch ms. "tomorrow 9am"
+/// and bare hours mean the next occurrence.
+fn parse_when(spec: &str) -> Option<i64> {
+    let spec = spec.trim();
+    let now = now_ms();
+    let rel = spec.strip_prefix("in ").map(parse_duration);
+    if let Some(Some((ms, _))) = rel {
+        return Some(now + ms);
+    }
+    let rest = spec.strip_prefix("at ").unwrap_or(spec);
+    // HH:MM, optionally "tomorrow" before it.
+    let (day_offset, hm) = rest
+        .strip_prefix("tomorrow ")
+        .map(|r| (1i64, r))
+        .unwrap_or((0, rest));
+    let (h, m) = hm.split_once(':')?;
+    let hour: i64 = h.trim().parse().ok()?;
+    let minute: i64 = m.trim().parse().ok()?;
+    if !(0..24).contains(&hour) || !(0..60).contains(&minute) {
+        return None;
+    }
+    let mut due = (now / 86_400_000 + day_offset) * 86_400_000 + hour * 3_600_000 + minute * 60_000;
+    // UTC-based; local-offset correction so "at 17:00" means local time.
+    let offset = local_utc_offset_minutes(now) as i64;
+    due += offset * 60_000;
+    if due < now && day_offset == 0 {
+        due += 86_400_000; // today's time already passed: tomorrow
+    }
+    Some(due)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn local_utc_offset_minutes(now_ms: i64) -> i32 {
+    // SAFETY: localtime_r on caller-owned structs.
+    unsafe {
+        let t = (now_ms / 1000) as libc::time_t;
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        tm.tm_gmtoff as i32 / 60
     }
 }
 

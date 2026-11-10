@@ -115,6 +115,8 @@ pub enum ProviderCommand {
     SpotifyCancel,
     /// Save the playing Spotify track to the library.
     SpotifyLike,
+    /// Add a reminder, optionally due at an absolute time (ms).
+    AddReminder { title: String, due_ms: Option<i64> },
     /// Forget the stored Spotify token.
     SpotifyDisconnect,
     /// An agent's lifecycle hook, for the provider that tracks its sessions.

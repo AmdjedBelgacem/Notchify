@@ -554,6 +554,8 @@ pub struct AgentActive {
     pub project: Option<String>,
     /// The project's git branch, read from its working directory.
     pub branch: Option<String>,
+    /// Rough "uncommitted changes" hint for that branch.
+    pub dirty: bool,
 }
 
 /// Name a limit by its window: 300 min is the session, 10080 the week.

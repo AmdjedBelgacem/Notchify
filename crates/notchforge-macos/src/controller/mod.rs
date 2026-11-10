@@ -1322,6 +1322,12 @@ impl Controller {
 
     /// Re-render the music page from the current snapshot (after a local
     /// choice such as switching the playlist source).
+    /// Enter in the history search: re-render the notifications card.
+    pub fn apply_history_filter(&self) {
+        self.expanded_dirty.set(true);
+        self.render_expanded(false);
+    }
+
     /// The magnifier toggled the search overlay; opening focuses the field.
     pub fn media_search_toggled(&self, opening: bool) {
         self.views.borrow().expanded.media.set_search_open(opening);

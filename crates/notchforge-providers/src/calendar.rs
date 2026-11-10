@@ -12,7 +12,7 @@ use notchforge_core::model::{CalendarEvent, PermissionState, ReminderItem};
 use notchforge_core::model::{CalendarState, ProviderStatus};
 #[cfg(target_os = "macos")]
 use notchforge_core::provider::Wake;
-use notchforge_core::provider::{
+use notchforge_core::provider::{ProviderCommand, 
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent,
 };
 #[cfg(target_os = "macos")]
@@ -35,13 +35,19 @@ pub fn complete_reminder_by_id(id: &str) -> bool {
 /// Add a reminder to the default Reminders list, on the main thread.
 #[cfg(target_os = "macos")]
 pub fn add_reminder(title: &str) -> bool {
+    add_reminder_due(title, None)
+}
+
+/// Add a reminder, optionally due at an absolute epoch-ms time.
+#[cfg(target_os = "macos")]
+pub fn add_reminder_due(title: &str, due_ms: Option<i64>) -> bool {
     let title = title.trim().to_owned();
     if title.is_empty() {
         return false;
     }
     on_main(move |mtm| {
         let store = mac::store_ref(mtm);
-        mac::add_reminder(&store, &title)
+        mac::add_reminder(&store, &title, due_ms)
     })
     .unwrap_or(false)
 }
@@ -255,14 +261,27 @@ mod mac {
         }
     }
 
-    /// Add a reminder titled `title` to the default list.
-    pub fn add_reminder(store: &EKEventStore, title: &str) -> bool {
+    /// Add a reminder titled `title` to the default list, optionally due at
+    /// an absolute time (epoch ms).
+    pub fn add_reminder(store: &EKEventStore, title: &str, due_ms: Option<i64>) -> bool {
         // SAFETY: create + save on the main thread.
         unsafe {
             let Some(list) = store.defaultCalendarForNewReminders() else { return false };
             let reminder = objc2_event_kit::EKReminder::reminderWithEventStore(store);
             reminder.setTitle(Some(&NSString::from_str(title)));
             reminder.setCalendar(Some(&list));
+            if let Some(ms) = due_ms {
+                let date = NSDate::dateWithTimeIntervalSince1970(ms as f64 / 1000.0);
+                let comps = objc2_foundation::NSCalendar::currentCalendar().components_fromDate(
+                    objc2_foundation::NSCalendarUnit::Year
+                        | objc2_foundation::NSCalendarUnit::Month
+                        | objc2_foundation::NSCalendarUnit::Day
+                        | objc2_foundation::NSCalendarUnit::Hour
+                        | objc2_foundation::NSCalendarUnit::Minute,
+                    &date,
+                );
+                reminder.setDueDateComponents(Some(&comps));
+            }
             store.saveReminder_commit_error(&reminder, true).is_ok()
         }
     }
@@ -485,6 +504,25 @@ impl Provider for CalendarProvider {
                 if last.as_ref() != Some(&state) {
                     let _ = ctx.emit(ProviderEvent::Calendar(state.clone())).await;
                     last = Some(state);
+                }
+                // Reminder requests from the CLI arrive as commands; save on
+                // the main thread where EventKit lives, then refresh at once.
+                let cmd = tokio::select! {
+                    c = ctx.next_command() => c,
+                    _ = tokio::time::sleep(POLL) => None,
+                };
+                if let Some(ProviderCommand::AddReminder { title, due_ms }) = cmd {
+                    let log_title = title.clone();
+                    let saved = on_main(move |mtm| {
+                        let store = mac::store_ref(mtm);
+                        mac::add_reminder(&store, &title, due_ms)
+                    })
+                    .unwrap_or(false);
+                    tracing::info!(saved, title = %log_title, "reminder added from the CLI");
+                    last = None; // force a re-read so the list shows it
+                    continue;
+                } else if cmd.is_none() {
+                    return Ok(());
                 }
                 if ctx.sleep(POLL).await == Wake::Shutdown {
                     return Ok(());

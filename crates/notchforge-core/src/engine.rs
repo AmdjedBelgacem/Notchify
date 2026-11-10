@@ -249,10 +249,22 @@ pub struct Engine {
     pomodoro_rounds: (i64, u8),
 }
 
-/// The branch of the git repo at `dir`, from `.git/HEAD` (no subprocess).
-fn git_branch(dir: &str) -> Option<String> {
-    let head = std::fs::read_to_string(std::path::Path::new(dir).join(".git").join("HEAD")).ok()?;
-    head.trim().strip_prefix("ref: refs/heads/").map(str::to_owned)
+/// The branch of the git repo at `dir`, from `.git/HEAD` (no subprocess),
+/// with a dirtiness hint: the index having moved after the branch's tip is
+/// what a `git status` dirty state almost always looks like. A heuristic —
+/// good enough for a dot in the wing.
+fn git_status(dir: &str) -> Option<(String, bool)> {
+    let dot = std::path::Path::new(dir).join(".git");
+    let head = std::fs::read_to_string(dot.join("HEAD")).ok()?;
+    let branch = head.trim().strip_prefix("ref: refs/heads/")?.to_owned();
+    let tip = dot.join("refs").join("heads").join(&branch);
+    let tip_mtime = std::fs::metadata(&tip).and_then(|m| m.modified()).ok();
+    let index_mtime = std::fs::metadata(dot.join("index")).and_then(|m| m.modified()).ok();
+    let dirty = match (index_mtime, tip_mtime) {
+        (Some(i), Some(t)) => i > t,
+        _ => false,
+    };
+    Some((branch, dirty))
 }
 
 impl Engine {
@@ -502,17 +514,23 @@ impl Engine {
                     .iter()
                     .chain(s.antigravity_limits.iter())
                     .filter(|l| l.running && l.active_ms.is_some_and(|ms| now - ms <= 120_000))
-                    .map(|l| AgentActive {
-                        agent: l.agent,
-                        context_percent: l.context_percent,
-                        project: l.project.clone(),
-                        branch: s
+                    .map(|l| {
+                        let (branch, dirty) = s
                             .usage
                             .running
                             .iter()
                             .find(|r| r.agent == l.agent)
                             .and_then(|r| r.dir.as_deref())
-                            .and_then(git_branch),
+                            .and_then(git_status)
+                            .map(|(b, d)| (Some(b), d))
+                            .unwrap_or_else(|| (None, false));
+                        AgentActive {
+                            agent: l.agent,
+                            context_percent: l.context_percent,
+                            project: l.project.clone(),
+                            branch,
+                            dirty,
+                        }
                     })
                     .collect()
             },
@@ -1114,6 +1132,16 @@ impl Engine {
                 return false;
             }
             return self.apply_command(Command::StartTimer { duration_ms: ms, label: n.title });
+        }
+        // A CLI reminder: hand it to the calendar provider (EventKit).
+        if n.thread.as_deref() == Some("notchforge-remind") {
+            let due_ms = n.body.parse::<i64>().ok();
+            tracing::info!(title = %n.title, due_ms = ?due_ms, "reminder requested from the CLI");
+            let _ = self.provider_commands.send(ProviderCommand::AddReminder {
+                title: n.title.clone(),
+                due_ms,
+            });
+            return false;
         }
         // Token usage reported along with an event is telemetry, not a message
         // the notch should show: route it to the usage provider instead.

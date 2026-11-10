@@ -934,7 +934,11 @@ impl Provider for MediaProvider {
                             Err(e) => tracing::info!(error = %e, "could not save the track"),
                         }
                     }
-                    Wake::Command(ProviderCommand::SetOutputDevice(_) | ProviderCommand::SetInputDevice(_)) => {}
+                    Wake::Command(
+                        ProviderCommand::SetOutputDevice(_)
+                        | ProviderCommand::SetInputDevice(_)
+                        | ProviderCommand::AddReminder { .. },
+                    ) => {}
                     Wake::Command(ProviderCommand::Usage { .. } | ProviderCommand::AgentHook(_)) => {}
                 }
             }

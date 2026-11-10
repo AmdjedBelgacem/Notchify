@@ -147,6 +147,8 @@ pub struct ExpandedView {
     notif_header: Retained<NSTextField>,
     notif_scroll: Retained<NSScrollView>,
     notif_doc: Retained<FlippedView>,
+    /// Filters the History list under the live rows.
+    history_field: Retained<NSTextField>,
     notif_width: f64,
 
     tray_header: Retained<NSTextField>,
@@ -394,10 +396,28 @@ impl ExpandedView {
         );
         make_card(&clear, &white(0.14), 12.0);
         overview.addSubview(&clear);
-        let list_h = body_h - 30.0;
+        let list_h = body_h - 30.0 - 26.0;
         let notif_doc = FlippedView::new(mtm, rect(0.0, 0.0, c1w, list_h));
-        let notif_scroll = scroll_view(mtm, rect(c1x, body_y + 30.0, c1w, list_h), &notif_doc);
+        let notif_scroll = scroll_view(mtm, rect(c1x, body_y + 30.0 + 26.0, c1w, list_h), &notif_doc);
         overview.addSubview(&notif_scroll);
+        // The history search: Enter filters the archive below.
+        let ht = targets.add(mtm, move |_| {
+            with_controller(|c| c.apply_history_filter());
+        });
+        let history_field =
+            NSTextField::initWithFrame(NSTextField::alloc(mtm), rect(c1x + 6.0, body_y + 30.0 + 2.0, c1w - 12.0, 22.0));
+        history_field.setEditable(true);
+        history_field.setBordered(false);
+        history_field.setBezeled(true);
+        history_field.setBezelStyle(objc2_app_kit::NSTextFieldBezelStyle::SquareBezel);
+        history_field.setFont(Some(&font(11.5, Weight::Regular)));
+        history_field.setPlaceholderString(Some(&crate::ui::ns("Search history, ⏎ to filter")));
+        // SAFETY: a valid target and selector; the target outlives the field.
+        unsafe {
+            history_field.setTarget(Some(ht.as_any()));
+            history_field.setAction(Some(crate::ui::ActionTarget::action()));
+        }
+        overview.addSubview(&history_field);
 
         // ── weather, with the next event along its bottom ──
         let weather_h = half_h;
@@ -814,6 +834,7 @@ impl ExpandedView {
             battery_top,
             notif_header,
             notif_scroll,
+            history_field,
             notif_doc,
             notif_width: c1w,
             tray_header,
@@ -1306,7 +1327,11 @@ impl ExpandedView {
         let p = &self.palette;
         let mtm = self.mtm;
         remove_all_subviews(&self.notif_doc);
-        let mut parts = vec![("Notifications".to_owned(), p.primary.clone())];
+        let lang = notchforge_core::i18n::Language::from_config(&self.config.borrow().general);
+        let mut parts = vec![(
+            notchforge_core::i18n::tr(lang, notchforge_core::i18n::Str::Notifications).to_owned(),
+            p.primary.clone(),
+        )];
         if !snap.notifications.is_empty() {
             parts.push((format!("  {}", snap.notifications.len()), p.tertiary.clone()));
         }
@@ -1319,7 +1344,6 @@ impl ExpandedView {
         let w = self.notif_width;
         if snap.notifications.is_empty() {
             self.notif_doc.setFrame(rect(0.0, 0.0, w, visible_h));
-            let lang = notchforge_core::i18n::Language::from_config(&self.config.borrow().general);
             self.notif_doc.addSubview(&self.quiet_tile(
                 rect(0.0, 0.0, w, visible_h),
                 Some("checkmark.circle"),
@@ -1363,21 +1387,50 @@ impl ExpandedView {
         for v in views {
             self.notif_doc.addSubview(&v);
         }
-        // The archive: what came through earlier, dimmed and quiet.
-        let recent: Vec<&Notification> = snap.history.iter().take(4).collect();
-        if recent.is_empty() {
+        // The archive: what came through earlier, dimmed and quiet. The
+        // field at the card's foot filters it (Enter applies the query).
+        let query = self.history_field.stringValue().to_string().to_lowercase();
+        let recent: Vec<&Notification> = snap
+            .history
+            .iter()
+            .filter(|n| {
+                query.is_empty()
+                    || n.title.to_lowercase().contains(&query)
+                    || n.app.display_name.to_lowercase().contains(&query)
+                    || n.body.to_lowercase().contains(&query)
+            })
+            .take(if query.is_empty() { 4 } else { 12 })
+            .collect();
+        if recent.is_empty() && query.is_empty() {
             return;
         }
-        let hy = y + 6.0;
+        let hy0 = y + 6.0;
         self.notif_doc.addSubview(&label(
             mtm,
-            "History",
+            &if query.is_empty() {
+                notchforge_core::i18n::tr(lang, notchforge_core::i18n::Str::History).to_owned()
+            } else {
+                format!("{} — \u{201c}{query}\u{201d}",
+                    notchforge_core::i18n::tr(lang, notchforge_core::i18n::Str::History))
+            },
             &font(11.0, Weight::Semibold),
             &p.tertiary,
-            rect(12.0, hy, w - 24.0, 14.0),
+            rect(12.0, hy0, w - 24.0, 14.0),
         ));
-        let mut hy = hy + 18.0;
-        for n in recent {
+        if recent.is_empty() {
+            self.notif_doc.addSubview(&label(
+                mtm,
+                "Nothing in the history matches.",
+                &font(11.5, Weight::Regular),
+                &p.tertiary,
+                rect(12.0, hy0 + 18.0, w - 24.0, 14.0),
+            ));
+            self.notif_doc
+                .setFrame(rect(0.0, 0.0, w, (hy0 + 34.0).max(visible_h)));
+            return;
+        }
+        let mut hy = hy0 + 18.0;
+        for n in &recent {
             let row = label(
                 mtm,
                 &format!("{} — {}", n.app.display_name, n.title),
@@ -1743,12 +1796,19 @@ impl ExpandedView {
                 (
                     "Copy Text",
                     Box::new(move || {
-                        // Screenshots often carry text: OCR them via the
-                        // Shortcuts action if the user made one, else nothing.
-                        let _ = std::process::Command::new("/usr/bin/shortcuts")
-                            .args(["run", "Copy Text from Screenshot"])
-                            .arg(&p6)
-                            .spawn();
+                        // Built-in Vision OCR first; the Shortcuts action is
+                        // the fallback for languages Vision's default model
+                        // handles poorly.
+                        let text = crate::vision::recognize_text(&p6);
+                        match text {
+                            Some(text) => crate::sharing::copy_text(&text),
+                            None => {
+                                let _ = std::process::Command::new("/usr/bin/shortcuts")
+                                    .args(["run", "Copy Text from Screenshot"])
+                                    .arg(&p6)
+                                    .spawn();
+                            }
+                        }
                     }),
                 ),
                 ("Reveal in Finder", Box::new(move || crate::sharing::reveal(std::slice::from_ref(&p2)))),

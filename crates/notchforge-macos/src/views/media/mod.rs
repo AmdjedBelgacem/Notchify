@@ -39,7 +39,7 @@ use notchforge_core::time::now_ms;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{
+use objc2_app_kit::{NSSlider, 
     NSButton, NSImageScaling, NSImageView, NSMenu, NSMenuItem, NSScrollView, NSScrollerStyle, NSTextAlignment,
     NSTextField, NSView,
 };
@@ -1285,12 +1285,45 @@ impl MediaPage {
             match mapped {
                 Some(player) if !is_featured => {
                     let t = self.source_targets.add(self.mtm, move |_| glue::pin_source(player));
-                    self.sources.addSubview(&click_overlay(
+                    let overlay = click_overlay(
                         self.mtm,
                         &t,
                         rect(x, 0.0, 22.0 + tw, 24.0),
                         &format!("Control {}", s.name),
-                    ));
+                    );
+                    // Spotify and Music answer their own volume: right-click
+                    // offers a slider. Other apps have no public per-app
+                    // volume on macOS, so nothing appears for them.
+                    if matches!(player, MediaPlayer::Spotify | MediaPlayer::Music) {
+                        let t = self.source_targets.add(self.mtm, move |sender: Option<&AnyObject>| {
+                            let Some(sl) = sender.and_then(|sl| sl.downcast_ref::<NSSlider>()) else { return };
+                            let v = sl.doubleValue().round() as u8;
+                            glue::control(player, MediaAction::SetVolume(v));
+                        });
+                        // SAFETY: valid target/selector on a standard slider.
+                        let slider = unsafe {
+                            NSSlider::sliderWithTarget_action(
+                                Some(t.as_any()),
+                                Some(crate::ui::ActionTarget::action()),
+                                self.mtm,
+                            )
+                        };
+                        slider.setMinValue(0.0);
+                        slider.setMaxValue(100.0);
+                        slider.setFrame(rect(0.0, 6.0, 200.0, 18.0));
+                        let label_text = format!("{} volume", s.name);
+                        let lbl = label(self.mtm, &label_text, &font(11.0, Weight::Regular), &rgba(1.0, 1.0, 1.0, 0.84), rect(0.0, 26.0, 200.0, 14.0));
+                        let holder = FlippedView::new(self.mtm, rect(0.0, 0.0, 220.0, 44.0));
+                        holder.addSubview(&lbl);
+                        holder.addSubview(&slider);
+                        let vol_item = NSMenuItem::new(self.mtm);
+                        vol_item.setView(Some(&holder));
+                        let vol_menu = NSMenu::new(self.mtm);
+                        vol_menu.addItem(&vol_item);
+                        // SAFETY: the menu's targets are kept alive by `source_targets`.
+                        unsafe { overlay.setMenu(Some(&vol_menu)) };
+                    }
+                    self.sources.addSubview(&overlay);
                 }
                 // Not a known player (or already featured): the click just
                 // brings its app forward.

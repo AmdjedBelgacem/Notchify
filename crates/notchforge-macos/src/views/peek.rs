@@ -14,13 +14,13 @@
 use super::{app_icon_view, set_app_icon};
 use crate::ui::{
     FlippedView, Palette, Weight, attributed, font, label, pill_button, rect, rgba, set_accessibility_label,
-    set_gradient, set_text, shape_view, style_pill, without_animation,
-};
+    set_gradient, set_text, shape_view, style_pill, Targets, without_animation,};
 use notchforge_core::geometry::{LayoutKind, NotchLayout};
+use notchforge_core::i18n::Str;
 use notchforge_core::model::{AuthTarget, Notification, NotificationKind, Priority};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSButton, NSImageView, NSTextField};
+use objc2_app_kit::{NSMenu, NSMenuItem, NSButton, NSImageView, NSTextField};
 use objc2_foundation::NSPoint;
 use std::cell::RefCell;
 
@@ -38,6 +38,9 @@ pub struct PeekView {
     deny: Retained<NSButton>,
     cy: f64,
     _target: Retained<crate::ui::ActionTarget>,
+    /// Right-click actions for the current peek (rebuilt each show).
+    _menu_targets: RefCell<Targets>,
+    _menu: RefCell<Option<Retained<NSMenu>>>,
     current: RefCell<Option<Notification>>,
 }
 
@@ -140,11 +143,14 @@ impl PeekView {
             deny,
             cy,
             _target: target,
+            _menu_targets: RefCell::new(Targets::default()),
+            _menu: RefCell::new(None),
             current: RefCell::new(None),
         }
     }
 
     pub fn show(&self, n: &Notification, p: &Palette) {
+        let mtm = MainThreadMarker::from(&*self.root);
         // Without a real app icon the icon view draws its own brand tile
         // (see `set_app_icon`); the outer tile only frames real icons. A web
         // platform's logo counts as branded even before its favicon arrives.
@@ -183,6 +189,38 @@ impl PeekView {
         }
         set_text(&self.title, &title);
         self.layout_buttons(n, p);
+        // Right-click: dismiss or mute the app outright, without opening.
+        let (id, rule, app_name) = (n.id, n.app.rule_key(), n.app.display_name.clone());
+        let targets = Targets::default();
+        let eng_t = targets.add(mtm, move |_| {
+            crate::app::send(notchforge_core::engine::Command::DismissNotification(id));
+        });
+        let mute_t = targets.add(mtm, move |_| {
+            crate::app::send(notchforge_core::engine::Command::MuteApp(rule.clone()));
+            tracing::info!(app = %app_name, "app muted from the peek");
+        });
+        let menu = NSMenu::new(mtm);
+        for (title, t) in [
+            ("Dismiss", &eng_t),
+            ("Never show this app", &mute_t),
+        ] {
+            let item = NSMenuItem::new(mtm);
+            item.setTitle(&crate::ui::ns(title));
+            // SAFETY: target kept alive by `targets` (dropped after show).
+            unsafe {
+                item.setTarget(Some(t.as_any()));
+                item.setAction(Some(crate::ui::ActionTarget::action()));
+            }
+            menu.addItem(&item);
+        }
+        self._menu_targets.replace(targets);
+        let menu_cell = self._menu.borrow_mut().replace(menu);
+        // SAFETY: the menu lives in `_menu` for as long as the view.
+        unsafe {
+            if let Some(m) = menu_cell.as_ref() {
+                self.root.setMenu(Some(m));
+            }
+        };
         set_accessibility_label(&self.root, &format!("New notification. {}", n.plain_text()));
         *self.current.borrow_mut() = Some(n.clone());
     }
@@ -191,6 +229,9 @@ impl PeekView {
     /// ordinary one, "Allow" + "Deny" for an agent asking for access, "Cancel"
     /// for a sign-in waiting on the browser.
     fn layout_buttons(&self, n: &Notification, p: &Palette) {
+        let lang = crate::app::with_config(|c| notchforge_core::i18n::Language::from_config(&c.general))
+            .unwrap_or_default();
+        let tr = |k: notchforge_core::i18n::Str| notchforge_core::i18n::tr(lang, k);
         let quick_reply = crate::app::with_config(|c| c.notifications.quick_reply).unwrap_or(true);
         let w = self.root.frame().size.width;
         let target = n.auth_target();
@@ -198,10 +239,10 @@ impl PeekView {
             && matches!(n.kind, NotificationKind::Message)
             && n.app.category() == notchforge_core::apps::AppCategory::Messaging;
         let (first, second) = match &target {
-            Some(AuthTarget::Agent(_) | AuthTarget::ToolPermission(_)) => ("Allow", Some("Deny")),
-            Some(AuthTarget::Spotify) => ("Cancel", None),
-            None if replyable => ("Reply", Some("Open")),
-            None => ("Open", Some("Snooze")),
+            Some(AuthTarget::Agent(_) | AuthTarget::ToolPermission(_)) => (tr(Str::Allow), Some(tr(Str::Deny))),
+            Some(AuthTarget::Spotify) => (tr(Str::Cancel), None),
+            None if replyable => (tr(Str::Reply), Some(tr(Str::Open))),
+            None => (tr(Str::Open), Some(tr(Str::Snooze))),
         };
         let f = font(12.5, Weight::Semibold);
         let measure = |t: &str| (crate::ui::text_width(&attributed(t, &f, &p.primary)) + 24.0).ceil();

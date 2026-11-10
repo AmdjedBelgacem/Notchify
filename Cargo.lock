@@ -723,6 +723,7 @@ name = "notchforge-notify"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "libc",
  "serde_json",
 ]
 

@@ -158,6 +158,41 @@ pub fn rgb8((r, g, b): (u8, u8, u8)) -> Retained<NSColor> {
 }
 
 /// Text colours tuned for the black island.
+/// `#5A8DFF` → NSColor (sRGB); anything unparsable becomes white.
+pub fn hex_to_color(value: &str) -> Retained<NSColor> {
+    let h = value.trim().trim_start_matches('#');
+    if h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit()) {
+        let v = |i: usize| -> Option<f64> { Some(u8::from_str_radix(&h[i..i + 2], 16).ok()? as f64 / 255.0) };
+        if let (Some(r), Some(g), Some(b)) = (v(0), v(2), v(4)) {
+            return rgba(r, g, b, 1.0);
+        }
+    }
+    rgba(1.0, 1.0, 1.0, 1.0)
+}
+
+/// NSColor → `#rrggbb` (sRGB components, rounded).
+pub fn color_to_hex(color: &NSColor) -> String {
+    // SAFETY: a documented NSColor accessor with a valid out-struct.
+    unsafe {
+        let space = objc2_app_kit::NSColorSpace::sRGBColorSpace();
+        if let Some(c) = color.colorUsingColorSpace(&space) {
+            let mut r = 0.0f64;
+            let mut g = 0.0f64;
+            let mut b = 0.0f64;
+            let mut a = 0.0f64;
+            c.getRed_green_blue_alpha(
+                (&mut r as *mut f64).cast(),
+                (&mut g as *mut f64).cast(),
+                (&mut b as *mut f64).cast(),
+                (&mut a as *mut f64).cast(),
+            );
+            let ch = |v: f64| format!("{:02X}", (v * 255.0).round().clamp(0.0, 255.0) as u8);
+            return format!("#{}{}{}", ch(r), ch(g), ch(b));
+        }
+    }
+    "#FFFFFF".to_owned()
+}
+
 #[derive(Clone)]
 pub struct Palette {
     pub primary: Retained<NSColor>,
