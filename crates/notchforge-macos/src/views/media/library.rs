@@ -69,6 +69,10 @@ impl MediaPage {
             t.title.hash(&mut h);
             t.artist.hash(&mut h);
         }
+        for t in &media.recently_played {
+            t.title.hash(&mut h);
+            t.at_ms.hash(&mut h);
+        }
         let key = h.finish();
         if self.state.borrow().playlists_key == key {
             return;
@@ -188,6 +192,57 @@ impl MediaPage {
                 self.list_doc.addSubview(&row);
             }
             base += queue.len() as f64 * row_h;
+        }
+        // Recently played trails the queue when Spotify is featured.
+        let recent: &[notchforge_core::model::PlayedTrack] =
+            if player == MediaPlayer::Spotify && base + header_h < doc_h { &media.recently_played } else { &[] };
+        if !recent.is_empty() {
+            let head = label(
+                self.mtm,
+                "Recently played",
+                &font(10.5, Weight::Semibold),
+                &p.secondary,
+                rect(10.0, base, w - 20.0, header_h.max(20.0)),
+            );
+            self.list_doc.addSubview(&head);
+            base += header_h.max(20.0);
+            for (i, t) in recent.iter().enumerate() {
+                let row = shape_view(
+                    self.mtm,
+                    rect(0.0, base + i as f64 * row_h, w, row_h),
+                    &rgba(1.0, 1.0, 1.0, 0.0),
+                    13.0,
+                );
+                let cy = (row_h - 40.0) / 2.0;
+                let cover = shape_view(self.mtm, rect(8.0, cy, 40.0, 40.0), &rgb8(t.player.color()), 8.0);
+                cover.addSubview(&symbol_view(
+                    self.mtm,
+                    "clock",
+                    15.0,
+                    &rgba(1.0, 1.0, 1.0, 0.92),
+                    rect(11.0, 11.0, 18.0, 18.0),
+                    &t.title,
+                ));
+                row.addSubview(&cover);
+                let ty = (row_h - 33.0) / 2.0;
+                row.addSubview(&label(
+                    self.mtm,
+                    &t.title,
+                    &font(13.0, Weight::Medium),
+                    &p.primary,
+                    rect(58.0, ty, w - 66.0, 18.0),
+                ));
+                row.addSubview(&label(
+                    self.mtm,
+                    &t.artist,
+                    &font(11.5, Weight::Regular),
+                    &detail_color,
+                    rect(58.0, ty + 18.0, w - 66.0, 15.0),
+                ));
+                set_accessibility_label(&row, &format!("Recently played: {}, {}", t.title, t.artist));
+                self.list_doc.addSubview(&row);
+            }
+            base += recent.len() as f64 * row_h;
         }
         for (i, pl) in lists.iter().enumerate() {
             let is_active = active.as_deref() == Some(pl.id.as_str());

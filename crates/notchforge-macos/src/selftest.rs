@@ -1695,6 +1695,7 @@ fn board_snapshots(
             notchforge_core::model::QueueTrack { title: "Meridian".into(), artist: "Kite Machine".into() },
         ],
         lyrics: None,
+        recently_played: vec![notchforge_core::model::PlayedTrack { title: "Earlier track".into(), artist: "NotchForge".into(), player: MediaPlayer::Spotify, at_ms: now - 600_000 }],
         up_next: vec![notchforge_core::model::UpNextVideo {
             title: "Daft Punk - One More Time".into(),
             author: "Daft Punk".into(),
@@ -1791,6 +1792,7 @@ fn sample_media() -> notchforge_core::model::MediaState {
         browser_denied: None,
         up_next: Vec::new(),
         lyrics: None,
+        recently_played: Vec::new(),
         spotify_queue: vec![notchforge_core::model::QueueTrack {
             title: "Next track".into(),
             artist: "NotchForge".into(),

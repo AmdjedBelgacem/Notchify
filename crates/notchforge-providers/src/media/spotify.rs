@@ -20,7 +20,7 @@ pub const CLIENT_ID: &str = "a2ff5487321947dab3b5e9fd64840749";
 pub const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";
 pub const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 pub const API_BASE: &str = "https://api.spotify.com/v1";
-pub const SCOPES: &str = "playlist-read-private playlist-read-collaborative";
+pub const SCOPES: &str = "playlist-read-private playlist-read-collaborative user-library-modify";
 /// How long the loopback listener waits for the browser redirect.
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -384,6 +384,22 @@ pub async fn queue(http: &reqwest::Client, token: &Token) -> Result<Vec<QueueTra
     }
     let text = resp.text().await?;
     Ok(parse_queue(&text))
+}
+
+/// Save the playing track to the user's library (the heart button).
+/// `track_id` is a `spotify:track:<id>` URI. Best effort.
+pub async fn like_track(http: &reqwest::Client, token: &Token, track_id: &str) -> Result<(), SpotifyError> {
+    let Some(id) = track_id.strip_prefix("spotify:track:") else {
+        return Err(SpotifyError::Rejected("no track id".into()));
+    };
+    let url = format!("{API_BASE}/me/tracks?ids={id}");
+    let resp = http.put(&url).bearer_auth(&token.access_token).send().await?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(SpotifyError::Refused(rejection_reason(status.as_u16(), &body)));
+    }
+    Ok(())
 }
 
 /// Parse a `/me/player/queue` response: the queued tracks after the current

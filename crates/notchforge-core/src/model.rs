@@ -1272,6 +1272,18 @@ pub struct MediaState {
     /// Lyrics for the current track (LRCLIB), fetched once per track.
     #[serde(default)]
     pub lyrics: Option<Lyrics>,
+    /// What played before, newest first (deduped per track).
+    #[serde(default)]
+    pub recently_played: Vec<PlayedTrack>,
+}
+
+/// One entry of the listening history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayedTrack {
+    pub title: String,
+    pub artist: String,
+    pub player: MediaPlayer,
+    pub at_ms: i64,
 }
 
 /// A song's lyrics: timestamped lines (milliseconds, for sync) or, when the

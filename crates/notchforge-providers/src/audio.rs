@@ -310,6 +310,32 @@ mod mac {
         let dev = ca::find_device_by_uid(uid).ok_or_else(|| format!("no input device {uid}"))?;
         ca::set_default_input(dev).map_err(|s| format!("CoreAudio error {s}"))
     }
+
+    /// Duck or restore the default output. Returns the new duck state: the
+    /// saved volume while ducked, `None` when normal.
+    pub fn mic_live() -> bool {
+        ca::microphone_in_use()
+    }
+
+    pub fn apply_duck(mic_live: bool, was: Option<f32>) -> Option<f32> {
+        let dev = ca::default_output()?;
+        match (mic_live, was) {
+            (true, None) => {
+                let current = ca::get::<f32>(dev, ca::output(ca::kVirtualMainVolume)).unwrap_or(1.0);
+                if current > 0.4 {
+                    let _ = ca::set::<f32>(dev, ca::output(ca::kVirtualMainVolume), 0.35);
+                    Some(current)
+                } else {
+                    None // already quiet: nothing to duck or restore
+                }
+            }
+            (false, Some(saved)) => {
+                let _ = ca::set::<f32>(dev, ca::output(ca::kVirtualMainVolume), saved);
+                None
+            }
+            _ => was,
+        }
+    }
 }
 
 impl Provider for AudioProvider {
@@ -324,8 +350,14 @@ impl Provider for AudioProvider {
                 let mut listeners = mac::Listeners::install();
                 ctx.set_status(ProviderStatus::Running).await;
                 let mut last: Option<notchforge_core::model::AudioState> = None;
+                // Auto-duck: while the microphone is live, the music backs
+                // off to 35%; restored when the call ends.
+                let mut ducked: Option<f32> = None;
                 loop {
                     let r = tokio::task::spawn_blocking(mac::read).await.map_err(ProviderError::other)?;
+                    let mic_live = tokio::task::spawn_blocking(mac::mic_live).await.unwrap_or(false);
+                    let duck_volume = mac::apply_duck(mic_live, ducked.take());
+                    ducked = duck_volume;
                     listeners.track(&r.process_objects, &r.device_objects);
                     if last.as_ref() != Some(&r.state) {
                         if !ctx.emit(notchforge_core::provider::ProviderEvent::Audio(r.state.clone())).await {

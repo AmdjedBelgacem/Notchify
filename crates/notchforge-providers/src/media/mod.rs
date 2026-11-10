@@ -198,6 +198,8 @@ struct Session {
     browser_bundle: Option<&'static str>,
     /// The track lyrics were last fetched for (`title|artist`).
     lyrics_for: Option<String>,
+    /// The track the history last recorded, so repeats don't stack.
+    last_played_key: Option<String>,
     /// The playing page's timeline (browser pid, element), found once via
     /// Accessibility and read on every poll.
     web_slider: Option<(i32, crate::sys::ax::WebSlider)>,
@@ -283,6 +285,39 @@ impl Session {
         let _ = tokio::fs::create_dir_all(&dir).await;
         let url = format!("https://www.google.com/s2/favicons?domain={domain}&sz=128");
         download(&self.http, &url, &dir.join(format!("site-{key}.jpg"))).await
+    }
+
+    /// Record what played, newest first, deduped per track.
+    fn record_history(&mut self) {
+        const CAP: usize = 10;
+        let Some(n) = self.state.primary().cloned().filter(|n| !n.title.trim().is_empty()) else { return };
+        let key = format!("{:?}|{}", n.player, n.title);
+        if self.last_played_key.as_deref() == Some(key.as_str()) {
+            return;
+        }
+        self.last_played_key = Some(key);
+        if let Some(existing) = self
+            .state
+            .recently_played
+            .iter_mut()
+            .find(|t| t.title == n.title && t.player == n.player)
+        {
+            existing.at_ms = n.sampled_at_ms;
+            let mut list = std::mem::take(&mut self.state.recently_played);
+            list.sort_by_key(|t| std::cmp::Reverse(t.at_ms));
+            self.state.recently_played = list;
+            return;
+        }
+        self.state.recently_played.insert(
+            0,
+            notchforge_core::model::PlayedTrack {
+                title: n.title.clone(),
+                artist: n.artist.clone(),
+                player: n.player,
+                at_ms: n.sampled_at_ms,
+            },
+        );
+        self.state.recently_played.truncate(CAP);
     }
 
     /// Fetch lyrics for the featured track, once per track (LRCLIB has no
@@ -746,6 +781,7 @@ impl Provider for MediaProvider {
                 yt_resolved: None,
                 browser_bundle: None,
                 lyrics_for: None,
+                last_played_key: None,
                 web_slider: None,
                 web_slider_miss: None,
                 web_last: None,
@@ -759,6 +795,7 @@ impl Provider for MediaProvider {
                 s.refresh_queue().await;
                 let started = s.read_players(ctx.config().media.browser_audio).await;
                 s.refresh_lyrics().await;
+                s.record_history();
                 for p in started {
                     s.reload_playlists(p, &ctx, true);
                 }
@@ -882,6 +919,20 @@ impl Provider for MediaProvider {
                         let signed_out = PlaylistStatus::NeedsSpotifyLogin;
                         apply_playlists(&mut s.state, (MediaPlayer::Spotify, signed_out, vec![]));
                         s.playlists_loaded_ms.remove(&MediaPlayer::Spotify);
+                    }
+                    Wake::Command(ProviderCommand::SpotifyLike) => {
+                        // The heart: save what's playing. Needs the Web API
+                        // scope granted at sign-in; failures stay quiet at INFO.
+                        let Some(n) = s.state.player(MediaPlayer::Spotify).cloned() else { continue };
+                        let Some(track_id) = n.track_id.clone() else { continue };
+                        let now = notchforge_core::time::now_ms();
+                        let Ok(token) = spotify::access_token(&s.http, &ctx.paths.spotify_token(), now).await else {
+                            continue;
+                        };
+                        match spotify::like_track(&s.http, &token, &track_id).await {
+                            Ok(()) => tracing::info!(track = %n.title, "saved to your Spotify library"),
+                            Err(e) => tracing::info!(error = %e, "could not save the track"),
+                        }
                     }
                     Wake::Command(ProviderCommand::SetOutputDevice(_) | ProviderCommand::SetInputDevice(_)) => {}
                     Wake::Command(ProviderCommand::Usage { .. } | ProviderCommand::AgentHook(_)) => {}

@@ -324,6 +324,9 @@ mod tests {
         assert_eq!(service(&t.url), Some("YouTube"));
         assert_eq!(clean_title(&t.title, service(&t.url)), "Daft Punk - One More Time");
         assert_eq!(youtube_id(&t.url).as_deref(), Some("FGBhQbmPwH8"));
+        // YouTube Music watch pages resolve the same way.
+        assert_eq!(youtube_id("https://music.youtube.com/watch?v=abc12345678").as_deref(), Some("abc12345678"));
+        assert!(youtube_title_query("Song - YouTube Music").is_some());
         // With no media tab, the active tab is used.
         assert_eq!(pick(&tabs[..1]).map(|t| t.title.as_str()), Some("Inbox (4)"));
     }

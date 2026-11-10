@@ -168,11 +168,14 @@ pub struct MediaPage {
     next: Retained<NSButton>,
     repeat: Retained<NSButton>,
     open_spotify: Retained<NSButton>,
+    like: Retained<NSButton>,
     open_music: Retained<NSButton>,
 
     output_button: Retained<NSButton>,
     input_button: Retained<NSButton>,
     volume: Retained<ThinSlider>,
+    /// Live bars over the artwork while something is playing.
+    card_eq: Retained<NSView>,
 
     caps: Retained<NSTextField>,
     sources: Retained<FlippedView>,
@@ -324,6 +327,10 @@ impl MediaPage {
         art.setFrame(rect(0.0, 0.0, art_side, art_side));
         art_card.addSubview(&art_placeholder);
         art_card.addSubview(&art);
+        // The playing bars, pinned to the artwork's bottom edge.
+        let card_eq = equalizer_view(mtm, rect(8.0, 6.0, 26.0, 12.0), &rgba(1.0, 1.0, 1.0, 0.92));
+        card_eq.setHidden(true);
+        art_card.addSubview(&card_eq);
         let st = state.clone();
         let t = targets.add(mtm, move |_| match &st.borrow().featured {
             Featured::Player(pl) => glue::activate_app(pl.bundle_id()),
@@ -548,6 +555,14 @@ impl MediaPage {
         );
         player.addSubview(&open_spotify);
         player.addSubview(&open_music);
+        // The heart: save the playing Spotify track (shown only then).
+        let t = targets.add(mtm, move |_| {
+            glue::send(ProviderCommand::SpotifyLike);
+        });
+        let like = symbol_button(mtm, "heart", 13.0, "Save to your Spotify library", &p.primary, &t, rect(rw - PAD - 30.0, bar_y - 4.0, 28.0, 28.0));
+        make_card(&like, &white(0.16), 14.0);
+        like.setHidden(true);
+        player.addSubview(&like);
 
         // ── volume and output ──
         // ── volume: a thin bar between two speakers, the output at the end ──
@@ -572,9 +587,19 @@ impl MediaPage {
             &white(0.9),
         );
         volume.set_grow(10.0);
-        set_accessibility_label(&volume, "Output volume");
-        volume.set_on_change(|v| {
-            crate::controls::volume::set(v as f32);
+        set_accessibility_label(&volume, "Volume");
+        // The featured player's own volume when it has one (Spotify, Music),
+        // else the system output.
+        volume.set_on_change({
+            let st = state.clone();
+            move |v| {
+                let featured = st.borrow().featured.clone();
+                if let Featured::Player(pl @ (MediaPlayer::Spotify | MediaPlayer::Music)) = featured {
+                    glue::control(pl, MediaAction::SetVolume((v * 100.0).round() as u8));
+                } else {
+                    crate::controls::volume::set(v as f32);
+                }
+            }
         });
         player.addSubview(&volume);
         let st = state.clone();
@@ -820,10 +845,12 @@ impl MediaPage {
             next,
             repeat,
             open_spotify,
+            like,
             open_music,
             output_button,
             input_button,
             volume,
+            card_eq,
             caps,
             sources,
             sources_width,
@@ -1068,6 +1095,7 @@ impl MediaPage {
                         }
                     }
                 }
+                self.card_eq.setHidden(!n.is_some_and(NowPlaying::is_playing));
                 let art = n.and_then(|n| n.artwork_path.clone());
                 if self.state.borrow().art_path != art || art.is_none() {
                     let img = art.as_deref().and_then(icons::file_image);
@@ -1086,6 +1114,7 @@ impl MediaPage {
                 if let Some(n) = n {
                     let on = |b: Option<bool>| rgba(1.0, 1.0, 1.0, if b == Some(true) { 0.28 } else { 0.0 });
                     make_card(&self.shuffle, &on(n.shuffle), 20.0);
+                    self.like.setHidden(*pl != MediaPlayer::Spotify);
                     make_card(&self.repeat, &on(n.repeat), 20.0);
                     self.shuffle.setContentTintColor(Some(&p.primary));
                     self.repeat.setContentTintColor(Some(&p.primary));

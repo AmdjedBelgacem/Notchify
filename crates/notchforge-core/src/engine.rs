@@ -137,6 +137,8 @@ pub struct Snapshot {
     pub agent_active: Vec<AgentActive>,
     /// Focus rounds finished today (pomodoro).
     pub pomodoro_rounds: u8,
+    /// Everything that got through, newest first (the history list).
+    pub history: Vec<Notification>,
     /// Ringing now, the one shown first at the front.
     pub calls: Vec<Call>,
     /// The call you picked up.
@@ -241,6 +243,8 @@ pub struct Engine {
     snoozed: Vec<(i64, NewNotification)>,
     /// What Clear All removed, for a short window of undo.
     cleared: Vec<(i64, NewNotification)>,
+    /// Everything that got through, newest first (the history list).
+    history: Vec<Notification>,
     /// Pomodoro focus rounds completed today (local day).
     pomodoro_rounds: (i64, u8),
 }
@@ -285,6 +289,7 @@ impl Engine {
             last_peek_ms: i64::MIN / 2,
             snoozed: Vec::new(),
             cleared: Vec::new(),
+            history: Vec::new(),
             pomodoro_rounds: (0, 0),
         };
         (engine, EngineHandle { commands: cmd_tx })
@@ -485,6 +490,7 @@ impl Engine {
                     usage
                 }
             },
+            history: self.history.clone(),
             pomodoro_rounds: {
                 let day = now_ms() / 86_400_000;
                 if self.pomodoro_rounds.0 == day { self.pomodoro_rounds.1 } else { 0 }
@@ -1165,6 +1171,8 @@ impl Engine {
             Outcome::Duplicate | Outcome::Filtered(_) => return false,
         };
         if let Some(item) = self.state.pipeline.get(id).cloned() {
+            self.history.insert(0, item.clone());
+            self.history.truncate(200);
             if from_system && cfg.notifications.suppress_native_banners {
                 self.sink.native_banner_handled(&item);
             }

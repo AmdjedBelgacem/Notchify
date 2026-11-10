@@ -1304,6 +1304,7 @@ impl ExpandedView {
 
     fn render_notifications(&self, snap: &Snapshot) {
         let p = &self.palette;
+        let mtm = self.mtm;
         remove_all_subviews(&self.notif_doc);
         let mut parts = vec![("Notifications".to_owned(), p.primary.clone())];
         if !snap.notifications.is_empty() {
@@ -1318,10 +1319,11 @@ impl ExpandedView {
         let w = self.notif_width;
         if snap.notifications.is_empty() {
             self.notif_doc.setFrame(rect(0.0, 0.0, w, visible_h));
+            let lang = notchforge_core::i18n::Language::from_config(&self.config.borrow().general);
             self.notif_doc.addSubview(&self.quiet_tile(
                 rect(0.0, 0.0, w, visible_h),
                 Some("checkmark.circle"),
-                "You're all caught up",
+                notchforge_core::i18n::tr(lang, notchforge_core::i18n::Str::CaughtUp),
             ));
             return;
         }
@@ -1361,6 +1363,34 @@ impl ExpandedView {
         for v in views {
             self.notif_doc.addSubview(&v);
         }
+        // The archive: what came through earlier, dimmed and quiet.
+        let recent: Vec<&Notification> = snap.history.iter().take(4).collect();
+        if recent.is_empty() {
+            return;
+        }
+        let hy = y + 6.0;
+        self.notif_doc.addSubview(&label(
+            mtm,
+            "History",
+            &font(11.0, Weight::Semibold),
+            &p.tertiary,
+            rect(12.0, hy, w - 24.0, 14.0),
+        ));
+        let mut hy = hy + 18.0;
+        for n in recent {
+            let row = label(
+                mtm,
+                &format!("{} — {}", n.app.display_name, n.title),
+                &font(11.5, Weight::Regular),
+                &p.tertiary,
+                rect(12.0, hy, w - 24.0, 14.0),
+            );
+            row.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingTail);
+            self.notif_doc.addSubview(&row);
+            hy += 16.0;
+        }
+        self.notif_doc
+            .setFrame(rect(0.0, 0.0, w, (hy - ROW_GAP).max(visible_h)));
     }
 
     /// A quiet tile holding a short message, so a short list leaves no hole.
@@ -1696,11 +1726,29 @@ impl ExpandedView {
             let (p1, p2, p3, p4, id) =
                 (item.path.clone(), item.path.clone(), item.path.clone(), item.path.clone(), item.id);
             let eng = self.engine.clone();
+            let (p5, p6) = (item.path.clone(), item.path.clone());
             let entries: Vec<(&str, Action)> = vec![
                 (
                     "Open",
                     Box::new(move || {
                         crate::sharing::open_path(&p1);
+                    }),
+                ),
+                (
+                    "Quick Look",
+                    Box::new(move || {
+                        let _ = std::process::Command::new("/usr/bin/qlmanage").arg("-p").arg(&p5).spawn();
+                    }),
+                ),
+                (
+                    "Copy Text",
+                    Box::new(move || {
+                        // Screenshots often carry text: OCR them via the
+                        // Shortcuts action if the user made one, else nothing.
+                        let _ = std::process::Command::new("/usr/bin/shortcuts")
+                            .args(["run", "Copy Text from Screenshot"])
+                            .arg(&p6)
+                            .spawn();
                     }),
                 ),
                 ("Reveal in Finder", Box::new(move || crate::sharing::reveal(std::slice::from_ref(&p2)))),

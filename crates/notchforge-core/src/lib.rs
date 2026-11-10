@@ -22,6 +22,7 @@ pub mod config;
 pub mod engine;
 pub mod error;
 pub mod geometry;
+pub mod i18n;
 pub mod machine;
 pub mod model;
 pub mod pipeline;

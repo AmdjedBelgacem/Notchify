@@ -113,6 +113,8 @@ pub enum ProviderCommand {
     SpotifyConnect,
     /// Give up a sign-in that is waiting on the browser.
     SpotifyCancel,
+    /// Save the playing Spotify track to the library.
+    SpotifyLike,
     /// Forget the stored Spotify token.
     SpotifyDisconnect,
     /// An agent's lifecycle hook, for the provider that tracks its sessions.

@@ -159,6 +159,8 @@ focus_off_shortcut = "NotchForge Focus Off"
 resolution_confirm_secs = 15
 # Focus on 15 minutes before a meeting, off when it ends (uses the shortcuts above).
 auto_focus_meetings = false
+# A daily Focus window in local hours, e.g. [9, 11]. [0, 0] disables it.
+# focus_schedule = [9, 11]
 
 [media]
 # Show the playing track's cover (left) and an equaliser (right) beside the

@@ -299,6 +299,31 @@ impl MenuBar {
             with_controller(|c| c.capture_clipboard());
         });
         menu.addItem(&shelve);
+        // Bluetooth quick-connect, via `blueutil` when it is installed.
+        if let Ok(out) = std::process::Command::new("/opt/homebrew/bin/blueutil")
+            .args(["--paired"])
+            .output()
+        {
+            let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| l.split("name: ").nth(1).map(|n| n.trim_end_matches(',').trim().to_owned()))
+                .collect();
+            if !names.is_empty() {
+                let bt = NSMenu::new(mtm);
+                for name in &names {
+                    let n = name.clone();
+                    bt.addItem(&menu_item(mtm, &targets, name, "", move || {
+                        let _ = std::process::Command::new("/opt/homebrew/bin/blueutil")
+                            .args(["--connect", &n])
+                            .spawn();
+                    }));
+                }
+                let root = NSMenuItem::new(mtm);
+                root.setTitle(&ns("Bluetooth"));
+                root.setSubmenu(Some(&bt));
+                menu.addItem(&root);
+            }
+        }
         menu.addItem(&NSMenuItem::separatorItem(mtm));
 
         // ── Sound Output ▸ ──
