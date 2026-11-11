@@ -184,6 +184,50 @@ pub fn choose_screen(
     Some(picked.unwrap_or(main))
 }
 
+/// Which edge of the menu bar an item is laid out from: app menus run from
+/// the left, status items from the right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarAnchor {
+    Left,
+    Right,
+}
+
+/// Every display shows the same menu bar, but macOS reports each item's
+/// position on one display only (the one whose menu bar is active). This adds
+/// a copy of each item on every other display, at the same distance from its
+/// anchoring edge. Copies that would fall under a display's notch are left
+/// out, as macOS hides those items there.
+pub fn project_menu_bar(items: &[(Rect, BarAnchor)], screens: &[ScreenInfo]) -> Vec<Rect> {
+    let mut out = Vec::with_capacity(items.len() * screens.len().max(1));
+    for &(r, anchor) in items {
+        out.push(r);
+        let mid = Point { x: r.mid_x(), y: r.mid_y() };
+        let Some(src) = screens.iter().find(|s| s.frame.contains_inclusive(mid)) else { continue };
+        for s in screens.iter().filter(|s| s.id != src.id) {
+            let x = match anchor {
+                BarAnchor::Left => s.frame.x + (r.x - src.frame.x),
+                BarAnchor::Right => s.frame.max_x() - (src.frame.max_x() - r.x),
+            };
+            let copy = Rect::new(x, s.frame.max_y() - (src.frame.max_y() - r.y), r.width, r.height);
+            let notch = detect_notch(s);
+            if notch.physical {
+                let n = notch.rect;
+                let hidden = match anchor {
+                    BarAnchor::Left => copy.max_x() > n.x,
+                    BarAnchor::Right => copy.x < n.max_x(),
+                };
+                if hidden {
+                    continue;
+                }
+            }
+            if copy.x >= s.frame.x && copy.max_x() <= s.frame.max_x() {
+                out.push(copy);
+            }
+        }
+    }
+    out
+}
+
 /// Wing-mask bit: the left wing (menu-bar side left of the notch) is shown.
 pub const WING_LEFT: u8 = 1;
 /// Wing-mask bit: the right wing is shown.
@@ -222,7 +266,8 @@ pub struct IslandShape {
 /// as wide as the notch (its "neck"), so menus and status items stay usable.
 pub const TAB_BAR: f64 = 40.0;
 
-/// Width of a single wing in [`LayoutKind::CollapsedWithWings`].
+/// Default width of a single wing in [`LayoutKind::CollapsedWithWings`];
+/// the user's choice is [`AppearanceConfig::wing`].
 pub const WING_WIDTH: f64 = 64.0;
 /// Space around the largest island inside the window, for the shadow.
 pub const WINDOW_MARGIN: f64 = 24.0;
@@ -290,7 +335,7 @@ impl NotchLayout {
             LayoutKind::Collapsed => IslandShape { width: n.width, height: n.height, corner_radius: base_radius },
             LayoutKind::CollapsedWithWings(mask) => {
                 let wings = u8::from(mask & WING_LEFT != 0) as f64 + u8::from(mask & WING_RIGHT != 0) as f64;
-                IslandShape { width: n.width + wings * WING_WIDTH, height: n.height, corner_radius: base_radius }
+                IslandShape { width: n.width + wings * a.wing(), height: n.height, corner_radius: base_radius }
             }
             LayoutKind::Peek => IslandShape {
                 width: (n.width + 2.0 * WING_WIDTH + 80.0).max(440.0).min(a.compact_width),
@@ -629,5 +674,40 @@ mod tests {
         assert_eq!(notch_ear_radius(28.0), NOTCH_EAR_MAX);
         assert_eq!(notch_ear_radius(80.0), NOTCH_EAR_MAX);
         assert_eq!(notch_ear_radius(2.0), 6.0);
+    }
+
+    #[test]
+    fn menu_bar_items_are_projected_onto_the_notched_display() {
+        // Items reported on the external display (its menu bar is active).
+        let screens = [mbp14(), external()];
+        let right = external().frame.max_x();
+        // A status item 300 pt from the external's right edge lands 300 pt
+        // from the laptop's right edge, in the laptop's menu bar.
+        let item = Rect::new(right - 300.0, 1440.0 - 24.0, 24.0, 24.0);
+        let out = project_menu_bar(&[(item, BarAnchor::Right)], &screens);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[1].x, 1512.0 - 300.0);
+        assert_eq!(out[1].max_y(), 982.0);
+        // One that would fall under the notch is hidden there by macOS.
+        let far = Rect::new(right - (1512.0 - 800.0), 1440.0 - 24.0, 24.0, 24.0);
+        assert_eq!(project_menu_bar(&[(far, BarAnchor::Right)], &screens).len(), 1);
+        // App menus keep their distance from the left edge.
+        let menu = Rect::new(1512.0 + 120.0, 1440.0 - 24.0, 40.0, 24.0);
+        let out = project_menu_bar(&[(menu, BarAnchor::Left)], &screens);
+        assert_eq!(out[1].x, 120.0);
+    }
+
+    #[test]
+    fn shoulder_width_follows_the_setting() {
+        let mut layout = NotchLayout::new(mbp14(), AppearanceConfig::default());
+        let n = layout.notch.rect.width;
+        layout.appearance.wing_width = 44.0;
+        assert_eq!(layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT)).width, n + 88.0);
+        assert_eq!(layout.shape(LayoutKind::CollapsedWithWings(WING_RIGHT)).width, n + 44.0);
+        // Out-of-range values are held to the limits.
+        layout.appearance.wing_width = 5.0;
+        assert_eq!(layout.appearance.wing(), AppearanceConfig::WING_MIN);
+        layout.appearance.wing_width = f64::NAN;
+        assert_eq!(layout.appearance.wing(), WING_WIDTH);
     }
 }

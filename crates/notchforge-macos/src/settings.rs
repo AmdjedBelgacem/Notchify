@@ -16,7 +16,7 @@ use crate::ui::{
 };
 use crate::views::kit::{self, Btn};
 use notchforge_core::apps::KnownApp;
-use notchforge_core::config::{Config, ReducedMotion, ScreenChoice};
+use notchforge_core::config::{AppearanceConfig, Config, ReducedMotion, ScreenChoice};
 use notchforge_core::engine::Command;
 use notchforge_core::model::{MediaPlayer, Permission, PermissionState, Priority, TemperatureUnit};
 use notchforge_providers::agents::connect;
@@ -1172,6 +1172,14 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 Some("Cover art on the left, a level meter on the right"),
                 c.media.show_in_wings,
                 |cfg, on| cfg.media.show_in_wings = on,
+            );
+            form.slider(
+                "Shoulder width",
+                Some("How far the closed island reaches each side of the notch"),
+                (AppearanceConfig::WING_MIN, AppearanceConfig::WING_MAX),
+                c.appearance.wing(),
+                |v| format!("{} pt", v.round() as u64),
+                |cfg, v| cfg.appearance.wing_width = v.round(),
             );
             form.switch(
                 "Stay clear of menu bar items",

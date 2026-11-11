@@ -10,7 +10,7 @@ use crate::ui::{
     FlippedView, Palette, Weight, label, mono_digits, rect, set_accessibility_label, set_symbol, set_text, symbol_view,
 };
 use notchforge_core::engine::Snapshot;
-use notchforge_core::geometry::{LayoutKind, NotchLayout, WING_LEFT, WING_RIGHT, WING_WIDTH};
+use notchforge_core::geometry::{LayoutKind, NotchLayout, WING_LEFT, WING_RIGHT};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{NSImageView, NSTextAlignment, NSTextField};
@@ -50,6 +50,8 @@ pub struct CollapsedView {
     right_text: Retained<NSTextField>,
     chev_l: Retained<NSImageView>,
     chev_r: Retained<NSImageView>,
+    /// Width of each shoulder (the user's setting).
+    wing: f64,
 }
 
 impl CollapsedView {
@@ -58,15 +60,16 @@ impl CollapsedView {
         // bit is off (see `Controller::apply_frame` for the offset).
         let s = layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
         let (w, h) = (s.width, s.height);
+        let wing = layout.appearance.wing();
         let root = FlippedView::new(mtm, rect(0.0, 0.0, w, h));
         let icon = 15.0;
         let iy = (h - icon) / 2.0;
         let ty = (h - 15.0) / 2.0;
         let f = mono_digits(11.5, Weight::Semibold);
         let left_icon = symbol_view(mtm, "bolt.fill", 12.0, &p.success, rect(12.0, iy, icon, icon), "Battery");
-        let left_text = label(mtm, "", &f, &p.primary, rect(29.0, ty, WING_WIDTH - 31.0, 15.0));
-        let right_icon = app_icon_view(mtm, rect(w - WING_WIDTH + 10.0, iy - 1.0, icon + 2.0, icon + 2.0));
-        let right_text = label(mtm, "", &f, &p.primary, rect(w - WING_WIDTH + 30.0, ty, WING_WIDTH - 42.0, 15.0));
+        let left_text = label(mtm, "", &f, &p.primary, rect(29.0, ty, wing - 31.0, 15.0));
+        let right_icon = app_icon_view(mtm, rect(w - wing + 10.0, iy - 1.0, icon + 2.0, icon + 2.0));
+        let right_text = label(mtm, "", &f, &p.primary, rect(w - wing + 30.0, ty, wing - 42.0, 15.0));
         right_text.setAlignment(NSTextAlignment::Right);
         let art_side = (h - 8.0).clamp(14.0, 20.0);
         // The image sits in a rounded container (its own layer clips it) rather
@@ -120,7 +123,7 @@ impl CollapsedView {
             "chevron.left.2",
             chev_size,
             &p.secondary,
-            rect(WING_WIDTH + 2.0, (h - chev_size) / 2.0, chev_size + 2.0, chev_size),
+            rect(wing + 2.0, (h - chev_size) / 2.0, chev_size + 2.0, chev_size),
             "Show what the notch hid",
         );
         let chev_r = symbol_view(
@@ -128,7 +131,7 @@ impl CollapsedView {
             "chevron.right.2",
             chev_size,
             &p.secondary,
-            rect(w - WING_WIDTH - chev_size - 4.0, (h - chev_size) / 2.0, chev_size + 2.0, chev_size),
+            rect(w - wing - chev_size - 4.0, (h - chev_size) / 2.0, chev_size + 2.0, chev_size),
             "Show what the notch hid",
         );
         chev_l.setHidden(true);
@@ -160,6 +163,7 @@ impl CollapsedView {
             right_text,
             chev_l,
             chev_r,
+            wing,
         }
     }
 
@@ -182,8 +186,8 @@ impl CollapsedView {
         let size = self.root.frame().size;
         let slack = 4.0;
         let in_band = (0.0..=size.height).contains(&local.y);
-        (!self.art_box.isHidden() && local.x < WING_WIDTH + slack && in_band)
-            || (!self.eq.isHidden() && local.x >= size.width - WING_WIDTH - slack && in_band)
+        (!self.art_box.isHidden() && local.x < self.wing + slack && in_band)
+            || (!self.eq.isHidden() && local.x >= size.width - self.wing - slack && in_band)
     }
 
     /// Draw `img` as the wing icon through the box's layer contents (layers
@@ -285,10 +289,10 @@ impl CollapsedView {
         if !in_band {
             return None;
         }
-        if !self.chev_l.isHidden() && local.x < WING_WIDTH + 16.0 {
+        if !self.chev_l.isHidden() && local.x < self.wing + 16.0 {
             return Some(WING_LEFT);
         }
-        if !self.chev_r.isHidden() && local.x >= size.width - WING_WIDTH - 16.0 {
+        if !self.chev_r.isHidden() && local.x >= size.width - self.wing - 16.0 {
             return Some(WING_RIGHT);
         }
         None

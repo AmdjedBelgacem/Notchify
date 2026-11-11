@@ -31,6 +31,7 @@ unsafe extern "C" {
     pub fn AXIsProcessTrusted() -> u8;
     pub fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> u8;
     pub fn AXUIElementCreateApplication(pid: i32) -> AXUIElementRef;
+    pub fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_secs: f32) -> AXError;
     pub fn AXUIElementCopyAttributeValue(
         element: AXUIElementRef,
         attribute: CFStringRef,

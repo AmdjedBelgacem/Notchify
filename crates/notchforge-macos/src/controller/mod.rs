@@ -20,9 +20,7 @@ use crate::views::{Views, system_increase_contrast, system_reduce_motion};
 use block2::RcBlock;
 use notchforge_core::config::{Config, ReducedMotion};
 use notchforge_core::engine::{Command, EngineHandle, Snapshot};
-use notchforge_core::geometry::{
-    LayoutKind, NotchLayout, Point, Rect, WING_LEFT, WING_RIGHT, WING_WIDTH, choose_screen,
-};
+use notchforge_core::geometry::{LayoutKind, NotchLayout, Point, Rect, WING_LEFT, WING_RIGHT, choose_screen};
 use notchforge_core::machine::{Effect, Event, NotchMachine, State, TimerKind, Timings};
 use notchforge_core::model::{MediaAction, MediaPlayer, Notification};
 use notchforge_core::spring::SpringRect;
@@ -88,8 +86,9 @@ pub struct WingDecision<'a> {
 pub fn wing_mask_for(layout: &NotchLayout, content: u8, occupancy: &[Rect]) -> u8 {
     let notch = layout.notch.rect;
     let mut mask = content;
-    let left = Rect::new(notch.x - WING_WIDTH, notch.y, WING_WIDTH, notch.height);
-    let right = Rect::new(notch.max_x(), notch.y, WING_WIDTH, notch.height);
+    let wing = layout.appearance.wing();
+    let left = Rect::new(notch.x - wing, notch.y, wing, notch.height);
+    let right = Rect::new(notch.max_x(), notch.y, wing, notch.height);
     if occupancy.iter().any(|r| r.intersects(&left)) {
         mask &= !WING_LEFT;
     }
@@ -688,9 +687,16 @@ impl Controller {
         if !crate::accessibility::is_trusted() {
             return Vec::new();
         }
+        use notchforge_core::geometry::{BarAnchor, project_menu_bar};
         let primary_h = NSScreen::screens(self.mtm).iter().next().map_or(0.0, |s| s.frame().size.height);
-        let mut occupied = crate::accessibility::app_menu_rects(primary_h);
-        occupied.extend(crate::accessibility::status_item_rects(primary_h));
+        // Accessibility reports the items on whichever display's menu bar is
+        // active; copy them onto every display (the notch's may be another).
+        let items: Vec<(Rect, BarAnchor)> = crate::accessibility::app_menu_rects(primary_h)
+            .into_iter()
+            .map(|r| (r, BarAnchor::Left))
+            .chain(crate::accessibility::status_item_rects(primary_h).into_iter().map(|r| (r, BarAnchor::Right)))
+            .collect();
+        let mut occupied = project_menu_bar(&items, &screen::screens(self.mtm));
         occupied.extend(crate::windows::status_item_rects(&crate::windows::on_screen(self.mtm)));
         occupied
     }
@@ -763,7 +769,22 @@ impl Controller {
         let chevrons = self.wing_chevrons.get();
         let mask = self.desired_wing_mask(&self.snapshot.borrow());
         if mask != self.wing_mask.replace(mask) {
-            tracing::info!(mask, "wing mask changed");
+            // How far the nearest menu bar item is from each side of the notch.
+            let (notch, occupied) = (self.layout.borrow().notch.rect, self.menu_bar_occupancy());
+            let band = |r: &&Rect| r.max_y() > notch.y && r.y < notch.max_y();
+            let left_gap = occupied
+                .iter()
+                .filter(band)
+                .filter(|r| r.max_x() <= notch.mid_x())
+                .map(|r| notch.x - r.max_x())
+                .fold(f64::INFINITY, f64::min);
+            let right_gap = occupied
+                .iter()
+                .filter(band)
+                .filter(|r| r.x >= notch.mid_x())
+                .map(|r| r.x - notch.max_x())
+                .fold(f64::INFINITY, f64::min);
+            tracing::info!(mask, items = occupied.len(), left_gap, right_gap, "wing mask changed");
             self.handle(Event::WingsChanged(mask));
         } else if chevrons != self.wing_chevrons.replace(chevrons) {
             // Chevron appeared or vanished without a mask change: redraw.

@@ -672,8 +672,20 @@ pub fn is_trusted() -> bool {
 /// The menu bar item frames of the app owning `pid`'s menu, in AppKit
 /// coordinates on the screen with the menu bar. The frontmost app's menu bar
 /// covers the app menus left of the notch; the Control Center process owns the
-/// status items on its right.
+/// system status items on its right.
 pub fn menu_bar_item_rects(pid: i32, primary_h: f64) -> Vec<Rect> {
+    bar_frames(pid, "AXMenuBar").into_iter().map(|f| to_appkit(f, primary_h)).collect()
+}
+
+/// An AX frame (top-left origin, like CG) in AppKit coordinates.
+fn to_appkit(f: Rect, primary_h: f64) -> Rect {
+    Rect::new(f.x, primary_h - f.y - f.height, f.width, f.height)
+}
+
+/// Frames, in AX coordinates, of the children of `pid`'s `bar` attribute
+/// (`AXMenuBar` for app menus, `AXExtrasMenuBar` for status items). A slow
+/// app is given up on after a short timeout.
+fn bar_frames(pid: i32, bar: &str) -> Vec<Rect> {
     if pid == 0 || !is_trusted() || pid == std::process::id() as i32 {
         return Vec::new();
     }
@@ -681,7 +693,8 @@ pub fn menu_bar_item_rects(pid: i32, primary_h: f64) -> Vec<Rect> {
     // SAFETY: AX calls on objects we own or borrow from owned arrays.
     unsafe {
         let Some(app_el) = Owned::from_create(AXUIElementCreateApplication(pid)) else { return out };
-        let Some(menubar) = copy_attr(app_el.as_ptr(), "AXMenuBar") else { return out };
+        AXUIElementSetMessagingTimeout(app_el.as_ptr(), 0.1);
+        let Some(menubar) = copy_attr(app_el.as_ptr(), bar) else { return out };
         let Some(items) = copy_attr(menubar.as_ptr(), "AXChildren") else { return out };
         for i in 0..CFArrayGetCount(items.as_ptr()) {
             let item = CFArrayGetValueAtIndex(items.as_ptr(), i);
@@ -690,9 +703,8 @@ pub fn menu_bar_item_rects(pid: i32, primary_h: f64) -> Vec<Rect> {
             else {
                 continue;
             };
-            // AX coordinates are top-left origin, like CG.
             if w > 0.0 && h > 0.0 {
-                out.push(Rect::new(x, primary_h - y - h, w, h));
+                out.push(Rect::new(x, y, w, h));
             }
         }
     }
@@ -707,10 +719,47 @@ pub fn app_menu_rects(primary_h: f64) -> Vec<Rect> {
     }
 }
 
-/// System status items (Wi-Fi, battery, clock side). On current macOS they
-/// render inside the menu bar window, so the window list can't see them —
-/// they are exposed by the Control Center process instead.
+/// Every app's status items, in AX coordinates, as last read by the scanner.
+static EXTRAS: std::sync::Mutex<Vec<Rect>> = std::sync::Mutex::new(Vec::new());
+static EXTRAS_SCANNER: std::sync::Once = std::sync::Once::new();
+
+/// How often the scanner re-reads every app's status items.
+const EXTRAS_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Read every running app's status items (`AXExtrasMenuBar`): current macOS
+/// draws them inside the menu bar, so the window list can't see them. Asking
+/// each app takes a while, so it runs on its own thread; a slow or hung app
+/// only delays the next read, never the island.
+fn scan_extras() {
+    let mut last = usize::MAX;
+    loop {
+        if is_trusted() {
+            // A pool per pass: this thread has no run loop to drain one.
+            let pids: Vec<i32> = objc2::rc::autoreleasepool(|_| {
+                NSWorkspace::sharedWorkspace().runningApplications().iter().map(|a| a.processIdentifier()).collect()
+            });
+            let mut found = Vec::new();
+            for pid in pids {
+                found.extend(bar_frames(pid, "AXExtrasMenuBar"));
+            }
+            if found.len() != last {
+                last = found.len();
+                tracing::info!(items = last, "menu bar status items read");
+            }
+            if let Ok(mut e) = EXTRAS.lock() {
+                *e = found;
+            }
+        }
+        std::thread::sleep(EXTRAS_EVERY);
+    }
+}
+
+/// Status items in the menu bar: Control Center's (Wi-Fi, battery, clock),
+/// read now, and every app's own, from the background scanner's last pass.
 pub fn status_item_rects(primary_h: f64) -> Vec<Rect> {
+    EXTRAS_SCANNER.call_once(|| {
+        let _ = std::thread::Builder::new().name("menu-bar-extras".into()).spawn(scan_extras);
+    });
     let cc = NSWorkspace::sharedWorkspace()
         .runningApplications()
         .iter()
@@ -720,7 +769,11 @@ pub fn status_item_rects(primary_h: f64) -> Vec<Rect> {
         })
         .map(|a| a.processIdentifier())
         .unwrap_or(0);
-    menu_bar_item_rects(cc, primary_h)
+    let mut out = menu_bar_item_rects(cc, primary_h);
+    if let Ok(e) = EXTRAS.lock() {
+        out.extend(e.iter().map(|f| to_appkit(*f, primary_h)));
+    }
+    out
 }
 
 /// Press the "Reply" button on the banner whose texts include `title`, which

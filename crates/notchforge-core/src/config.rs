@@ -123,10 +123,28 @@ pub struct AppearanceConfig {
     /// Keep a wing away from the menu bar items beside the notch: a wing whose
     /// span is occupied is hidden instead of drawn over them.
     pub dodge_menu_bar: bool,
+    /// Width of each shoulder beside the closed notch, in points (see [`Self::wing`]).
+    pub wing_width: f64,
     /// Respect "Increase contrast" by using brighter secondary text.
     pub high_contrast: bool,
     /// Accent colour theme: "system", "sunset", "ocean", "violet" or "forest".
     pub accent: String,
+}
+
+impl AppearanceConfig {
+    /// Narrowest shoulder: an icon and nothing else.
+    pub const WING_MIN: f64 = 40.0;
+    /// Widest shoulder.
+    pub const WING_MAX: f64 = 100.0;
+
+    /// The shoulder width in use, kept within [`Self::WING_MIN`]…[`Self::WING_MAX`].
+    pub fn wing(&self) -> f64 {
+        if self.wing_width.is_finite() {
+            self.wing_width.clamp(Self::WING_MIN, Self::WING_MAX)
+        } else {
+            crate::geometry::WING_WIDTH
+        }
+    }
 }
 
 impl Default for AppearanceConfig {
@@ -140,6 +158,7 @@ impl Default for AppearanceConfig {
             expanded_height: 340.0,
             show_wings: true,
             dodge_menu_bar: true,
+            wing_width: crate::geometry::WING_WIDTH,
             high_contrast: false,
             accent: "system".to_owned(),
         }
