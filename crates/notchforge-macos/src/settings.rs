@@ -450,8 +450,8 @@ impl Form<'_> {
         card.addSubview(&sw);
     }
 
-    /// A pop-up: a grey pill with the current value and a chevron; clicking
-    /// opens a menu of the options.
+    /// A pop-up, drawn the way System Settings draws one: the current value in
+    /// secondary text with a small chevron, right-aligned in the row, no box.
     fn popup(
         &self,
         title: &str,
@@ -464,28 +464,36 @@ impl Form<'_> {
         let value_font = font(13.0, Weight::Regular);
         let widest =
             options.iter().map(|o| text_width(&attributed(o, &value_font, &kit::text()))).fold(0.0_f64, f64::max);
-        let pw = (widest + 44.0).ceil().max(96.0);
-        let (card, top, h) = self.texts(title, subtitle, pw, None);
+        let (card, top, h) = self.texts(title, subtitle, (widest + 24.0).ceil(), None);
+        let right = MAIN_W - ROW_PAD;
         let btn = NSButton::new(self.mtm);
-        btn.setButtonType(objc2_app_kit::NSButtonType::MomentaryPushIn);
+        btn.setButtonType(objc2_app_kit::NSButtonType::MomentaryChange);
         btn.setBordered(false);
-        btn.setFrame(rect(MAIN_W - ROW_PAD - pw, top + (h - CONTROL_H) / 2.0, pw, CONTROL_H));
-        btn.setAlignment(NSTextAlignment::Left);
-        btn.setAttributedTitle(&attributed(options.get(selected).copied().unwrap_or(""), &value_font, &kit::text()));
         btn.setImage(crate::ui::symbol_image("chevron.up.chevron.down", 9.0, "").as_deref());
         btn.setImagePosition(NSCellImagePosition::ImageRight);
         btn.setContentTintColor(Some(&kit::text3()));
-        crate::ui::make_card(&btn, &kit::raised(), CONTROL_H / 2.0);
         crate::ui::set_accessibility_label(&btn, title);
+        // Shows `name` and hugs it, keeping the right edge on the row's margin.
+        let show = {
+            let f = value_font.clone();
+            move |b: &NSButton, name: &str| {
+                b.setAttributedTitle(&attributed(name, &f, &kit::text2()));
+                b.sizeToFit();
+                let w = b.frame().size.width.ceil() + 4.0;
+                b.setFrame(rect(right - w, top + (h - CONTROL_H) / 2.0, w, CONTROL_H));
+            }
+        };
+        show(&btn, options.get(selected).copied().unwrap_or(""));
+        let show = Rc::new(show);
 
         let set = Rc::new(set);
         let menu = NSMenu::new(self.mtm);
         let items: Rc<RefCell<Vec<Retained<NSMenuItem>>>> = Rc::default();
         for (i, name) in options.iter().enumerate() {
             let (draft, set, button, items_c) = (self.draft.clone(), set.clone(), btn.clone(), items.clone());
-            let (f, name_owned) = (value_font.clone(), (*name).to_owned());
+            let (show, name_owned) = (show.clone(), (*name).to_owned());
             let t = self.targets.add(self.mtm, move |_| {
-                button.setAttributedTitle(&attributed(&name_owned, &f, &kit::text()));
+                show(&button, &name_owned);
                 for (j, it) in items_c.borrow().iter().enumerate() {
                     it.setState(if j == i { NSControlStateValueOn } else { NSControlStateValueOff });
                 }
@@ -509,12 +517,11 @@ impl Form<'_> {
         }
         let opener = {
             let button = btn.clone();
+            let items = items.clone();
             self.targets.add(self.mtm, move |_| {
-                menu.popUpMenuPositioningItem_atLocation_inView(
-                    None,
-                    NSPoint::new(0.0, CONTROL_H + 4.0),
-                    Some(&button),
-                );
+                // Like a native pop-up, the menu opens with the chosen item over the value.
+                let at = items.borrow().iter().find(|it| it.state() == NSControlStateValueOn).cloned();
+                menu.popUpMenuPositioningItem_atLocation_inView(at.as_deref(), NSPoint::new(-18.0, 0.0), Some(&button));
             })
         };
         // SAFETY: target kept alive by `targets`.

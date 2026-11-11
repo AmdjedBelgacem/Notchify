@@ -133,7 +133,7 @@ impl MediaPage {
         self.list_scroll.setHidden(lists.is_empty() && queue.is_empty());
 
         let p = &self.p;
-        let w = self.list_width;
+        let w = self.list_width - crate::views::kit::GUTTER;
         let brand = rgb8(player.color());
         let visible_h = self.list_scroll.frame().size.height;
         // Five rows fill the tile; a shorter list spreads out, a longer one scrolls.
@@ -331,7 +331,7 @@ impl MediaPage {
             self.list_message.setHidden(false);
             return;
         }
-        let w = self.list_width;
+        let w = self.list_width - crate::views::kit::GUTTER;
         let visible_h = self.list_scroll.frame().size.height;
         let row_h = if videos.len() as f64 >= VISIBLE_ROWS {
             visible_h / VISIBLE_ROWS
@@ -441,7 +441,7 @@ impl MediaPage {
             return;
         }
         self.list_scroll.setHidden(false);
-        let w = self.list_width;
+        let w = self.list_width - crate::views::kit::GUTTER;
         let visible_h = self.list_height();
         let row_h = 30.0_f64.min((visible_h / lines.len() as f64).max(20.0));
         let doc_h = (lines.len() as f64 * row_h).max(visible_h);
@@ -524,7 +524,7 @@ impl MediaPage {
             return;
         }
         self.list_scroll.setHidden(false);
-        let w = self.list_width;
+        let w = self.list_width - crate::views::kit::GUTTER;
         let visible_h = lh;
         let row_h = if results.len() as f64 >= VISIBLE_ROWS {
             visible_h / VISIBLE_ROWS

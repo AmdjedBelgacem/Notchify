@@ -94,7 +94,7 @@ impl NowPage {
         }
         remove_all_subviews(&self.doc);
         self.targets.clear();
-        let w = self.scroll.frame().size.width;
+        let w = self.scroll.frame().size.width - kit::GUTTER;
         let mut y = 0.0;
 
         let questions: Vec<&Notification> = snap.notifications.iter().filter(|n| asks(n)).take(MAX_ASKS).collect();

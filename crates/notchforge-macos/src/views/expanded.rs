@@ -500,7 +500,7 @@ impl ExpandedView {
         let mtm = self.mtm;
         remove_all_subviews(&self.shelf_doc);
         self.shelf_targets.clear();
-        let w = self.shelf_scroll.frame().size.width;
+        let w = self.shelf_scroll.frame().size.width - super::kit::GUTTER;
         let files: Vec<_> = snap.tray.iter().filter(|t| t.text.is_none()).collect();
         let clips: Vec<_> = snap.tray.iter().filter(|t| t.text.is_some()).collect();
         let lit = self.shelf_highlight.get();

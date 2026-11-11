@@ -207,8 +207,13 @@ pub fn rule(mtm: MainThreadMarker, x: f64, y: f64, w: f64) -> Retained<FlippedVi
     shape_view(mtm, rect(x, y, w, 1.0), &hairline(), 0.0)
 }
 
-/// A vertically scrolling container for a space's column.
+/// Room to the right of a scrolling column for the overlay scroller, so it never sits on content.
+pub const GUTTER: f64 = 10.0;
+
+/// A vertically scrolling container for a space's column. `frame` is the content's area; the
+/// scroll view reaches `GUTTER` past it so the scroller runs in the margin, not over the rows.
 pub fn scroller(mtm: MainThreadMarker, frame: NSRect, doc: &NSView) -> Retained<NSScrollView> {
+    let frame = NSRect::new(frame.origin, objc2_foundation::NSSize::new(frame.size.width + GUTTER, frame.size.height));
     let s = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), frame);
     s.setDrawsBackground(false);
     s.setHasVerticalScroller(true);

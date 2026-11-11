@@ -53,7 +53,7 @@ fn from_agent(n: &Notification, agent: UsageAgent) -> bool {
 impl AgentsPage {
     pub fn new(mtm: MainThreadMarker, w: f64, h: f64, top: f64) -> Self {
         let root = FlippedView::new(mtm, rect(0.0, 0.0, w, h));
-        let col_w = w - 2.0 * PAD - SIDE_W - GAP;
+        let col_w = w - 2.0 * PAD - SIDE_W - GAP - kit::GUTTER;
         let y0 = top + 6.0;
         root.addSubview(&kit::heading(mtm, "Sessions", rect(PAD + 4.0, y0, col_w, 16.0)));
         let doc = FlippedView::new(mtm, rect(0.0, 0.0, col_w, 10.0));
@@ -77,7 +77,7 @@ impl AgentsPage {
     }
 
     fn sessions(&self, snap: &Snapshot) {
-        let w = self.scroll.frame().size.width;
+        let w = self.scroll.frame().size.width - kit::GUTTER;
         let mut asked: Vec<u64> = Vec::new();
         let mut list: Vec<(&RunningSession, Option<&Notification>)> = snap
             .usage
