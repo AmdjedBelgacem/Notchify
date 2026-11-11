@@ -265,10 +265,14 @@ impl MediaPage {
 
         let top_y = nh + 6.0;
         let ph = h - top_y - PAD;
-        // Two equal halves, each a 2 × 2 block of the Overview's modules.
-        let lw = (w - 2.0 * PAD - 10.0) / 2.0;
-        let rx = PAD + lw + 10.0;
-        let rw = w - PAD - rx;
+        // As on the Music board: the player spans the space; the library opens
+        // over it from its Library button (and closes with Done).
+        let lw = w - 2.0 * PAD;
+        let rx = PAD;
+        let rw = lw;
+        // Room at the library's top right for Done.
+        const DONE_W: f64 = 70.0;
+        let lib_w = 82.0;
 
         // ── player tile, tinted from the cover ──
         let player = super::expanded::glass_tile(mtm, rect(PAD, top_y, lw, ph));
@@ -289,10 +293,13 @@ impl MediaPage {
         if let Some(l) = player.layer() {
             l.setCornerRadius(20.0);
             l.setMasksToBounds(true);
+            // As on the Music board: the player sits on the island's black,
+            // with no card around it; the artwork carries the colour.
+            l.setBackgroundColor(None);
             l.addSublayer(&tint);
             l.addSublayer(&ambient);
-            l.addSublayer(&shade);
         }
+        let _ = &shade;
         root.addSubview(&player);
 
         // The artwork takes what the rows below it leave: the timeline, the
@@ -342,7 +349,7 @@ impl MediaPage {
 
         // ── title block ──
         let tx = PAD + art_side + PAD;
-        let tw = lw - tx - PAD;
+        let tw = lw - tx - PAD - lib_w - 8.0;
         // Centred on the artwork.
         let ty = PAD + ((art_side - 78.0) / 2.0).max(0.0);
         let badge = label(mtm, "", &font(10.5, Weight::Bold), &white(0.62), rect(tx, ty, tw, 14.0));
@@ -407,10 +414,11 @@ impl MediaPage {
         // ── transport: space-between across the tile ──
         let row_y = times_y + 18.0;
         let widths = [40.0, 48.0, 56.0, 48.0, 40.0];
-        let span = lw - 2.0 * 20.0;
+        // Grouped in the middle, as on the Music board, not spread edge to edge.
+        let span = (lw - 2.0 * 20.0).min(420.0);
         let gap = (span - widths.iter().sum::<f64>()) / 4.0;
         let mut xs = [0.0; 5];
-        let mut x = 20.0;
+        let mut x = (lw - span) / 2.0;
         for (i, bw) in widths.iter().enumerate() {
             xs[i] = x;
             x += bw + gap;
@@ -664,9 +672,9 @@ impl MediaPage {
             l.setCornerRadius(20.0);
             l.setMasksToBounds(true);
         }
-        // Four sources across the tile's width, plus the search toggle.
-        let seg_w = (rw - 20.0 - 4.0 - 26.0) / 4.0;
-        let seg_track = shape_view(mtm, rect(10.0, 10.0, rw - 20.0, 28.0), &white(0.12), 14.0);
+        // Four sources across the tile's width, plus the search toggle and Done.
+        let seg_w = (rw - 20.0 - DONE_W - 4.0 - 26.0) / 4.0;
+        let seg_track = shape_view(mtm, rect(10.0, 10.0, rw - 20.0 - DONE_W, 28.0), &white(0.12), 14.0);
         let pick = |player: MediaPlayer| {
             let st = state.clone();
             move |_: Option<&AnyObject>| {
@@ -757,7 +765,7 @@ impl MediaPage {
             "Play something from YouTube",
             &p.secondary,
             &t,
-            rect(rw - 20.0 - 26.0 + 4.0, 8.0, 20.0, 20.0),
+            rect(rw - 20.0 - DONE_W - 26.0 + 4.0, 8.0, 20.0, 20.0),
         );
         // The field lives beside the segments and only shows while searching.
         let search_target = crate::ui::ActionTarget::new(mtm, |_| {
@@ -823,7 +831,36 @@ impl MediaPage {
             rect(rw / 2.0 - 70.0, ph / 2.0 + 20.0, 140.0, 28.0),
         );
         card.addSubview(&list_action);
+        // The library opens over the player and closes with Done.
+        card.setHidden(true);
         root.addSubview(&card);
+        let (c1, c2) = (card.clone(), card.clone());
+        let t = targets.add(mtm, move |_| c1.setHidden(false));
+        let library = pill_button(
+            mtm,
+            "Library",
+            Some("music.note.list"),
+            &font(12.5, Weight::Semibold),
+            &p.primary,
+            &white(0.14),
+            15.0,
+            &t,
+            rect(lw - PAD - lib_w, PAD, lib_w, 30.0),
+        );
+        player.addSubview(&library);
+        let t = targets.add(mtm, move |_| c2.setHidden(true));
+        let done = pill_button(
+            mtm,
+            "Done",
+            None,
+            &font(12.5, Weight::Semibold),
+            &p.primary,
+            &white(0.14),
+            14.0,
+            &t,
+            rect(rw - 10.0 - DONE_W + 6.0, 10.0, DONE_W - 6.0, 28.0),
+        );
+        card.addSubview(&done);
 
         Self {
             root,
@@ -1108,14 +1145,11 @@ impl MediaPage {
                     let img = art.as_deref().and_then(icons::file_image);
                     self.art.setImage(img.as_deref());
                     self.art_placeholder.setHidden(img.is_some());
-                    let (r, g, b) = pl.color();
-                    let tint = img.as_deref().and_then(icons::average_color).unwrap_or((
-                        r as f64 / 255.0,
-                        g as f64 / 255.0,
-                        b as f64 / 255.0,
-                    ));
-                    self.set_wash(Some(tint));
-                    self.set_ambient(img.as_deref());
+                    // Flat black like the rest of the island: the artwork
+                    // carries the colour, the card doesn't wash with it.
+                    let _ = pl;
+                    self.set_wash(None);
+                    self.set_ambient(None);
                     self.state.borrow_mut().art_path = art;
                 }
                 if let Some(n) = n {

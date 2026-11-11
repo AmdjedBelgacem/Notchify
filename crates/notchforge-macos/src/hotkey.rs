@@ -63,6 +63,8 @@ const KEY_LEFT: u32 = 123;
 const KEY_RIGHT: u32 = 124;
 /// `kVK_ANSI_N`.
 const KEY_N: u32 = 0x2D;
+/// `kVK_Space`.
+const KEY_SPACE: u32 = 0x31;
 /// `kVK_ANSI_C`.
 const KEY_C: u32 = 0x08;
 /// `kVK_ANSI_Y`.
@@ -147,7 +149,7 @@ fn register(key_code: u32, id: usize) {
     }
 }
 
-/// Register ⌃⌥N, ⌃⌥C, ⌃⌥Y and ⌃⌥D.
+/// Register ⌃⌥Space and ⌃⌥N (open / close), ⌃⌥C, ⌃⌥Y, ⌃⌥D, ⌃⌥M and ⌃⌥T.
 pub fn install() {
     let spec = EventTypeSpec { event_class: K_EVENT_CLASS_KEYBOARD, event_kind: K_EVENT_HOT_KEY_PRESSED };
     let mut handler_ref = std::ptr::null_mut();
@@ -161,6 +163,7 @@ pub fn install() {
             return;
         }
     }
+    register(KEY_SPACE, 1);
     register(KEY_N, 1);
     register(KEY_C, 2);
     register(KEY_Y, 3);

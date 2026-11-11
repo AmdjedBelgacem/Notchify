@@ -451,8 +451,13 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             }
         }
         3 => {
-            let (st, ignores, anim) = with_controller(|c| (c.machine_state(), c.ignores_mouse(), c.last_animation()))
-                .unwrap_or((State::Collapsed, true, AnimStats::default()));
+            // Whether a click on the notch lands on the open island. (The real
+            // pointer may be elsewhere when the hover was simulated, and the
+            // window takes the pointer only over its shape.)
+            let at = notchforge_core::geometry::Point { x: center.x, y: center.y };
+            let (st, ignores, anim) =
+                with_controller(|c| (c.machine_state(), !c.accepts_click_at(at), c.last_animation()))
+                    .unwrap_or((State::Collapsed, true, AnimStats::default()));
             // The real pointer moved away (someone is using the Mac): hover
             // again and check on the next tick, once.
             if st != State::Hover && !ctx.retried.replace(true) {
@@ -475,15 +480,6 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             check_pixels(ctx, "hover", 0.004, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "02-hover", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
-            // The same glance with a playing track, as on the design board.
-            if let Some(real) = with_controller(|c| c.current_snapshot()) {
-                let mut fake = (*real).clone();
-                fake.media = sample_media();
-                fake.unread = 0;
-                with_controller(|c| c.preview_compact(&fake));
-                screenshot(ctx, mtm, "02b-hover-music", None);
-                with_controller(|c| c.preview_compact(&real));
-            }
         }
         // ── click to pin ──
         4 => {
@@ -1058,7 +1054,8 @@ fn overview_preview(ctx: &Rc<Ctx>, mtm: MainThreadMarker, snap: &notchforge_core
     ];
     fake.unread = 1;
     with_controller(|c| c.preview_overview(&fake));
-    check_pixels(ctx, "overview sample", 0.004, true);
+    // Black with flat tiles: the text is most of what's bright.
+    check_pixels(ctx, "overview sample", 0.002, true);
     screenshot(ctx, mtm, "03c-overview-sample", None);
     with_controller(|c| c.preview_overview(snap));
     notched_previews(ctx, &fake);
@@ -1486,7 +1483,7 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
-    r.check("notched: eighteen views rendered", sizes.len() == 18, format!("{sizes:?}"));
+    r.check("notched: seventeen views rendered", sizes.len() == 17, format!("{sizes:?}"));
     r.metrics.insert("notched_sizes".into(), json!(sizes));
     // Island sizes on the design boards (Overview, Main, Hover, Peek): the
     // simulated 14-inch screen's shape for that view, using the live config's
@@ -1510,7 +1507,6 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     for (name, kind) in [
         ("07a-notched-overview", LayoutKind::Expanded),
         ("07b-notched-music", LayoutKind::Expanded),
-        ("07c-notched-hover", LayoutKind::Compact),
         ("07d-notched-peek", LayoutKind::Peek),
     ] {
         let got = size(name);

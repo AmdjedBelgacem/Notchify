@@ -5,14 +5,15 @@
 //! without any per-frame relayout. Views are rebuilt only when the screen
 //! geometry or appearance changes.
 
+pub mod agents;
 pub mod call;
 pub mod collapsed;
-pub mod compact;
+pub mod day;
 pub mod expanded;
-pub mod live;
+pub mod kit;
 pub mod media;
+pub mod now;
 pub mod peek;
-pub mod planner;
 pub mod usage;
 
 use crate::ui::{FlippedView, Palette, rgb8, symbol_image};
@@ -31,7 +32,6 @@ use std::sync::Arc;
 pub struct Views {
     pub collapsed: collapsed::CollapsedView,
     pub peek: peek::PeekView,
-    pub compact: compact::CompactView,
     pub expanded: expanded::ExpandedView,
     pub call: call::CallView,
 }
@@ -47,7 +47,6 @@ impl Views {
         Self {
             collapsed: collapsed::CollapsedView::new(mtm, layout, &palette),
             peek: peek::PeekView::new(mtm, layout, &palette),
-            compact: compact::CompactView::new(mtm, layout, &palette),
             call: call::CallView::new(mtm, layout, &palette),
             expanded,
         }
@@ -57,14 +56,15 @@ impl Views {
         match kind {
             LayoutKind::Collapsed | LayoutKind::CollapsedWithWings(_) => &self.collapsed.root,
             LayoutKind::Peek => &self.peek.root,
-            LayoutKind::Compact => &self.compact.root,
+            // Hover opens the full panel; nothing draws the old hover card.
+            LayoutKind::Compact => &self.expanded.root,
             LayoutKind::Expanded => &self.expanded.root,
             LayoutKind::Incoming(_) => &self.call.root,
         }
     }
 
-    pub fn all(&self) -> [&Retained<FlippedView>; 5] {
-        [&self.collapsed.root, &self.peek.root, &self.compact.root, &self.expanded.root, &self.call.root]
+    pub fn all(&self) -> [&Retained<FlippedView>; 4] {
+        [&self.collapsed.root, &self.peek.root, &self.expanded.root, &self.call.root]
     }
 }
 

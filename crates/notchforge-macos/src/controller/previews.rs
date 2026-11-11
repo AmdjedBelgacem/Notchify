@@ -4,11 +4,6 @@
 use super::*;
 
 impl Controller {
-    /// Render the hover glance from an arbitrary snapshot (self-test).
-    pub fn preview_compact(&self, snap: &Snapshot) {
-        self.views.borrow().compact.update(snap, &self.palette.borrow());
-    }
-
     /// Render the Overview from an arbitrary snapshot (self-test).
     pub fn preview_overview(&self, snap: &Snapshot) {
         self.views.borrow().expanded.update(snap);
@@ -92,7 +87,6 @@ impl Controller {
         };
 
         views.expanded.update(overview);
-        views.expanded.preview_controls(0.72, 0.62, "1512 × 982");
         views.expanded.show_tab(Tab::Overview);
         show("07a-notched-overview", LayoutKind::Expanded, &views.expanded.root);
         views.expanded.media.invalidate();
@@ -100,8 +94,6 @@ impl Controller {
         views.expanded.media.update(music);
         views.expanded.show_tab(Tab::Media);
         show("07b-notched-music", LayoutKind::Expanded, &views.expanded.root);
-        views.compact.update(music, &palette);
-        show("07c-notched-hover", LayoutKind::Compact, &views.compact.root);
         views.peek.show(peek, &palette);
         show("07d-notched-peek", LayoutKind::Peek, &views.peek.root);
         // Collapsed with wings while a browser tab plays audio (no Spotify / Music).
@@ -156,6 +148,9 @@ impl Controller {
         views.expanded.update(&planner);
         views.expanded.show_tab(Tab::Planner);
         show("07r-notched-planner", LayoutKind::Expanded, &views.expanded.root);
+        // The Shelf, with the sample tray (files and a shelved link).
+        views.expanded.show_tab(Tab::Shelf);
+        show("07s-notched-shelf", LayoutKind::Expanded, &views.expanded.root);
         // As from the desktop app alone: Claude Code's limits unknown, large totals.
         let mut desktop = agents.clone();
         desktop.generation += 1;
@@ -173,11 +168,6 @@ impl Controller {
         let on_call = crate::selftest::sample_active_call();
         views.call.update_active(&on_call, notchforge_core::time::now_ms());
         show("07m-notched-in-call", LayoutKind::Incoming(1), &views.call.root);
-        let mut hovering = music.clone();
-        hovering.active_call = Some(on_call.clone());
-        views.compact.update(&hovering, &palette);
-        show("07n-notched-hover-in-call", LayoutKind::Compact, &views.compact.root);
-        views.compact.update(music, &palette);
         views.expanded.show_tab(Tab::Overview);
         views.expanded.set_call(Some(&on_call), notchforge_core::time::now_ms());
         show("07o-notched-panel-in-call", LayoutKind::Expanded, &views.expanded.root);

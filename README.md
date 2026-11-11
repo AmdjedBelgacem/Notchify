@@ -512,13 +512,13 @@ hook does nothing. Your deny rules in Claude Code still apply.
 ### Links, shortcuts and keys
 
 `notchisland://` links drive the notch from Shortcuts ("Open URL"), Raycast,
-Alfred or `open` in a script: `open`, `tab/<overview|planner|music|live|agents>`,
+Alfred or `open` in a script: `open`, `tab/<now|music|agents|day|shelf|usage>`,
 `toggle`, `close`, `timer?minutes=25&label=Focus`, `cancel-timer`,
 `notify?title=…&body=…`, `play-pause`, `next`, `previous`, `allow`, `deny`,
 `shelve`, `settings`, `setup`. Ready-made, signed shortcuts for the common
 ones are in [`integrations/shortcuts/`](integrations/shortcuts/README.md), and
 the app adds native Shortcuts actions (Open the Notch, Start a Notch Timer,
-Show in the Notch, Answer Agent Request…) when built with Xcode installed. Keys: **⌃⌥N** opens the notch, **← →** and
+Show in the Notch, Answer Agent Request…) when built with Xcode installed. Keys: **⌃⌥Space** (or **⌃⌥N**) opens the notch, **← →** and
 **⌘1…⌘5** switch tabs while it is open, **⌃⌥C** shelves the clipboard.
 
 ### CI runs and updates

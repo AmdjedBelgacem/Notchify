@@ -840,10 +840,6 @@ impl Controller {
             self.views.borrow().expanded.set_drop_highlight(false);
         }
         self.views.borrow().expanded.set_visible(kind == LayoutKind::Expanded);
-        if kind == LayoutKind::Compact {
-            let snap = self.snapshot.borrow().clone();
-            self.views.borrow().compact.update(&snap, &self.palette.borrow());
-        }
         self.show_container(kind);
         let notch_h = self.layout.borrow().notch.rect.height;
         // The island stays true black at every size (no glass), like the notch.
@@ -1298,10 +1294,6 @@ impl Controller {
                 return true;
             }
         }
-        // Clicking the hover card's "now playing" opens straight on the music page.
-        if self.kind.get() == LayoutKind::Compact && self.views.borrow().compact.media_hit(window_point) {
-            self.views.borrow().expanded.show_tab(crate::views::expanded::Tab::Media);
-        }
         if self.passes_through(global, island) {
             self.click_through(global, false);
             return true;
@@ -1337,10 +1329,6 @@ impl Controller {
         if let Some(muted) = crate::controls::mic::toggle() {
             self.views.borrow().expanded.set_mic_muted(Some(muted));
         }
-    }
-
-    pub fn show_resolution_menu(&self, anchor: &objc2_app_kit::NSButton) {
-        self.views.borrow().expanded.resolution_menu(anchor);
     }
 
     fn is_expanded(&self) -> bool {
@@ -1387,14 +1375,6 @@ impl Controller {
         views.expanded.media.invalidate();
         views.expanded.media.update(snap);
         views.expanded.media.debug_summary()
-    }
-
-    /// Re-render the music page from the current snapshot (after a local
-    /// choice such as switching the playlist source).
-    /// Enter in the history search: re-render the notifications card.
-    pub fn apply_history_filter(&self) {
-        self.expanded_dirty.set(true);
-        self.render_expanded(false);
     }
 
     /// The magnifier toggled the search overlay; opening focuses the field.
@@ -1644,35 +1624,12 @@ impl Controller {
         }
     }
 
-    /// Answer an authorization prompt: Allow / Deny for an agent asking to show
-    /// notifications, Cancel for a Spotify sign-in waiting on the browser.
-    /// Add a plan to Reminders. EventKit runs on the main thread, which this
-    /// is, so the save waits on a worker that hops back to it.
-    pub fn add_plan(&self, title: &str) {
-        self.views.borrow().expanded.planner.plan_added(title);
-        let title = title.to_owned();
-        std::thread::spawn(move || {
-            if !notchforge_providers::calendar::add_reminder(&title) {
-                tracing::warn!("could not add a reminder");
-            }
-        });
-    }
-
     /// Tick a plan off in Reminders.
     pub fn complete_plan(&self, id: &str) {
-        self.views.borrow().expanded.planner.plan_done(id);
         let id = id.to_owned();
         std::thread::spawn(move || {
             notchforge_providers::calendar::complete_reminder_by_id(&id);
         });
-    }
-
-    pub fn new_note(&self) {
-        self.views.borrow().expanded.planner.new_note();
-    }
-
-    pub fn open_note(&self, id: u64) {
-        self.views.borrow().expanded.planner.open_note(id);
     }
 
     pub fn answer_auth(&self, target: &notchforge_core::model::AuthTarget, primary: bool) {
@@ -1743,31 +1700,6 @@ impl Controller {
         if let Err(e) = crate::controls::focus::toggle(active, on, off) {
             crate::app::alert("Could not toggle Focus", &e);
         }
-    }
-
-    /// Resolution popup changed: apply the mode, then ask to keep or revert.
-    pub fn choose_display_mode(&self, idx: isize) {
-        let Some((display, mode)) = self.views.borrow().expanded.display_mode_at(idx) else { return };
-        match crate::controls::display_modes::apply(display, mode) {
-            Ok(Some(previous)) if previous != mode => {
-                let secs = self.config.borrow().controls.resolution_confirm_secs;
-                if !crate::app::confirm_with_timeout(
-                    "Keep this display resolution?",
-                    "The previous resolution will be restored automatically.",
-                    "Keep",
-                    "Revert",
-                    secs,
-                ) {
-                    if let Err(e) = crate::controls::display_modes::apply(display, previous) {
-                        tracing::warn!(error = %e, "could not revert display mode");
-                    }
-                }
-            }
-            Ok(_) => {}
-            Err(e) => crate::app::alert("Could not change resolution", &e),
-        }
-        let id = self.layout.borrow().screen.id;
-        self.views.borrow().expanded.refresh_controls(id);
     }
 
     // ── snapshots & config ───────────────────────────────────────────────
@@ -1847,9 +1779,6 @@ impl Controller {
             chevrons: self.wing_chevrons.get(),
         };
         views.collapsed.update(snap, &palette, opts);
-        if self.kind.get() == LayoutKind::Compact {
-            views.compact.update(snap, &palette);
-        }
     }
 
     fn render_expanded(&self, opening: bool) {

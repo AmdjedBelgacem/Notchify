@@ -41,11 +41,12 @@ pub enum UrlAction {
 
 fn tab_named(name: &str) -> Option<Tab> {
     Some(match name.to_ascii_lowercase().as_str() {
-        "overview" | "home" => Tab::Overview,
-        "planner" | "calendar" | "notes" => Tab::Planner,
+        "now" | "overview" | "home" => Tab::Overview,
+        "day" | "planner" | "calendar" | "notes" => Tab::Planner,
         "music" | "media" | "player" => Tab::Media,
-        "live" | "sessions" => Tab::Live,
-        "agents" | "usage" => Tab::Agents,
+        "agents" | "live" | "sessions" => Tab::Live,
+        "usage" => Tab::Agents,
+        "shelf" | "tray" | "files" => Tab::Shelf,
         _ => return None,
     })
 }
