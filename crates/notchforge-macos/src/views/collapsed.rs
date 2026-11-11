@@ -35,6 +35,8 @@ pub struct WingOptions {
 const EQ_HEIGHTS: [f64; 4] = [7.0, 12.0, 9.0, 11.0];
 const EQ_DURATIONS: [f64; 4] = [0.42, 0.55, 0.38, 0.5];
 const EQ_BAR: f64 = 2.5;
+/// Below this shoulder width, text gives way to icons where both don't fit.
+const NARROW: f64 = 52.0;
 const EQ_GAP: f64 = 2.0;
 
 pub struct CollapsedView {
@@ -50,8 +52,15 @@ pub struct CollapsedView {
     right_text: Retained<NSTextField>,
     chev_l: Retained<NSImageView>,
     chev_r: Retained<NSImageView>,
+    /// A count badge on the right icon's corner, for narrow shoulders where
+    /// the count can't sit beside it.
+    badge: Retained<FlippedView>,
+    badge_text: Retained<NSTextField>,
     /// Width of each shoulder (the user's setting).
     wing: f64,
+    /// Under a hardware notch: the chevrons' spot is behind the camera
+    /// housing, so they are never drawn.
+    physical: bool,
 }
 
 impl CollapsedView {
@@ -65,7 +74,8 @@ impl CollapsedView {
         let icon = 15.0;
         let iy = (h - icon) / 2.0;
         let ty = (h - 15.0) / 2.0;
-        let f = mono_digits(11.5, Weight::Semibold);
+        // Narrow shoulders take a slightly smaller figure so a timer still fits.
+        let f = mono_digits(if wing < NARROW { 10.5 } else { 11.5 }, Weight::Semibold);
         let left_icon = symbol_view(mtm, "bolt.fill", 12.0, &p.success, rect(12.0, iy, icon, icon), "Battery");
         let left_text = label(mtm, "", &f, &p.primary, rect(29.0, ty, wing - 31.0, 15.0));
         let right_icon = app_icon_view(mtm, rect(w - wing + 10.0, iy - 1.0, icon + 2.0, icon + 2.0));
@@ -137,6 +147,18 @@ impl CollapsedView {
         chev_l.setHidden(true);
         chev_r.setHidden(true);
 
+        let badge = crate::ui::shape_view(mtm, rect(0.0, 0.0, 13.0, 13.0), &crate::ui::rgba(1.0, 0.27, 0.23, 1.0), 6.5);
+        let badge_text = label(
+            mtm,
+            "",
+            &crate::ui::font(8.5, Weight::Bold),
+            &crate::ui::rgba(1.0, 1.0, 1.0, 1.0),
+            rect(0.0, 1.0, 13.0, 11.0),
+        );
+        badge_text.setAlignment(NSTextAlignment::Center);
+        badge.addSubview(&badge_text);
+        badge.setHidden(true);
+
         for v in [
             &*left_icon as &objc2_app_kit::NSView,
             &left_text,
@@ -147,6 +169,7 @@ impl CollapsedView {
             &eq,
             &chev_l,
             &chev_r,
+            &badge,
         ] {
             root.addSubview(v);
         }
@@ -163,7 +186,10 @@ impl CollapsedView {
             right_text,
             chev_l,
             chev_r,
+            badge,
+            badge_text,
             wing,
+            physical: layout.notch.physical,
         }
     }
 
@@ -257,6 +283,7 @@ impl CollapsedView {
 
     pub fn update(&self, snap: &Snapshot, p: &Palette, opts: WingOptions) {
         self.update_inner(snap, p, opts);
+        self.place();
         // A wing that is dodged (menu bar items beside the notch) is not shown
         // at all: no clipped content, and nothing there can take clicks.
         if opts.mask & WING_LEFT == 0 {
@@ -268,8 +295,74 @@ impl CollapsedView {
         }
         // The chevron stands in for a dodged wing that has content: visible
         // only while that wing is actually hidden (not popped out).
-        self.chev_l.setHidden(opts.chevrons & WING_LEFT == 0 || opts.mask & WING_LEFT != 0);
-        self.chev_r.setHidden(opts.chevrons & WING_RIGHT == 0 || opts.mask & WING_RIGHT != 0);
+        self.chev_l.setHidden(self.physical || opts.chevrons & WING_LEFT == 0 || opts.mask & WING_LEFT != 0);
+        self.chev_r.setHidden(self.physical || opts.chevrons & WING_RIGHT == 0 || opts.mask & WING_RIGHT != 0);
+    }
+
+    /// Centre each shoulder's content in the shoulder, whatever its width.
+    /// A shoulder shows one thing where it is narrow: an icon, or a short
+    /// figure. An icon's count turns into a badge on its corner; other text
+    /// that doesn't fit beside an icon gives way to it.
+    fn place(&self) {
+        let size = self.root.frame().size;
+        let (w, h, wing) = (size.width, size.height, self.wing);
+        let pad = if wing < NARROW { 3.0 } else { 8.0 };
+        self.badge.setHidden(true);
+        self.place_side(0.0, &self.left_icon, &self.left_text, pad, h, false);
+        self.place_side(w - wing, &self.right_icon, &self.right_text, pad, h, true);
+        let art = self.art_box.frame().size.width;
+        let art_frame = rect((wing - art) / 2.0, (h - art) / 2.0, art, art);
+        self.art_box.setFrame(art_frame);
+        self.art.setFrame(art_frame);
+        let eq = self.eq.frame().size;
+        self.eq.setFrame(rect(w - wing + (wing - eq.width) / 2.0, (h - eq.height) / 2.0, eq.width, eq.height));
+    }
+
+    fn place_side(&self, x0: f64, icon_v: &NSImageView, text_v: &NSTextField, pad: f64, h: f64, badge: bool) {
+        const ICON: f64 = 15.0;
+        const GAP: f64 = 3.0;
+        let room = self.wing - 2.0 * pad;
+        let has_icon = !icon_v.isHidden();
+        let mut has_text = !text_v.isHidden();
+        // The field draws its text inset a couple of points from each side.
+        let mut tw = if has_text { crate::ui::text_width(&text_v.attributedStringValue()).ceil() + 5.0 } else { 0.0 };
+        let count = text_v.stringValue().to_string();
+        let is_count = !count.is_empty() && count.len() <= 2 && count.chars().all(|c| c.is_ascii_digit());
+        let narrow = self.wing < NARROW;
+        if has_icon && has_text && (ICON + GAP + tw > room || (narrow && badge && is_count)) {
+            text_v.setHidden(true);
+            has_text = false;
+            // A count rides on the icon's corner instead.
+            if badge && is_count {
+                self.badge_text.setStringValue(&objc2_foundation::NSString::from_str(&count));
+                let bw = if count.len() > 1 { 17.0 } else { 13.0 };
+                let ix = x0 + (self.wing - ICON) / 2.0;
+                self.badge.setFrame(rect(ix + ICON - 7.0, (h - ICON) / 2.0 - 5.0, bw, 13.0));
+                self.badge_text.setFrame(rect(0.0, 1.0, bw, 11.0));
+                self.badge.setHidden(false);
+            }
+        }
+        if !has_text {
+            tw = 0.0;
+        }
+        tw = tw.min(room);
+        let total = if has_icon { ICON } else { 0.0 } + if has_icon && has_text { GAP } else { 0.0 } + tw;
+        let mut x = x0 + (self.wing - total) / 2.0;
+        if has_icon {
+            icon_v.setFrame(rect(x, (h - ICON) / 2.0 - 1.0, ICON + 2.0, ICON + 2.0));
+            x += ICON + GAP;
+        }
+        if has_text {
+            // The field gets the rest of the shoulder, not just its measured
+            // width: a tight field truncates text that would fit.
+            if has_icon {
+                text_v.setAlignment(NSTextAlignment::Left);
+                text_v.setFrame(rect(x - 2.0, (h - 15.0) / 2.0, x0 + self.wing - x + 2.0, 15.0));
+            } else {
+                text_v.setAlignment(NSTextAlignment::Center);
+                text_v.setFrame(rect(x0, (h - 15.0) / 2.0, self.wing, 15.0));
+            }
+        }
     }
 
     /// Is the chevron for `side` (`WING_LEFT` / `WING_RIGHT`) on screen?
@@ -316,7 +409,14 @@ impl CollapsedView {
             let now = notchforge_core::time::now_ms();
             let remaining = (timer.ends_at_ms - now).max(0);
             let (m, s) = (remaining / 60_000, remaining % 60_000 / 1000);
-            let text = if timer.expired { "done".to_owned() } else { format!("{m:02}:{s:02}") };
+            let text = if timer.expired {
+                "done".to_owned()
+            } else if self.wing < NARROW {
+                // A narrow shoulder fits minutes, or seconds in the last one.
+                if remaining >= 60_000 { format!("{}m", (remaining + 59_999) / 60_000) } else { format!("{s}s") }
+            } else {
+                format!("{m:02}:{s:02}")
+            };
             self.art.setHidden(true);
             self.art_box.setHidden(true);
             self.set_equalizer(false, &p.success, false);
@@ -386,13 +486,22 @@ impl CollapsedView {
                 self.right_icon.setHidden(true);
                 self.right_text.setHidden(true);
             } else if opts.mask & WING_RIGHT != 0 {
-                // Right wing only: the status text, right-aligned.
+                // Right wing only: the status text, or the sparkle where it
+                // can't fit.
                 self.left_icon.setHidden(true);
                 self.left_text.setHidden(true);
-                self.right_icon.setHidden(true);
-                set_text(&self.right_text, &text);
-                set_accessibility_label(&self.right_text, &spoken);
-                self.right_text.setHidden(false);
+                if self.wing < NARROW {
+                    super::clear_app_tile(&self.right_icon);
+                    set_symbol(&self.right_icon, "sparkles", 12.0, &spoken);
+                    self.right_icon.setContentTintColor(Some(&p.accent));
+                    self.right_icon.setHidden(false);
+                    self.right_text.setHidden(true);
+                } else {
+                    self.right_icon.setHidden(true);
+                    set_text(&self.right_text, &text);
+                    set_accessibility_label(&self.right_text, &spoken);
+                    self.right_text.setHidden(false);
+                }
             } else {
                 // Both wings dodged: nothing renders here.
                 self.left_icon.setHidden(true);
@@ -423,7 +532,8 @@ impl CollapsedView {
             self.left_text.setHidden(true);
             self.right_icon.setHidden(true);
             let mins = (m.starts_at_ms - now + 59_999) / 60_000;
-            set_text(&self.right_text, &format!("in {mins}m"));
+            let soon = if self.wing < NARROW { format!("{mins}m") } else { format!("in {mins}m") };
+            set_text(&self.right_text, &soon);
             set_accessibility_label(&self.right_text, &format!("{} in {} minutes", m.title, mins));
             self.right_text.setHidden(false);
             return;

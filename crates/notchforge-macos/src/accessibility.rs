@@ -720,7 +720,7 @@ pub fn app_menu_rects(primary_h: f64) -> Vec<Rect> {
 }
 
 /// Every app's status items, in AX coordinates, as last read by the scanner.
-static EXTRAS: std::sync::Mutex<Vec<Rect>> = std::sync::Mutex::new(Vec::new());
+static EXTRAS: std::sync::Mutex<Option<Vec<Rect>>> = std::sync::Mutex::new(None);
 static EXTRAS_SCANNER: std::sync::Once = std::sync::Once::new();
 
 /// How often the scanner re-reads every app's status items.
@@ -731,6 +731,11 @@ const EXTRAS_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
 /// each app takes a while, so it runs on its own thread; a slow or hung app
 /// only delays the next read, never the island.
 fn scan_extras() {
+    use std::collections::HashMap;
+    // Each app's items from its last answer, and how many passes in a row it
+    // has failed to answer since. An app that is busy for a moment keeps its
+    // items: dropping them would let a shoulder pop out over them.
+    let mut known: HashMap<i32, (Vec<Rect>, u32)> = HashMap::new();
     let mut last = usize::MAX;
     loop {
         if is_trusted() {
@@ -738,20 +743,78 @@ fn scan_extras() {
             let pids: Vec<i32> = objc2::rc::autoreleasepool(|_| {
                 NSWorkspace::sharedWorkspace().runningApplications().iter().map(|a| a.processIdentifier()).collect()
             });
-            let mut found = Vec::new();
+            known.retain(|pid, _| pids.contains(pid));
             for pid in pids {
-                found.extend(bar_frames(pid, "AXExtrasMenuBar"));
+                match read_extras(pid) {
+                    Some(items) => {
+                        known.insert(pid, (items, 0));
+                    }
+                    None => {
+                        if let Some(entry) = known.get_mut(&pid) {
+                            entry.1 += 1;
+                            if entry.1 > EXTRAS_PATIENCE {
+                                known.remove(&pid);
+                            }
+                        }
+                    }
+                }
             }
+            let found: Vec<Rect> = known.values().flat_map(|(items, _)| items.iter().copied()).collect();
             if found.len() != last {
                 last = found.len();
                 tracing::info!(items = last, "menu bar status items read");
             }
             if let Ok(mut e) = EXTRAS.lock() {
-                *e = found;
+                *e = Some(found);
             }
         }
         std::thread::sleep(EXTRAS_EVERY);
     }
+}
+
+/// Passes an app may miss before its remembered items are dropped (~30 s).
+const EXTRAS_PATIENCE: u32 = 10;
+
+/// `pid`'s status items, in AX coordinates: `Some(empty)` when it has none,
+/// `None` when it didn't answer in time (keep what it showed before).
+fn read_extras(pid: i32) -> Option<Vec<Rect>> {
+    if pid == 0 || pid == std::process::id() as i32 {
+        return Some(Vec::new());
+    }
+    let mut out = Vec::new();
+    // SAFETY: AX calls on objects we own or borrow from owned arrays.
+    unsafe {
+        let app_el = Owned::from_create(AXUIElementCreateApplication(pid))?;
+        AXUIElementSetMessagingTimeout(app_el.as_ptr(), 0.25);
+        let key = cf::cfstring("AXExtrasMenuBar")?;
+        let mut bar: CFTypeRef = std::ptr::null();
+        match AXUIElementCopyAttributeValue(app_el.as_ptr(), key.as_ptr(), &mut bar) {
+            e if e == kAXErrorSuccess => {}
+            e if e == kAXErrorCannotComplete => return None,
+            _ => return Some(out), // no status items (or no accessibility at all)
+        }
+        let bar = Owned::from_create(bar)?;
+        let items = copy_attr(bar.as_ptr(), "AXChildren")?;
+        for i in 0..CFArrayGetCount(items.as_ptr()) {
+            let item = CFArrayGetValueAtIndex(items.as_ptr(), i);
+            let (Some((x, y)), Some((w, h))) =
+                (ax_value(item, "AXPosition", kAXValueCGPointType), ax_value(item, "AXSize", kAXValueCGSizeType))
+            else {
+                // Half an answer is no answer: keep the previous one.
+                return None;
+            };
+            if w > 0.0 && h > 0.0 {
+                out.push(Rect::new(x, y, w, h));
+            }
+        }
+    }
+    Some(out)
+}
+
+/// Has the scanner finished its first pass? Until then the apps' status
+/// items are unknown.
+pub fn extras_ready() -> bool {
+    EXTRAS.lock().is_ok_and(|e| e.is_some())
 }
 
 /// Status items in the menu bar: Control Center's (Wi-Fi, battery, clock),
@@ -771,7 +834,7 @@ pub fn status_item_rects(primary_h: f64) -> Vec<Rect> {
         .unwrap_or(0);
     let mut out = menu_bar_item_rects(cc, primary_h);
     if let Ok(e) = EXTRAS.lock() {
-        out.extend(e.iter().map(|f| to_appkit(*f, primary_h)));
+        out.extend(e.iter().flatten().map(|f| to_appkit(*f, primary_h)));
     }
     out
 }

@@ -121,6 +121,59 @@ impl Controller {
             LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT),
             &views.collapsed.root,
         );
+        // The other things the shoulders show: charging + unread, an agent at
+        // work, a timer.
+        let mut wings = |name: &str, snap: &notchforge_core::engine::Snapshot| {
+            views.collapsed.update(
+                snap,
+                &palette,
+                crate::views::collapsed::WingOptions {
+                    media: true,
+                    animate: false,
+                    mask: WING_LEFT | WING_RIGHT,
+                    chevrons: 0,
+                },
+            );
+            show(name, LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT), &views.collapsed.root);
+        };
+        let mut quiet = overview.clone();
+        quiet.media.players.clear();
+        quiet.audio.sources.clear();
+        quiet.agent_active.clear();
+        quiet.timer = None;
+        quiet.calls.clear();
+        quiet.active_call = None;
+        quiet.calendar.events.clear();
+        let mut charging = quiet.clone();
+        charging.battery = Some(notchforge_core::model::BatteryStatus {
+            percent: 82,
+            charging: true,
+            plugged_in: true,
+            minutes_remaining: None,
+            present: true,
+        });
+        charging.unread = 3;
+        charging.latest = overview.notifications.first().cloned();
+        wings("07e2-notched-wings-charging", &charging);
+        let mut agent = quiet.clone();
+        agent.agent_active = vec![notchforge_core::model::AgentActive {
+            agent: notchforge_core::model::UsageAgent::ClaudeCode,
+            context_percent: Some(42),
+            project: Some("Notchify".into()),
+            branch: Some("main".into()),
+            dirty: false,
+        }];
+        wings("07e3-notched-wings-agent", &agent);
+        let mut timer = quiet.clone();
+        let now = notchforge_core::time::now_ms();
+        timer.timer = Some(notchforge_core::model::TimerState {
+            label: "Tea".into(),
+            ends_at_ms: now + 754_000,
+            duration_ms: 900_000,
+            expired: false,
+            ..Default::default()
+        });
+        wings("07e4-notched-wings-timer", &timer);
         // Authorization prompts: an agent asking for access, a Spotify sign-in.
         views.peek.show(&prompts[0], &palette);
         show("07f-notched-auth-agent", LayoutKind::Peek, &views.peek.root);

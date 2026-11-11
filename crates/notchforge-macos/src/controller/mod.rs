@@ -83,10 +83,32 @@ pub struct WingDecision<'a> {
 /// Drop a content mask's wings whose span is occupied on that layout's
 /// screen (menu bar items, the camera/mic pill, …). Shared by the primary
 /// island and the mirrors.
+/// Where the collapsed view (always built with both shoulders, `full` wide)
+/// sits in an island `w` wide showing the shoulders in `mask`: a missing
+/// shoulder's space hangs outside the island, clipped, so the notch part of
+/// the view stays under the notch.
+pub fn collapsed_offset(mask: u8, full: f64, w: f64) -> f64 {
+    if full <= w {
+        return (w - full) / 2.0;
+    }
+    match (mask & WING_LEFT != 0, mask & WING_RIGHT != 0) {
+        // Left shoulder only: the view starts at the island's left edge.
+        (true, false) => 0.0,
+        // Right only, or none: the left shoulder's space hangs off the left.
+        (false, _) => -(full - w),
+        (true, true) => (w - full) / 2.0,
+    }
+}
+
+/// Room kept between a shoulder and the nearest menu bar item.
+const WING_MARGIN: f64 = 4.0;
+
 pub fn wing_mask_for(layout: &NotchLayout, content: u8, occupancy: &[Rect]) -> u8 {
     let notch = layout.notch.rect;
     let mut mask = content;
-    let wing = layout.appearance.wing();
+    // A little past the shoulder's edge too: an item flush against it would
+    // look covered.
+    let wing = layout.appearance.wing() + WING_MARGIN;
     let left = Rect::new(notch.x - wing, notch.y, wing, notch.height);
     let right = Rect::new(notch.max_x(), notch.y, wing, notch.height);
     if occupancy.iter().any(|r| r.intersects(&left)) {
@@ -648,7 +670,12 @@ impl Controller {
             return content;
         }
         let layout = self.layout.borrow();
-        let base = wing_mask_for(&layout, content, &self.menu_bar_occupancy());
+        let mut base = wing_mask_for(&layout, content, &self.menu_bar_occupancy());
+        // Until the apps' status items have been read once, the right of the
+        // notch (where they live) counts as taken.
+        if !crate::accessibility::extras_ready() {
+            base &= !WING_RIGHT;
+        }
         // Sides with content but no room: the chevron offers them on demand,
         // the way the system's notch offers the items it hides.
         self.wing_chevrons.set(content & !base);
@@ -853,6 +880,7 @@ impl Controller {
 
     fn set_layout(&self, kind: LayoutKind) {
         let previous = self.kind.replace(kind);
+        self.layout.borrow_mut().wing_side = notchforge_core::geometry::wing_side(kind);
         let shape = self.layout.borrow().shape(kind);
         let speed = self.config.borrow().appearance.animation_speed;
         if kind == LayoutKind::Expanded {
@@ -988,7 +1016,7 @@ impl Controller {
         // dodged the island is narrower and clips it. Skip the hidden left
         // wing's space so the notch area of the view stays under the island.
         let ox = match self.kind.get() {
-            LayoutKind::CollapsedWithWings(mask) if mask & WING_LEFT == 0 && cs.width > w => -(cs.width - w),
+            LayoutKind::CollapsedWithWings(mask) => collapsed_offset(mask, cs.width, w),
             _ => (w - cs.width) / 2.0,
         };
         c.setFrameOrigin(NSPoint::new(ox, h - cs.height));
@@ -1046,7 +1074,8 @@ impl Controller {
         self.panel.setHasShadow(layout.notch.floating);
         self.glass.set_notch_height(layout.notch.rect.height);
         self.sync_mirrors(&self.snapshot.borrow());
-        *self.layout.borrow_mut() = layout;
+        *self.layout.borrow_mut() =
+            NotchLayout { wing_side: notchforge_core::geometry::wing_side(self.kind.get()), ..layout };
         self.rebuild_views();
         let kind = self.kind.get();
         let shape = self.layout.borrow().shape(kind);
@@ -1830,7 +1859,8 @@ impl Controller {
             self.focus_override.set(None);
             // Force a geometry + view rebuild.
             if let Some(layout) = current_layout_pinned(self.mtm, &cfg, self.focus_override.get()) {
-                *self.layout.borrow_mut() = layout;
+                *self.layout.borrow_mut() =
+                    NotchLayout { wing_side: notchforge_core::geometry::wing_side(self.kind.get()), ..layout };
             }
             self.rebuild_views();
             self.handle(Event::Reset);

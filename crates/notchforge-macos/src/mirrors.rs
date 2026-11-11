@@ -11,7 +11,7 @@ use crate::screen;
 use crate::ui::{Palette, rect};
 use notchforge_core::config::Config;
 use notchforge_core::engine::Snapshot;
-use notchforge_core::geometry::{LayoutKind, NotchLayout, ScreenInfo, WING_LEFT};
+use notchforge_core::geometry::{LayoutKind, NotchLayout, ScreenInfo};
 use objc2::rc::Retained;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{NSPanel, NSView, NSWindowCollectionBehavior, NSWindowStyleMask};
@@ -119,6 +119,7 @@ impl Mirrors {
                 occupancy.push(notchforge_core::geometry::Rect::new(notch.max_x(), notch.y, 40.0, notch.height));
             }
             let mask = crate::controller::wing_mask_for(&m.layout, content_mask, &occupancy);
+            m.layout.wing_side = notchforge_core::geometry::wing_side(LayoutKind::CollapsedWithWings(mask));
             let shape = m.layout.shape(LayoutKind::CollapsedWithWings(mask));
             let (w, h) = (shape.width.max(1.0), shape.height.max(1.0));
             let radius = if m.layout.notch.floating { h / 2.0 } else { shape.corner_radius };
@@ -159,7 +160,7 @@ impl Mirrors {
             }
             let collapsed_container = m.collapsed.root.clone();
             let cs = collapsed_container.frame().size;
-            let ox = if mask & WING_LEFT == 0 && cs.width > w { -(cs.width - w) } else { (w - cs.width) / 2.0 };
+            let ox = crate::controller::collapsed_offset(mask, cs.width, w);
             collapsed_container.setFrameOrigin(objc2_foundation::NSPoint::new(ox, h - cs.height));
             // No chevrons on mirrors: their clicks move the island here.
             let opts = crate::views::collapsed::WingOptions { media: opts.media, animate: false, mask, chevrons: 0 };

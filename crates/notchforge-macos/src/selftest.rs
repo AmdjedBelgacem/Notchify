@@ -847,11 +847,14 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             // Left wing shown, right wing dodged with content behind it.
             with_controller(|c| c.force_wing_mask(WING_LEFT));
             with_controller(|c| c.force_wing_chevrons(WING_RIGHT));
+            // Under a hardware notch the chevron's spot is behind the camera
+            // housing, so it is only drawn on a floating notch.
+            let physical = with_controller(|c| c.layout().notch.physical).unwrap_or(false);
             let mut r = ctx.report.borrow_mut();
             r.check(
-                "wing chevron: shows for the dodged side",
-                with_controller(|c| c.wing_chevron_showing(WING_RIGHT)).unwrap_or(false),
-                "",
+                "wing chevron: shows for the dodged side (not under a hardware notch)",
+                with_controller(|c| c.wing_chevron_showing(WING_RIGHT)).unwrap_or(false) != physical,
+                format!("physical notch: {physical}"),
             );
             r.check(
                 "wing chevron: none on the side that is shown",
@@ -860,7 +863,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             );
             drop(r);
             // The chevron is a small, dim symbol over a black island (measured ~0.05%).
-            check_pixels(ctx, "collapsed-chevron", 0.0003, true);
+            check_pixels(ctx, "collapsed-chevron", if physical { 0.0 } else { 0.0003 }, true);
             with_controller(|c| {
                 c.force_wing_chevrons(0);
                 c.force_wing_mask(WING_LEFT | WING_RIGHT);
@@ -1472,7 +1475,7 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
     });
     let mut r = ctx.report.borrow_mut();
     let size = |n: &str| sizes.iter().find(|s| s.0 == n).map(|s| (s.1, s.2));
-    r.check("notched: seventeen views rendered", sizes.len() == 17, format!("{sizes:?}"));
+    r.check("notched: twenty views rendered", sizes.len() == 20, format!("{sizes:?}"));
     r.metrics.insert("notched_sizes".into(), json!(sizes));
     // Island sizes on the design boards (Overview, Main, Hover, Peek): the
     // simulated 14-inch screen's shape for that view, using the live config's

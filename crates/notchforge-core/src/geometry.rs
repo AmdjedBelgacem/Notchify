@@ -268,7 +268,7 @@ pub const TAB_BAR: f64 = 40.0;
 
 /// Default width of a single wing in [`LayoutKind::CollapsedWithWings`];
 /// the user's choice is [`AppearanceConfig::wing`].
-pub const WING_WIDTH: f64 = 64.0;
+pub const WING_WIDTH: f64 = 40.0;
 /// Space around the largest island inside the window, for the shadow.
 pub const WINDOW_MARGIN: f64 = 24.0;
 
@@ -312,12 +312,25 @@ pub struct NotchLayout {
     /// Sideways offset of the whole island, for the floating notch's smart
     /// placement (dodging menu bar items). Animated by the controller.
     pub x_offset: f64,
+    /// Which way a one-shouldered island grows: -1 left, +1 right, 0 both
+    /// ways (see [`wing_side`]). Set by the controller with the layout kind.
+    pub wing_side: f64,
+}
+
+/// Which way the island grows from the notch in `kind`: a single shoulder
+/// hangs off its own side only, so the other side of the notch stays clear.
+pub fn wing_side(kind: LayoutKind) -> f64 {
+    match kind {
+        LayoutKind::CollapsedWithWings(m) if m & WING_LEFT != 0 && m & WING_RIGHT == 0 => -1.0,
+        LayoutKind::CollapsedWithWings(m) if m & WING_RIGHT != 0 && m & WING_LEFT == 0 => 1.0,
+        _ => 0.0,
+    }
 }
 
 impl NotchLayout {
     pub fn new(screen: ScreenInfo, appearance: AppearanceConfig) -> Self {
         let notch = detect_notch(&screen);
-        Self { screen, notch, appearance, x_offset: 0.0 }
+        Self { screen, notch, appearance, x_offset: 0.0, wing_side: 0.0 }
     }
 
     /// How far the island's top sits below the screen's top edge: the floating
@@ -382,7 +395,11 @@ impl NotchLayout {
     /// offset) and pinned below the top gap.
     pub fn island_in_window(&self, width: f64, height: f64) -> Rect {
         let win = self.window_frame();
-        let cx = self.notch.rect.mid_x() + self.x_offset - win.x;
+        // A one-shouldered island keeps its other edge on the notch's: it is
+        // shifted by half of what it adds (at most one shoulder, so opening
+        // from it to the panel starts from where it was).
+        let grow = (width - self.notch.rect.width).clamp(0.0, self.appearance.wing());
+        let cx = self.notch.rect.mid_x() + self.x_offset + self.wing_side * grow / 2.0 - win.x;
         Rect::new(cx - width / 2.0, win.height - self.top_gap() - height, width, height)
     }
 
@@ -709,5 +726,22 @@ mod tests {
         assert_eq!(layout.appearance.wing(), AppearanceConfig::WING_MIN);
         layout.appearance.wing_width = f64::NAN;
         assert_eq!(layout.appearance.wing(), WING_WIDTH);
+    }
+
+    #[test]
+    fn one_shoulder_keeps_the_other_side_of_the_notch_clear() {
+        let mut layout = NotchLayout::new(mbp14(), AppearanceConfig::default());
+        let n = layout.notch.rect;
+        let wing = layout.appearance.wing();
+        for (mask, left, right) in [(WING_LEFT, n.x - wing, n.max_x()), (WING_RIGHT, n.x, n.max_x() + wing)] {
+            let kind = LayoutKind::CollapsedWithWings(mask);
+            layout.wing_side = wing_side(kind);
+            let s = layout.shape(kind);
+            let g = layout.island_global(s.width, s.height);
+            assert_eq!((g.x, g.max_x()), (left, right), "mask {mask}");
+        }
+        layout.wing_side = wing_side(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
+        let s = layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
+        assert_eq!(layout.island_global(s.width, s.height).mid_x(), n.mid_x());
     }
 }
