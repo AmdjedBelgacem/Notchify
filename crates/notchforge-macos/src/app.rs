@@ -304,6 +304,18 @@ pub fn ask_text(title: &str, message: &str, placeholder: &str, ok: &str) -> Opti
     (!text.is_empty()).then_some(text)
 }
 
+/// Modal confirmation; true when the user picks `yes`.
+pub fn confirm(title: &str, message: &str, yes: &str) -> bool {
+    let Some(mtm) = MainThreadMarker::new() else { return false };
+    let alert = NSAlert::new(mtm);
+    alert.setMessageText(&ns(title));
+    alert.setInformativeText(&ns(message));
+    alert.addButtonWithTitle(&ns(yes));
+    alert.addButtonWithTitle(&ns("Cancel"));
+    crate::app::activate(mtm);
+    alert.runModal() == NSAlertFirstButtonReturn
+}
+
 /// Modal confirmation that resolves to "no" after `secs` seconds.
 pub fn confirm_with_timeout(title: &str, message: &str, yes: &str, no: &str, secs: u64) -> bool {
     let Some(mtm) = MainThreadMarker::new() else { return false };

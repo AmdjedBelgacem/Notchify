@@ -38,6 +38,7 @@ pub struct Views {
 
 impl Views {
     pub fn new(mtm: MainThreadMarker, layout: &NotchLayout, config: &Arc<Config>, engine: &EngineHandle) -> Self {
+        kit::set_accent(&config.appearance.accent);
         let palette = Palette::for_theme(
             config.appearance.high_contrast || system_increase_contrast(),
             &config.appearance.accent,

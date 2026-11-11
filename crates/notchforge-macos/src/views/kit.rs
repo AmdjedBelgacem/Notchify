@@ -21,8 +21,44 @@ pub const TILE_R: f64 = 16.0;
 /// A pill button's height.
 pub const BUTTON_H: f64 = 30.0;
 
+thread_local! {
+    /// The accent the user picked (Settings › Look), as RGB.
+    static ACCENT: std::cell::Cell<(f64, f64, f64)> = const { std::cell::Cell::new(CYAN) };
+}
+
+/// The island's own accent, and the "system" choice.
+const CYAN: (f64, f64, f64) = (0.392, 0.824, 1.0);
+
+/// The accent choices Settings offers: (config value, name, RGB).
+pub const ACCENTS: [(&str, &str, (f64, f64, f64)); 5] = [
+    ("system", "Cyan", CYAN),
+    ("sunset", "Sunset", (1.0, 0.584, 0.275)),
+    ("ocean", "Ocean", (0.369, 0.588, 1.0)),
+    ("violet", "Violet", (0.749, 0.553, 1.0)),
+    ("forest", "Forest", (0.365, 0.851, 0.533)),
+];
+
+/// RGB for a config accent: a preset name or a `#rrggbb` hex.
+pub fn accent_rgb(value: &str) -> (f64, f64, f64) {
+    if let Some(&(_, _, rgb)) = ACCENTS.iter().find(|(k, _, _)| *k == value) {
+        return rgb;
+    }
+    let h = value.trim_start_matches('#');
+    let part = |i: usize| h.get(i..i + 2).and_then(|x| u8::from_str_radix(x, 16).ok()).map(|v| f64::from(v) / 255.0);
+    match (h.len(), part(0), part(2), part(4)) {
+        (6, Some(r), Some(g), Some(b)) => (r, g, b),
+        _ => CYAN,
+    }
+}
+
+/// Use the accent from the config for every view built from now on.
+pub fn set_accent(value: &str) {
+    ACCENT.with(|a| a.set(accent_rgb(value)));
+}
+
 pub fn accent() -> Retained<NSColor> {
-    rgba(0.392, 0.824, 1.0, 1.0)
+    let (r, g, b) = ACCENT.with(std::cell::Cell::get);
+    rgba(r, g, b, 1.0)
 }
 /// Text on the accent: near black, for contrast.
 pub fn on_accent() -> Retained<NSColor> {
@@ -235,6 +271,15 @@ pub fn span(ms: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accents_read_presets_and_hex() {
+        assert_eq!(accent_rgb("system"), CYAN);
+        assert_eq!(accent_rgb("forest"), ACCENTS[4].2);
+        assert_eq!(accent_rgb("#ff0000"), (1.0, 0.0, 0.0));
+        assert_eq!(accent_rgb("#zz"), CYAN);
+        assert_eq!(accent_rgb("nonsense"), CYAN);
+    }
 
     #[test]
     fn times_read_plainly() {

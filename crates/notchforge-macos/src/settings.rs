@@ -1,19 +1,20 @@
-//! Settings window, built to the *Settings · Media* and *Settings · Coding
-//! Agents* boards: an ink-black window with a brand header and grouped
-//! sidebar, a pane header with a live status chip, and hairline-separated
-//! cards of native controls (switches, pop-ups, fields, buttons), fully
-//! VoiceOver accessible.
+//! Settings window, built to the *Settings* board of the Notchisland redesign:
+//! the island's own true black, a plain sidebar that mirrors the island (how
+//! it behaves, how it looks, one page per space, then the Mac), and pages of
+//! grouped lists. Every setting is one row: what it is on the left, one line
+//! of why under it, its control on the right. One cyan accent (or the accent
+//! the user picked) marks what is on.
 //!
 //! Every change applies immediately: the edited draft config is sent to the
-//! engine, which persists it and broadcasts it. A pane is rebuilt each time
-//! it is shown so permission states are always fresh.
+//! engine, which persists it and broadcasts it. A page is rebuilt each time
+//! it is shown so permission and connection states are always fresh.
 
 use crate::app;
 use crate::permissions;
 use crate::ui::{
-    ActionTarget, FlippedView, Targets, Weight, attributed, attributed_tracked, font, label, ns, rect, rgba,
-    shape_view, text_width,
+    ActionTarget, FlippedView, Targets, Weight, attributed, font, label, ns, rect, rgba, shape_view, text_width,
 };
+use crate::views::kit::{self, Btn};
 use notchforge_core::apps::KnownApp;
 use notchforge_core::config::{Config, ReducedMotion, ScreenChoice};
 use notchforge_core::engine::Command;
@@ -24,43 +25,41 @@ use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSBackingStoreType, NSButton, NSColor, NSControlSize,
-    NSControlStateValueOff, NSControlStateValueOn, NSImageView, NSScrollView, NSSearchField, NSSlider, NSTextAlignment,
-    NSTextField, NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSControlStateValueOff, NSControlStateValueOn, NSScrollView, NSSearchField, NSSlider, NSTextAlignment, NSTextField,
+    NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
 };
+use objc2_foundation::NSPoint;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-const WIDTH: f64 = 960.0;
-const HEIGHT: f64 = 700.0;
-const SIDEBAR: f64 = 248.0;
-const CONTENT_PAD: f64 = 24.0;
-const HEADER_H: f64 = 88.0;
-const GROUP_W: f64 = WIDTH - SIDEBAR - 2.0 * CONTENT_PAD;
-/// The floating sidebar, inset from the window's edges.
-const SIDE_INSET: f64 = 10.0;
-const SIDE_W: f64 = SIDEBAR - SIDE_INSET;
-const SIDE_H: f64 = HEIGHT - 2.0 * SIDE_INSET;
-/// Settings are equal tiles, two across. A setting too wide for that has a full row.
-const TILE_GAP: f64 = 10.0;
-const TILE_W: f64 = (GROUP_W - TILE_GAP) / 2.0;
-const TILE_H: f64 = 84.0;
-const WIDE_H: f64 = TILE_H;
-const TILE_R: f64 = 18.0;
-/// A text box wider than this needs a full row.
-const WIDEST_HALF_FIELD: f64 = 150.0;
+const WIDTH: f64 = 860.0;
+const HEIGHT: f64 = 620.0;
+const SIDEBAR: f64 = 208.0;
+/// Space either side of a page's content.
+const MARGIN: f64 = 28.0;
+/// Width of a page's groups.
+const MAIN_W: f64 = WIDTH - SIDEBAR - 2.0 * MARGIN;
+/// Where a page's scrolling content starts, under its title.
+const HEADER_H: f64 = 100.0;
+/// Inside a group: the row's side padding.
+const ROW_PAD: f64 = 14.0;
+const GROUP_R: f64 = 12.0;
+/// Between a group and the next section's heading.
+const SECTION_GAP: f64 = 22.0;
+const SWITCH_W: f64 = 38.0;
+const SWITCH_H: f64 = 22.0;
+const CONTROL_H: f64 = 26.0;
+const BUTTON_H: f64 = 28.0;
+
 thread_local! {
-    /// Self-test only: show the design boards' sample state (Spotify connected
-    /// with 24 playlists, Automation allowed, Accessibility not) so renders
-    /// compare like for like.
+    /// Self-test only: show the design board's sample state (Spotify connected
+    /// with 24 playlists, a sample token) so renders compare like for like.
     static PREVIEW: Cell<bool> = const { Cell::new(false) };
-    /// Self-test only: offscreen renders can't see through the window.
-    static SOLID_GROUND: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Draw the window's own ground rather than showing the desktop through it.
-pub fn set_solid_ground(on: bool) {
-    SOLID_GROUND.with(|p| p.set(on));
-}
+/// Kept for the self-test, which used to ask for an opaque ground; the window
+/// is always solid black now.
+pub fn set_solid_ground(_on: bool) {}
 
 /// Turn the board sample state on or off (self-test renders).
 pub fn set_preview(on: bool) {
@@ -71,213 +70,190 @@ fn preview() -> bool {
     PREVIEW.with(Cell::get)
 }
 
-const TOGGLE_W: f64 = 42.0;
-const TOGGLE_H: f64 = 26.0;
-
-/// Track colour and knob position of the board's switch (blue on, grey off,
-/// white knob).
-fn style_toggle(b: &NSButton, on: bool) {
-    let Some(l) = b.layer() else { return };
-    let track = if on { rgba(0.17, 0.48, 0.97, 1.0) } else { rgba(1.0, 1.0, 1.0, 0.16) };
-    l.setBackgroundColor(Some(&track.CGColor()));
-    let r = (TOGGLE_H - 4.0) / 2.0;
-    let x = if on { TOGGLE_W - 2.0 - r } else { 2.0 + r };
-    // SAFETY: plain read of the layer's sublayer list on the main thread.
-    if let Some(subs) = unsafe { l.sublayers() } {
-        for k in subs.iter() {
-            k.setPosition(objc2_foundation::NSPoint::new(x, TOGGLE_H / 2.0));
-        }
-    }
+/// Row separators, a step lighter than the group.
+fn separator() -> Retained<NSColor> {
+    rgba(0.137, 0.137, 0.149, 1.0)
+}
+/// The sidebar's edge.
+fn edge() -> Retained<NSColor> {
+    rgba(0.11, 0.11, 0.122, 1.0)
+}
+/// A switch that is off, and a slider's empty track.
+fn off_track() -> Retained<NSColor> {
+    rgba(0.227, 0.227, 0.243, 1.0)
+}
+/// Sidebar captions.
+fn text4() -> Retained<NSColor> {
+    rgba(0.388, 0.388, 0.4, 1.0)
 }
 
-/// The board's button: a dark rounded pill (or blue when primary) with the
-/// label centred.
-fn pill_button(
-    mtm: MainThreadMarker,
-    title: &str,
-    target: &crate::ui::ActionTarget,
-    frame: objc2_foundation::NSRect,
-    primary: bool,
-) -> Retained<NSButton> {
-    // SAFETY: valid target/selector; the target is kept alive by the caller.
-    let b = unsafe {
-        NSButton::buttonWithTitle_target_action(
-            &ns(title),
-            Some(target.as_any()),
-            Some(crate::ui::ActionTarget::action()),
-            mtm,
-        )
-    };
-    b.setBordered(false);
-    b.setFrame(frame);
-    b.setAlignment(NSTextAlignment::Center);
-    b.setAttributedTitle(&attributed(
-        title,
-        &font(13.0, Weight::Medium),
-        &rgba(1.0, 1.0, 1.0, if primary { 1.0 } else { 0.92 }),
-    ));
-    b.setWantsLayer(true);
-    if let Some(l) = b.layer() {
-        l.setCornerRadius(8.0);
-        if primary {
-            l.setBackgroundColor(Some(&rgba(0.2, 0.5, 0.98, 1.0).CGColor()));
-        } else {
-            l.setBackgroundColor(Some(&rgba(0.11, 0.11, 0.125, 1.0).CGColor()));
-            l.setBorderWidth(1.0);
-            l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.10).CGColor()));
-        }
-    }
-    b
-}
-
-/// Settings panes, in sidebar order.
+/// Settings pages, in sidebar order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
-    General,
-    Appearance,
-    Notifications,
+    Island,
+    Look,
+    Now,
+    Music,
     Agents,
-    Calls,
-    Weather,
-    Media,
-    Tray,
-    Controls,
+    Day,
+    Shelf,
     Permissions,
+    Advanced,
 }
 
 impl Pane {
-    pub const ALL: [Pane; 10] = [
-        Pane::General,
-        Pane::Appearance,
-        Pane::Notifications,
+    pub const ALL: [Pane; 9] = [
+        Pane::Island,
+        Pane::Look,
+        Pane::Now,
+        Pane::Music,
         Pane::Agents,
-        Pane::Calls,
-        Pane::Media,
-        Pane::Weather,
-        Pane::Tray,
-        Pane::Controls,
+        Pane::Day,
+        Pane::Shelf,
         Pane::Permissions,
+        Pane::Advanced,
     ];
 
-    /// The sidebar's captioned sections.
+    /// The sidebar's sections; the first has no caption.
     const SECTIONS: [(&'static str, &'static [Pane]); 3] = [
-        ("Surface", &[Pane::General, Pane::Appearance]),
-        ("Content", &[Pane::Notifications, Pane::Agents, Pane::Calls, Pane::Media, Pane::Weather, Pane::Tray]),
-        ("System", &[Pane::Controls, Pane::Permissions]),
+        ("", &[Pane::Island, Pane::Look]),
+        ("Spaces", &[Pane::Now, Pane::Music, Pane::Agents, Pane::Day, Pane::Shelf]),
+        ("Mac", &[Pane::Permissions, Pane::Advanced]),
     ];
-
-    /// One line under the pane title.
-    fn blurb(self) -> &'static str {
-        match self {
-            Pane::General => "Launch, menu bar, display and how the notch reacts.",
-            Pane::Appearance => "Motion, animation speed and the live indicators.",
-            Pane::Notifications => "Which notifications peek out, and from where.",
-            Pane::Agents => "Claude Code, Codex, Cursor, Zed and anything that can post JSON.",
-            Pane::Calls => "Calls from any app or browser tab ring in the notch.",
-            Pane::Media => "What plays beside the notch, and how your music apps connect.",
-            Pane::Weather => "Location, units and how often the forecast refreshes.",
-            Pane::Tray => "A temporary shelf for files you drag onto the notch.",
-            Pane::Controls => "Brightness, volume, resolution and Focus from the island.",
-            Pane::Permissions => "Every permission is optional; features wait until it is granted.",
-        }
-    }
-
-    /// Top and bottom colour of the pane's icon tile.
-    fn gradient(self) -> ((u8, u8, u8), (u8, u8, u8)) {
-        match self {
-            Pane::General => ((154, 154, 160), (110, 110, 116)),
-            Pane::Appearance => ((156, 139, 255), (111, 92, 255)),
-            Pane::Notifications => ((255, 106, 96), (232, 55, 47)),
-            Pane::Agents => ((238, 149, 119), (217, 119, 87)),
-            Pane::Calls => ((76, 217, 100), (40, 167, 69)),
-            Pane::Media => ((255, 100, 130), (245, 43, 73)),
-            Pane::Weather => ((99, 208, 255), (47, 155, 224)),
-            Pane::Tray => ((90, 165, 255), (31, 112, 240)),
-            Pane::Controls => ((134, 131, 242), (94, 92, 230)),
-            Pane::Permissions => ((69, 214, 234), (20, 166, 196)),
-        }
-    }
-
-    /// Live status shown at the right of the pane header.
-    fn chip(self, c: &Config) -> Option<(String, Tone)> {
-        match self {
-            Pane::Media => Some(if app::spotify_signed_in() || preview() {
-                ("Spotify connected".into(), Tone::Ok)
-            } else {
-                ("Spotify not connected".into(), Tone::Neutral)
-            }),
-            Pane::Agents => Some(if c.providers.agents {
-                (format!("Listening on {}", c.agents.http_port), Tone::Ok)
-            } else {
-                ("Off".into(), Tone::Neutral)
-            }),
-            Pane::Calls => Some(if c.notifications.incoming_calls {
-                ("Ringing on".into(), Tone::Ok)
-            } else {
-                ("Off".into(), Tone::Neutral)
-            }),
-            Pane::Permissions => {
-                let all = Permission::ALL;
-                let ok = all
-                    .iter()
-                    .filter(|p| {
-                        matches!(permissions::state(**p), PermissionState::Granted | PermissionState::NotRequired)
-                    })
-                    .count();
-                Some((format!("{ok} of {} allowed", all.len()), if ok == all.len() { Tone::Ok } else { Tone::Neutral }))
-            }
-            _ => None,
-        }
-    }
 
     pub fn title(self) -> &'static str {
         match self {
-            Pane::General => "General",
-            Pane::Appearance => "Appearance & Motion",
-            Pane::Notifications => "Notifications",
-            Pane::Agents => "Coding Agents",
-            Pane::Calls => "Calls",
-            Pane::Weather => "Weather",
-            Pane::Media => "Media",
-            Pane::Tray => "File Tray",
-            Pane::Controls => "Quick Controls",
+            Pane::Island => "Island",
+            Pane::Look => "Look",
+            Pane::Now => "Now",
+            Pane::Music => "Music",
+            Pane::Agents => "Agents",
+            Pane::Day => "Day",
+            Pane::Shelf => "Shelf",
             Pane::Permissions => "Permissions",
+            Pane::Advanced => "Advanced",
         }
     }
 
-    /// (SF Symbol, tile colour) for the sidebar.
-    fn icon(self) -> (&'static str, (u8, u8, u8)) {
+    /// One line under the page title.
+    fn blurb(self) -> &'static str {
         match self {
-            Pane::General => ("gearshape.fill", (142, 142, 147)),
-            Pane::Appearance => ("circle.lefthalf.filled", (60, 60, 67)),
-            Pane::Notifications => ("bell.badge.fill", (255, 59, 48)),
-            Pane::Agents => ("chevron.left.forwardslash.chevron.right", (217, 119, 87)),
-            Pane::Calls => ("phone.fill", (52, 199, 89)),
-            Pane::Weather => ("cloud.sun.fill", (50, 173, 230)),
-            Pane::Media => ("music.note", (250, 45, 72)),
-            Pane::Tray => ("tray.full.fill", (10, 132, 255)),
-            Pane::Controls => ("slider.horizontal.3", (94, 92, 230)),
-            Pane::Permissions => ("hand.raised.fill", (10, 132, 255)),
+            Pane::Island => "Where the island shows and how it opens.",
+            Pane::Look => "The accent colour, motion and contrast.",
+            Pane::Now => "Notifications and calls, and which apps may show them.",
+            Pane::Music => "What plays in the island, and how music apps connect.",
+            Pane::Agents => "Coding agents report to the island and ask it for permission.",
+            Pane::Day => "Weather, calendar, batteries and Focus.",
+            Pane::Shelf => "A shelf for files you drop on the island.",
+            Pane::Permissions => "Every permission is optional; a feature waits until it is allowed.",
+            Pane::Advanced => "The configuration file, logs and starting over.",
+        }
+    }
+
+    /// SF Symbol in the sidebar.
+    fn symbol(self) -> &'static str {
+        match self {
+            Pane::Island => "capsule.fill",
+            Pane::Look => "paintpalette",
+            Pane::Now => "bell",
+            Pane::Music => "music.note",
+            Pane::Agents => "terminal",
+            Pane::Day => "sun.max",
+            Pane::Shelf => "tray",
+            Pane::Permissions => "hand.raised",
+            Pane::Advanced => "gearshape",
         }
     }
 
     /// Extra words the sidebar search matches.
     fn keywords(self) -> &'static str {
         match self {
-            Pane::General => "launch login menu bar screen display hover peek config logs reset battery accessories",
-            Pane::Appearance => "motion animation speed wings contrast",
-            Pane::Notifications => "focus banners apps whatsapp discord slack messages priority notification center",
+            Pane::Island => {
+                "screen display hover delay peek glance priority fullscreen shoulders wings menu bar launch login icon"
+            }
+            Pane::Look => "accent colour color motion animation speed contrast",
+            Pane::Now => {
+                "notifications focus banners apps whatsapp discord slack messages quick reply calls ring answer facetime"
+            }
+            Pane::Music => "spotify apple music audio output playlists browser youtube",
             Pane::Agents => {
-                "claude cursor zed codex opencode qoder webhook port token socket inbox allow deny approval authorize consent"
+                "claude codex cursor gemini zed opencode webhook port token allow deny approval limits usage"
             }
-            Pane::Calls => {
-                "call ring ringing answer decline hang up whatsapp facetime discord meet teams zoom instagram messenger"
+            Pane::Day => "weather location units celsius fahrenheit calendar battery airpods focus schedule shortcuts",
+            Pane::Shelf => "files tray drop downloads screenshots airdrop",
+            Pane::Permissions => "accessibility full disk access location automation privacy bluetooth calendar",
+            Pane::Advanced => "config file toml export import logs reset",
+        }
+    }
+
+    /// Live status at the right of the page title.
+    fn chip(self, c: &Config) -> Option<(String, Tone)> {
+        match self {
+            Pane::Agents => Some(if c.providers.agents {
+                (format!("Listening on {}", c.agents.http_port), Tone::Ok)
+            } else {
+                ("Not listening".into(), Tone::Neutral)
+            }),
+            Pane::Permissions => {
+                let ok = Permission::ALL.iter().filter(|p| allowed(permissions::state(**p))).count();
+                let all = Permission::ALL.len();
+                Some((format!("{ok} of {all} allowed"), if ok == all { Tone::Ok } else { Tone::Warn }))
             }
-            Pane::Weather => "location city units celsius fahrenheit refresh",
-            Pane::Media => "spotify apple music audio output playlists automation",
-            Pane::Tray => "files drop airdrop keep",
-            Pane::Controls => "brightness volume resolution focus shortcuts",
-            Pane::Permissions => "accessibility full disk access location automation privacy",
+            _ => None,
+        }
+    }
+}
+
+fn allowed(s: PermissionState) -> bool {
+    matches!(s, PermissionState::Granted | PermissionState::NotRequired)
+}
+
+/// Whether any permission still waits for the user (a dot in the sidebar).
+fn permissions_need_you() -> bool {
+    Permission::ALL.iter().any(|p| !allowed(permissions::state(*p)))
+}
+
+/// Meaning of a status: a dot's colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tone {
+    Ok,
+    Warn,
+    Neutral,
+}
+
+impl Tone {
+    fn color(self) -> Retained<NSColor> {
+        match self {
+            Tone::Ok => kit::green(),
+            Tone::Warn => kit::amber(),
+            Tone::Neutral => kit::text3(),
+        }
+    }
+}
+
+/// A dot and a word. Returns the view and its width.
+fn status_view(mtm: MainThreadMarker, text: &str, tone: Tone, h: f64) -> (Retained<FlippedView>, f64) {
+    let f = font(12.0, Weight::Regular);
+    let tw = text_width(&attributed(text, &f, &kit::text2())).ceil();
+    let w = 13.0 + tw + 2.0;
+    let v = FlippedView::new(mtm, rect(0.0, 0.0, w, h));
+    v.addSubview(&kit::dot(mtm, 0.0, (h - 7.0) / 2.0, 7.0, &tone.color()));
+    v.addSubview(&label(mtm, text, &f, &kit::text2(), rect(13.0, (h - 16.0) / 2.0, tw + 2.0, 16.0)));
+    crate::ui::set_accessibility_label(&v, text);
+    (v, w)
+}
+
+/// Track colour and knob position of a switch.
+fn style_switch(b: &NSButton, on: bool) {
+    let Some(l) = b.layer() else { return };
+    let track = if on { kit::accent() } else { off_track() };
+    l.setBackgroundColor(Some(&track.CGColor()));
+    let r = (SWITCH_H - 4.0) / 2.0;
+    let x = if on { SWITCH_W - 2.0 - r } else { 2.0 + r };
+    // SAFETY: plain read of the layer's sublayer list on the main thread.
+    if let Some(subs) = unsafe { l.sublayers() } {
+        for k in subs.iter() {
+            k.setPosition(NSPoint::new(x, SWITCH_H / 2.0));
         }
     }
 }
@@ -292,290 +268,157 @@ type Draft = Rc<RefCell<Config>>;
 /// (title, primary, action) for a row button.
 type RowButton<'a> = (&'a str, bool, Box<dyn Fn()>);
 
-fn text_primary() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.94)
-}
-fn text_secondary() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.6)
-}
-fn text_tertiary() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.5)
-}
-fn hairline() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.12)
-}
-fn side_bg() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.05)
-}
-fn card_bg() -> Retained<NSColor> {
-    rgba(1.0, 1.0, 1.0, 0.06)
+/// What leads a row: an SF Symbol, or a brand colour dot (agents, players).
+enum Mark<'a> {
+    Symbol(&'a str),
+    Dot((u8, u8, u8)),
+    Spotify,
 }
 
-/// A rounded tile with a hairline edge, the same in the sidebar and the panes.
-fn glass_card(
-    mtm: MainThreadMarker,
-    frame: objc2_foundation::NSRect,
-    fill: &NSColor,
-    radius: f64,
-) -> Retained<FlippedView> {
-    let v = shape_view(mtm, frame, fill, radius);
-    if let Some(l) = v.layer() {
-        l.setBorderWidth(0.5);
-        l.setBorderColor(Some(&hairline().CGColor()));
-    }
-    v
-}
-
-/// The window's ground, as on the notch: black at the top, thinning into glass
-/// lower down. Where nothing can be seen through it, a dark tint stands in.
-fn ground(mtm: MainThreadMarker) -> Retained<FlippedView> {
-    let root = FlippedView::new(mtm, rect(0.0, 0.0, WIDTH, HEIGHT));
-    root.setWantsLayer(true);
-    let solid = SOLID_GROUND.with(Cell::get) || crate::glass::system_reduce_transparency();
-    if solid {
-        if let Some(l) = root.layer() {
-            let g = crate::ui::gradient_layer(
-                &[(0.03, 0.03, 0.035, 1.0), (0.16, 0.09, 0.13, 1.0)],
-                objc2_foundation::NSPoint::new(0.5, 0.0),
-                objc2_foundation::NSPoint::new(0.5, 1.0),
-            );
-            g.setFrame(rect(0.0, 0.0, WIDTH, HEIGHT));
-            l.addSublayer(&g);
-        }
-        return root;
-    }
-    use objc2_app_kit::{NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView};
-    let glass = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), rect(0.0, 0.0, WIDTH, HEIGHT));
-    glass.setMaterial(NSVisualEffectMaterial::HUDWindow);
-    glass.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-    glass.setState(NSVisualEffectState::Active);
-    root.addSubview(&glass);
-    let veil = FlippedView::new(mtm, rect(0.0, 0.0, WIDTH, HEIGHT));
-    veil.setWantsLayer(true);
-    if let Some(l) = veil.layer() {
-        let g = crate::ui::gradient_layer(
-            &[(0.0, 0.0, 0.0, 0.92), (0.0, 0.0, 0.0, 0.58)],
-            objc2_foundation::NSPoint::new(0.5, 0.0),
-            objc2_foundation::NSPoint::new(0.5, 1.0),
-        );
-        g.setFrame(rect(0.0, 0.0, WIDTH, HEIGHT));
-        l.addSublayer(&g);
-    }
-    root.addSubview(&veil);
-    root
-}
-
-/// Meaning of a status capsule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tone {
-    Ok,
-    Warn,
-    Neutral,
-}
-
-/// A status capsule: icon and text on a tinted pill. Returns it and its width.
-fn chip_view(mtm: MainThreadMarker, text: &str, tone: Tone) -> (Retained<FlippedView>, f64) {
-    let (fg, bg, edge, symbol) = match tone {
-        Tone::Ok => (
-            rgba(0.247, 0.878, 0.478, 1.0),
-            rgba(0.188, 0.82, 0.345, 0.14),
-            rgba(0.188, 0.82, 0.345, 0.4),
-            Some("checkmark.circle.fill"),
-        ),
-        Tone::Warn => (
-            rgba(1.0, 0.702, 0.251, 1.0),
-            rgba(1.0, 0.624, 0.039, 0.14),
-            rgba(1.0, 0.624, 0.039, 0.4),
-            Some("exclamationmark.triangle.fill"),
-        ),
-        Tone::Neutral => (text_secondary(), rgba(1.0, 1.0, 1.0, 0.07), rgba(1.0, 1.0, 1.0, 0.1), None),
-    };
-    let f = font(12.0, Weight::Semibold);
-    let tw = text_width(&attributed(text, &f, &fg));
-    let text_x = if symbol.is_some() { 28.0 } else { 11.0 };
-    let w = text_x + tw + 11.0;
-    let v = shape_view(mtm, rect(0.0, 0.0, w, 26.0), &bg, 13.0);
-    if let Some(l) = v.layer() {
-        l.setBorderWidth(0.5);
-        l.setBorderColor(Some(&edge.CGColor()));
-    }
-    if let Some(sym) = symbol {
-        v.addSubview(&crate::ui::symbol_view(mtm, sym, 12.0, &fg, rect(9.0, 6.5, 13.0, 13.0), ""));
-    }
-    v.addSubview(&label(mtm, text, &f, &fg, rect(text_x, 5.0, tw + 2.0, 16.0)));
-    crate::ui::set_accessibility_label(&v, text);
-    (v, w)
-}
-
-/// A small tile filled with a vertical gradient (pane icons).
-fn gradient_tile(
-    mtm: MainThreadMarker,
-    frame: objc2_foundation::NSRect,
-    (a, b): ((u8, u8, u8), (u8, u8, u8)),
-    radius: f64,
-) -> Retained<FlippedView> {
-    let v = shape_view(mtm, frame, &rgba(0.0, 0.0, 0.0, 0.0), radius);
-    if let Some(l) = v.layer() {
-        let c = |t: (u8, u8, u8)| (f64::from(t.0) / 255.0, f64::from(t.1) / 255.0, f64::from(t.2) / 255.0, 1.0);
-        let g = crate::ui::gradient_layer(
-            &[c(a), c(b)],
-            objc2_foundation::NSPoint::new(0.5, 0.0),
-            objc2_foundation::NSPoint::new(0.5, 1.0),
-        );
-        g.setFrame(l.bounds());
-        l.setMasksToBounds(true);
-        l.addSublayer(&g);
-        l.setBorderWidth(0.5);
-        l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.22).CGColor()));
-    }
-    v
-}
-
-/// An uppercase, letter-spaced caption.
-fn caption(mtm: MainThreadMarker, text: &str, size: f64, frame: objc2_foundation::NSRect) -> Retained<NSTextField> {
-    let a = attributed_tracked(&text.to_uppercase(), &font(size, Weight::Semibold), &text_tertiary(), size * 0.08);
-    crate::ui::rich_label(mtm, &a, frame)
-}
-
-/// Lays out groups of rows top-to-bottom inside a pane.
+/// Lays a page out top to bottom: sections of grouped rows, notes, cards.
 struct Form<'a> {
     mtm: MainThreadMarker,
     doc: &'a FlippedView,
     y: Cell<f64>,
     targets: &'a Targets,
     draft: Draft,
-    /// A half-width tile waiting for a neighbour on its right.
-    waiting: RefCell<Option<Retained<FlippedView>>>,
-    /// A section is open, so there's a gap to leave after it.
-    in_section: Cell<bool>,
-    /// Colour the next row's subtitle green (a connected account).
-    sub_ok: Cell<bool>,
+    /// The open group and the height of its rows so far.
+    group: RefCell<Option<(Retained<FlippedView>, f64)>>,
 }
 
-const PRIORITIES: [(&str, Priority); 4] =
-    [("Low", Priority::Low), ("Normal", Priority::Normal), ("High", Priority::High), ("Critical", Priority::Critical)];
+const PRIORITIES: [(&str, Priority); 4] = [
+    ("Everything", Priority::Low),
+    ("Normal and up", Priority::Normal),
+    ("High and up", Priority::High),
+    ("Critical only", Priority::Critical),
+];
 
 impl Form<'_> {
     fn commit(draft: &Draft) {
         app::send(Command::UpdateConfig(Box::new(draft.borrow().clone())));
     }
 
-    fn begin(&self, title: &str) {
+    /// Start a section: its heading, then a group the next rows go in.
+    fn section(&self, title: &str) {
         self.end();
         if !title.is_empty() {
-            self.doc.addSubview(&label(
-                self.mtm,
-                title,
-                &font(13.0, Weight::Semibold),
-                &text_primary(),
-                rect(CONTENT_PAD + 4.0, self.y.get(), GROUP_W, 17.0),
-            ));
-            self.y.set(self.y.get() + 25.0);
+            self.doc.addSubview(&kit::heading(self.mtm, title, rect(MARGIN + 2.0, self.y.get(), MAIN_W, 16.0)));
+            self.y.set(self.y.get() + 23.0);
         }
-        self.in_section.set(true);
+        let card = shape_view(self.mtm, rect(MARGIN, self.y.get(), MAIN_W, 0.0), &kit::tile(), GROUP_R);
+        self.doc.addSubview(&card);
+        *self.group.borrow_mut() = Some((card, 0.0));
     }
 
-    /// A tile left without a neighbour takes the whole row, so there's no hole.
-    fn finish_row(&self) {
-        if let Some(tile) = self.waiting.borrow_mut().take() {
-            tile.setFrameSize(objc2_foundation::NSSize::new(GROUP_W, TILE_H));
-            self.y.set(self.y.get() + TILE_H + TILE_GAP);
-        }
-    }
-
+    /// Close the open group, sizing it to its rows.
     fn end(&self) {
-        self.finish_row();
-        if self.in_section.replace(false) {
-            self.y.set(self.y.get() + 14.0);
+        if let Some((card, h)) = self.group.borrow_mut().take() {
+            card.setFrameSize(objc2_foundation::NSSize::new(MAIN_W, h));
+            self.y.set(self.y.get() + h + SECTION_GAP);
         }
     }
 
-    /// Footnote under the last section.
+    /// A row `h` tall in the open group; returns the group and the row's top.
+    fn row(&self, h: f64) -> (Retained<FlippedView>, f64) {
+        if self.group.borrow().is_none() {
+            self.section("");
+        }
+        let mut g = self.group.borrow_mut();
+        let (card, used) = g.as_mut().expect("a group is open");
+        let top = *used;
+        if top > 0.0 {
+            card.addSubview(&shape_view(self.mtm, rect(ROW_PAD, top, MAIN_W - ROW_PAD, 1.0), &separator(), 0.0));
+        }
+        *used += h;
+        (card.clone(), top)
+    }
+
+    /// A small grey paragraph under the last group.
     fn note(&self, text: &str) {
         self.end();
         let f = font(12.0, Weight::Regular);
-        let lines = (text_width(&attributed(text, &f, &text_tertiary())) / (GROUP_W - 16.0)).ceil().max(1.0);
+        let w = MAIN_W - 4.0;
+        let lines = (text_width(&attributed(text, &f, &kit::text3())) / (w - 12.0)).ceil().max(1.0);
         let h = lines * 17.0;
-        let l = crate::ui::wrapping_label(
-            self.mtm,
-            text,
-            &f,
-            &text_tertiary(),
-            rect(CONTENT_PAD + 4.0, self.y.get() - 14.0, GROUP_W - 8.0, h),
-            4,
-        );
+        let top = self.y.get() - SECTION_GAP + 8.0;
+        let l = crate::ui::wrapping_label(self.mtm, text, &f, &kit::text3(), rect(MARGIN + 2.0, top, w, h), 5);
         self.doc.addSubview(&l);
-        self.y.set(self.y.get() - 14.0 + h + 22.0);
+        self.y.set(top + h + SECTION_GAP);
     }
 
-    /// The next half-width tile in the grid; its width and height.
-    fn half_tile(&self) -> (Retained<FlippedView>, f64, f64) {
-        let mut waiting = self.waiting.borrow_mut();
-        let x = if waiting.is_some() { CONTENT_PAD + TILE_W + TILE_GAP } else { CONTENT_PAD };
-        let tile = glass_card(self.mtm, rect(x, self.y.get(), TILE_W, TILE_H), &card_bg(), TILE_R);
-        self.doc.addSubview(&tile);
-        if waiting.take().is_some() {
-            self.y.set(self.y.get() + TILE_H + TILE_GAP);
-        } else {
-            *waiting = Some(tile.clone());
-        }
-        (tile, TILE_W, TILE_H)
-    }
-
-    /// A tile across the whole row.
-    fn wide_tile(&self, height: f64) -> (Retained<FlippedView>, f64) {
-        self.finish_row();
-        let tile = glass_card(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, height), &card_bg(), TILE_R);
-        self.doc.addSubview(&tile);
-        self.y.set(self.y.get() + height + TILE_GAP);
-        (tile, GROUP_W)
-    }
-
-    /// How many lines a subtitle takes in `text_w` points.
-    fn subtitle_lines(subtitle: Option<&str>, text_w: f64) -> f64 {
+    /// Lines a subtitle takes in `w` points.
+    fn lines(subtitle: Option<&str>, w: f64) -> f64 {
         subtitle.map_or(0.0, |s| {
-            (text_width(&attributed(s, &font(11.5, Weight::Regular), &text_secondary())) / text_w)
-                .ceil()
-                .clamp(1.0, 3.0)
+            (text_width(&attributed(s, &font(12.0, Weight::Regular), &kit::text2())) / (w - 4.0)).ceil().clamp(1.0, 3.0)
         })
     }
 
-    /// Height of a full-row tile for a title and subtitle in `text_w` points.
-    fn wide_height(subtitle: Option<&str>, text_w: f64) -> f64 {
-        (28.0 + 20.0 + Self::subtitle_lines(subtitle, text_w) * 15.0).max(WIDE_H)
-    }
-
-    /// A title and subtitle, together in the middle of the tile's height.
-    fn put_texts(&self, row: &FlippedView, title: &str, subtitle: Option<&str>, text_w: f64, h: f64) {
-        let lines = Self::subtitle_lines(subtitle, text_w);
-        let block = if subtitle.is_some() { 19.0 + lines * 15.0 } else { 18.0 };
-        let ty = (h - block) / 2.0;
-        let t = label(self.mtm, title, &font(13.0, Weight::Semibold), &text_primary(), rect(16.0, ty, text_w, 18.0));
-        t.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable);
-        row.addSubview(&t);
+    /// Lay out a row: the optional mark, the title and subtitle, and room on
+    /// the right for `control_w` points of controls. Returns the group, the
+    /// row's top and its height.
+    fn texts(
+        &self,
+        title: &str,
+        subtitle: Option<&str>,
+        control_w: f64,
+        mark: Option<Mark<'_>>,
+    ) -> (Retained<FlippedView>, f64, f64) {
+        let lead = if mark.is_some() { 40.0 } else { 0.0 };
+        let text_w = MAIN_W - 2.0 * ROW_PAD - lead - control_w - if control_w > 0.0 { 16.0 } else { 0.0 };
+        let lines = Self::lines(subtitle, text_w);
+        let block = 17.0 + if subtitle.is_some() { 3.0 + lines * 16.0 } else { 0.0 };
+        let h = (block + 24.0).max(if subtitle.is_some() { 52.0 } else { 44.0 });
+        let (card, top) = self.row(h);
+        if let Some(m) = mark {
+            let tile =
+                shape_view(self.mtm, rect(ROW_PAD, top + (h - 28.0) / 2.0, 28.0, 28.0), &NSColor::blackColor(), 8.0);
+            if let Some(l) = tile.layer() {
+                l.setBorderWidth(1.0);
+                l.setBorderColor(Some(&kit::raised().CGColor()));
+            }
+            match m {
+                Mark::Symbol(s) => {
+                    tile.addSubview(&crate::ui::symbol_view(
+                        self.mtm,
+                        s,
+                        13.0,
+                        &kit::text2(),
+                        rect(6.0, 6.0, 16.0, 16.0),
+                        "",
+                    ));
+                }
+                Mark::Dot(c) => tile.addSubview(&kit::dot(self.mtm, 7.0, 7.0, 14.0, &crate::ui::rgb8(c))),
+                Mark::Spotify => {
+                    let disc = kit::dot(self.mtm, 5.0, 5.0, 18.0, &crate::ui::rgb8((30, 215, 96)));
+                    disc.addSubview(&crate::ui::spotify_mark(self.mtm, rect(3.0, 3.0, 12.0, 12.0)));
+                    tile.addSubview(&disc);
+                }
+            }
+            card.addSubview(&tile);
+        }
+        let x = ROW_PAD + lead;
+        let ty = top + (h - block) / 2.0;
+        card.addSubview(&label(self.mtm, title, &font(13.0, Weight::Medium), &kit::text(), rect(x, ty, text_w, 17.0)));
         if let Some(s) = subtitle {
-            let l = crate::ui::wrapping_label(
+            card.addSubview(&crate::ui::wrapping_label(
                 self.mtm,
                 s,
-                &font(11.5, Weight::Regular),
-                &*if self.sub_ok.get() { rgba(0.19, 0.82, 0.35, 1.0) } else { text_secondary() },
-                rect(16.0, ty + 19.0, text_w, lines * 15.0),
+                &font(12.0, Weight::Regular),
+                &kit::text2(),
+                rect(x, ty + 20.0, text_w, lines * 16.0),
                 3,
-            );
-            l.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable);
-            row.addSubview(&l);
+            ));
         }
+        (card, top, h)
     }
 
     fn switch(&self, title: &str, subtitle: Option<&str>, value: bool, set: impl Fn(&mut Config, bool) + 'static) {
-        let (row, w, h) = self.half_tile();
-        let text_w = w - 32.0 - TOGGLE_W - 12.0;
-        self.put_texts(&row, title, subtitle, text_w, h);
+        let (card, top, h) = self.texts(title, subtitle, SWITCH_W, None);
         let draft = self.draft.clone();
         let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
             if let Some(b) = sender.and_then(|s| s.downcast_ref::<NSButton>()) {
                 let on = b.state() == NSControlStateValueOn;
-                style_toggle(b, on);
+                style_switch(b, on);
                 set(&mut draft.borrow_mut(), on);
                 Self::commit(&draft);
             }
@@ -585,93 +428,67 @@ impl Form<'_> {
         sw.setBordered(false);
         sw.setTitle(&ns(""));
         sw.setState(if value { NSControlStateValueOn } else { NSControlStateValueOff });
-        sw.setFrame(rect(w - 16.0 - TOGGLE_W, (h - TOGGLE_H) / 2.0, TOGGLE_W, TOGGLE_H));
-        sw.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewMinXMargin);
+        sw.setFrame(rect(MAIN_W - ROW_PAD - SWITCH_W, top + (h - SWITCH_H) / 2.0, SWITCH_W, SWITCH_H));
         sw.setWantsLayer(true);
         if let Some(l) = sw.layer() {
-            l.setCornerRadius(TOGGLE_H / 2.0);
+            l.setCornerRadius(SWITCH_H / 2.0);
             let knob = objc2_quartz_core::CALayer::new();
-            knob.setBounds(rect(0.0, 0.0, TOGGLE_H - 4.0, TOGGLE_H - 4.0));
-            knob.setCornerRadius((TOGGLE_H - 4.0) / 2.0);
-            knob.setBackgroundColor(Some(&rgba(1.0, 1.0, 1.0, 1.0).CGColor()));
-            knob.setShadowOpacity(0.3);
+            knob.setBounds(rect(0.0, 0.0, SWITCH_H - 4.0, SWITCH_H - 4.0));
+            knob.setCornerRadius((SWITCH_H - 4.0) / 2.0);
+            knob.setBackgroundColor(Some(&NSColor::whiteColor().CGColor()));
+            knob.setShadowOpacity(0.25);
             knob.setShadowRadius(1.5);
-            knob.setName(Some(&ns("knob")));
             l.addSublayer(&knob);
         }
-        style_toggle(&sw, value);
+        style_switch(&sw, value);
         // SAFETY: target kept alive by `targets`.
         unsafe {
             sw.setTarget(Some(t.as_any()));
             sw.setAction(Some(ActionTarget::action()));
         }
         crate::ui::set_accessibility_label(&sw, title);
-        row.addSubview(&sw);
+        card.addSubview(&sw);
     }
 
-    /// The board's pop-up: a dark rounded pill with the current value and a
-    /// chevron; clicking opens a menu of the options.
-    /// A colour well bound to a hex accent. Changes commit like any other
-    /// control; a non-hex result is rounded to the nearest hex by the caller.
-    fn color_well(&self, title: &str, value: &str, set: impl Fn(&mut Config, String) + 'static) {
-        let (row, w, h) = self.half_tile();
-        self.put_texts(&row, title, None, w - 48.0 - 70.0, h);
-        let well_frame = rect(w - 16.0 - 56.0, (h - 28.0) / 2.0, 56.0, 28.0);
-        let well = objc2_app_kit::NSColorWell::colorWellWithStyle(objc2_app_kit::NSColorWellStyle::Default, self.mtm);
-        well.setFrame(well_frame);
-        well.setColor(&crate::ui::hex_to_color(value));
-        let draft = self.draft.clone();
-        let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
-            if let Some(w) = sender.and_then(|sl| sl.downcast_ref::<objc2_app_kit::NSColorWell>()) {
-                let hex = crate::ui::color_to_hex(&w.color());
-                set(&mut draft.borrow_mut(), hex);
-                Self::commit(&draft);
-            }
-        });
-        // SAFETY: target kept alive by `targets`.
-        unsafe {
-            well.setTarget(Some(t.as_any()));
-            well.setAction(Some(crate::ui::ActionTarget::action()));
-        }
-        row.addSubview(&well);
-    }
-
-    fn popup(&self, title: &str, options: &[&str], selected: usize, set: impl Fn(&mut Config, usize) + 'static) {
+    /// A pop-up: a grey pill with the current value and a chevron; clicking
+    /// opens a menu of the options.
+    fn popup(
+        &self,
+        title: &str,
+        subtitle: Option<&str>,
+        options: &[&str],
+        selected: usize,
+        set: impl Fn(&mut Config, usize) + 'static,
+    ) {
         use objc2_app_kit::{NSCellImagePosition, NSMenu, NSMenuItem};
-        let (row, w, h) = self.half_tile();
-        let (pw, ph) = (124.0, 27.0);
-        self.put_texts(&row, title, None, w - 32.0 - pw - 8.0, h);
         let value_font = font(13.0, Weight::Regular);
-        let value_color = rgba(1.0, 1.0, 1.0, 0.92);
+        let widest =
+            options.iter().map(|o| text_width(&attributed(o, &value_font, &kit::text()))).fold(0.0_f64, f64::max);
+        let pw = (widest + 44.0).ceil().max(96.0);
+        let (card, top, h) = self.texts(title, subtitle, pw, None);
         let btn = NSButton::new(self.mtm);
         btn.setButtonType(objc2_app_kit::NSButtonType::MomentaryPushIn);
         btn.setBordered(false);
-        btn.setFrame(rect(w - 16.0 - pw, (h - ph) / 2.0, pw, ph));
-        btn.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewMinXMargin);
+        btn.setFrame(rect(MAIN_W - ROW_PAD - pw, top + (h - CONTROL_H) / 2.0, pw, CONTROL_H));
         btn.setAlignment(NSTextAlignment::Left);
-        btn.setAttributedTitle(&attributed(options.get(selected).copied().unwrap_or(""), &value_font, &value_color));
+        btn.setAttributedTitle(&attributed(options.get(selected).copied().unwrap_or(""), &value_font, &kit::text()));
         btn.setImage(crate::ui::symbol_image("chevron.up.chevron.down", 9.0, "").as_deref());
         btn.setImagePosition(NSCellImagePosition::ImageRight);
-        btn.setContentTintColor(Some(&rgba(1.0, 1.0, 1.0, 0.55)));
-        btn.setWantsLayer(true);
-        if let Some(l) = btn.layer() {
-            l.setCornerRadius(8.0);
-            l.setBackgroundColor(Some(&rgba(0.11, 0.11, 0.125, 1.0).CGColor()));
-            l.setBorderWidth(1.0);
-            l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.10).CGColor()));
-        }
+        btn.setContentTintColor(Some(&kit::text3()));
+        crate::ui::make_card(&btn, &kit::raised(), CONTROL_H / 2.0);
         crate::ui::set_accessibility_label(&btn, title);
 
         let set = Rc::new(set);
         let menu = NSMenu::new(self.mtm);
-        let names: Vec<String> = options.iter().map(|o| (*o).to_owned()).collect();
-        for (i, name) in names.iter().enumerate() {
-            let draft = self.draft.clone();
-            let set = set.clone();
-            let button = btn.clone();
-            let (font, color, title) = (value_font.clone(), value_color.clone(), name.clone());
+        let items: Rc<RefCell<Vec<Retained<NSMenuItem>>>> = Rc::default();
+        for (i, name) in options.iter().enumerate() {
+            let (draft, set, button, items_c) = (self.draft.clone(), set.clone(), btn.clone(), items.clone());
+            let (f, name_owned) = (value_font.clone(), (*name).to_owned());
             let t = self.targets.add(self.mtm, move |_| {
-                button.setAttributedTitle(&attributed(&title, &font, &color));
+                button.setAttributedTitle(&attributed(&name_owned, &f, &kit::text()));
+                for (j, it) in items_c.borrow().iter().enumerate() {
+                    it.setState(if j == i { NSControlStateValueOn } else { NSControlStateValueOff });
+                }
                 set(&mut draft.borrow_mut(), i);
                 Self::commit(&draft);
             });
@@ -688,13 +505,14 @@ impl Form<'_> {
             unsafe { item.setTarget(Some(t.as_any())) };
             item.setState(if i == selected { NSControlStateValueOn } else { NSControlStateValueOff });
             menu.addItem(&item);
+            items.borrow_mut().push(item);
         }
         let opener = {
             let button = btn.clone();
             self.targets.add(self.mtm, move |_| {
                 menu.popUpMenuPositioningItem_atLocation_inView(
                     None,
-                    objc2_foundation::NSPoint::new(0.0, ph + 4.0),
+                    NSPoint::new(0.0, CONTROL_H + 4.0),
                     Some(&button),
                 );
             })
@@ -704,23 +522,68 @@ impl Form<'_> {
             btn.setTarget(Some(opener.as_any()));
             btn.setAction(Some(ActionTarget::action()));
         }
-        row.addSubview(&btn);
+        card.addSubview(&btn);
     }
 
-    fn text(
+    /// A slider with its value written beside it. The value follows the knob;
+    /// the setting is saved when the knob is let go.
+    #[allow(clippy::too_many_arguments)]
+    fn slider(
         &self,
         title: &str,
-        value: &str,
-        placeholder: &str,
-        mono: bool,
-        set: impl Fn(&mut Config, String) + 'static,
+        subtitle: Option<&str>,
+        (min, max): (f64, f64),
+        value: f64,
+        show: impl Fn(f64) -> String + 'static,
+        set: impl Fn(&mut Config, f64) + 'static,
     ) {
-        self.text_row(title, None, value, placeholder, mono, 300.0, false, set);
+        let (sw, vw) = (170.0, 56.0);
+        let (card, top, h) = self.texts(title, subtitle, sw + 8.0 + vw, None);
+        let shown = label(
+            self.mtm,
+            &show(value),
+            &crate::ui::mono_digits(12.0, Weight::Regular),
+            &kit::text2(),
+            rect(MAIN_W - ROW_PAD - vw, top + (h - 16.0) / 2.0, vw, 16.0),
+        );
+        shown.setAlignment(NSTextAlignment::Right);
+        let draft = self.draft.clone();
+        let (mtm, shown_c) = (self.mtm, shown.clone());
+        let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
+            let Some(s) = sender.and_then(|s| s.downcast_ref::<NSSlider>()) else { return };
+            let v = s.doubleValue();
+            crate::ui::set_text(&shown_c, &show(v));
+            let dragging = objc2_app_kit::NSApplication::sharedApplication(mtm)
+                .currentEvent()
+                .is_some_and(|e| e.r#type() == objc2_app_kit::NSEventType::LeftMouseDragged);
+            if !dragging {
+                set(&mut draft.borrow_mut(), v);
+                Self::commit(&draft);
+            }
+        });
+        // SAFETY: target kept alive by `targets`.
+        let s = unsafe {
+            NSSlider::sliderWithValue_minValue_maxValue_target_action(
+                value,
+                min,
+                max,
+                Some(t.as_any()),
+                Some(ActionTarget::action()),
+                self.mtm,
+            )
+        };
+        s.setControlSize(NSControlSize::Small);
+        s.setContinuous(true);
+        s.setTrackFillColor(Some(&kit::accent()));
+        s.setFrame(rect(MAIN_W - ROW_PAD - vw - 8.0 - sw, top + (h - 20.0) / 2.0, sw, 20.0));
+        crate::ui::set_accessibility_label(&s, title);
+        card.addSubview(&s);
+        card.addSubview(&shown);
     }
 
-    /// A row with a text field on the right: dark rounded box, `width` wide.
+    /// A text box on the right: black, hairline edge, `width` wide.
     #[allow(clippy::too_many_arguments)]
-    fn text_row(
+    fn field(
         &self,
         title: &str,
         subtitle: Option<&str>,
@@ -731,16 +594,8 @@ impl Form<'_> {
         secure: bool,
         set: impl Fn(&mut Config, String) + 'static,
     ) {
-        let (row, w, h) = if width > WIDEST_HALF_FIELD {
-            let h = Self::wide_height(subtitle, GROUP_W - 48.0 - width);
-            let (row, w) = self.wide_tile(h);
-            (row, w, h)
-        } else {
-            self.half_tile()
-        };
-        self.put_texts(&row, title, subtitle, w - 48.0 - width, h);
-        let box_frame = rect(w - 16.0 - width, (h - 28.0) / 2.0, width, 28.0);
-        let frame = rect(10.0, 4.0, width - 20.0, 20.0);
+        let (card, top, h) = self.texts(title, subtitle, width, None);
+        let frame = rect(8.0, 4.0, width - 16.0, 18.0);
         let f: Retained<NSTextField> = if secure {
             let sf = objc2_app_kit::NSSecureTextField::initWithFrame(
                 <objc2_app_kit::NSSecureTextField as MainThreadOnly>::alloc(self.mtm),
@@ -759,18 +614,12 @@ impl Form<'_> {
         f.setBezeled(false);
         f.setDrawsBackground(false);
         f.setFocusRingType(objc2_app_kit::NSFocusRingType::None);
-        f.setTextColor(Some(&text_primary()));
-        let field_box = shape_view(self.mtm, box_frame, &rgba(0.04, 0.04, 0.05, 1.0), 8.0);
-        if let Some(l) = field_box.layer() {
-            l.setBorderWidth(1.0);
-            l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.08).CGColor()));
-        }
-        if mono {
-            f.setFont(Some(&objc2_app_kit::NSFont::monospacedSystemFontOfSize_weight(
-                13.0,
-                crate::ui::weight(Weight::Regular),
-            )));
-        }
+        f.setTextColor(Some(&kit::text()));
+        f.setFont(Some(&*if mono {
+            objc2_app_kit::NSFont::monospacedSystemFontOfSize_weight(12.0, crate::ui::weight(Weight::Regular))
+        } else {
+            font(13.0, Weight::Regular)
+        }));
         if let Some(cell) = f.cell() {
             cell.setSendsActionOnEndEditing(true);
         }
@@ -787,138 +636,159 @@ impl Form<'_> {
             f.setTarget(Some(t.as_any()));
             f.setAction(Some(ActionTarget::action()));
         }
-        field_box.addSubview(&f);
-        field_box.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewMinXMargin);
-        row.addSubview(&field_box);
-    }
-
-    fn slider(&self, title: &str, min: f64, max: f64, value: f64, set: impl Fn(&mut Config, f64) + 'static) {
-        // The title above, and the slider across the tile.
-        let (row, w, h) = self.half_tile();
-        let t = label(
+        let field_box = shape_view(
             self.mtm,
-            title,
-            &font(13.0, Weight::Semibold),
-            &text_primary(),
-            rect(16.0, h / 2.0 - 24.0, w - 32.0, 18.0),
+            rect(MAIN_W - ROW_PAD - width, top + (h - CONTROL_H) / 2.0, width, CONTROL_H),
+            &NSColor::blackColor(),
+            7.0,
         );
-        row.addSubview(&t);
-        let draft = self.draft.clone();
-        let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
-            if let Some(s) = sender.and_then(|s| s.downcast_ref::<NSSlider>()) {
-                set(&mut draft.borrow_mut(), s.doubleValue());
-                Self::commit(&draft);
-            }
-        });
-        // SAFETY: target kept alive by `targets`.
-        let s = unsafe {
-            NSSlider::sliderWithValue_minValue_maxValue_target_action(
-                value,
-                min,
-                max,
-                Some(t.as_any()),
-                Some(ActionTarget::action()),
-                self.mtm,
-            )
-        };
-        s.setControlSize(NSControlSize::Small);
-        s.setContinuous(false);
-        s.setFrame(rect(16.0, h / 2.0 + 2.0, w - 32.0, 20.0));
-        s.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable);
-        crate::ui::set_accessibility_label(&s, title);
-        row.addSubview(&s);
+        if let Some(l) = field_box.layer() {
+            l.setBorderWidth(1.0);
+            l.setBorderColor(Some(&kit::raised().CGColor()));
+        }
+        field_box.addSubview(&f);
+        card.addSubview(&field_box);
     }
 
-    /// A row with a status capsule and buttons on the right.
-    fn action_row(
+    /// A row with an optional status (dot and word) and pill buttons.
+    fn action(
         &self,
         title: &str,
         subtitle: Option<&str>,
         status: Option<(&str, Tone)>,
         buttons: Vec<RowButton<'_>>,
-        leading_icon: Option<(&str, (u8, u8, u8))>,
-    ) -> Vec<Retained<NSButton>> {
-        let bw: Vec<f64> = buttons
-            .iter()
-            .map(|(t, _, _)| {
-                (text_width(&attributed(t, &font(12.5, Weight::Regular), &text_primary())) + 26.0).max(70.0)
-            })
-            .collect();
-        let chip = status.map(|(t, tone)| chip_view(self.mtm, t, tone));
-        let chip_w = chip.as_ref().map_or(0.0, |(_, w)| w + 10.0);
-        let controls_w = bw.iter().sum::<f64>() + 8.0 * bw.len() as f64 + chip_w;
-        let icon_w = if leading_icon.is_some() { 46.0 } else { 0.0 };
-        let text_w = GROUP_W - 32.0 - controls_w - icon_w;
-        let h = Self::wide_height(subtitle, text_w);
-        let (row, w) = self.wide_tile(h);
-        if let Some((sym, color)) = leading_icon {
-            let tile =
-                shape_view(self.mtm, rect(16.0, (h - 34.0) / 2.0, 34.0, 34.0), &rgba(0.047, 0.047, 0.055, 1.0), 10.0);
-            if let Some(l) = tile.layer() {
-                l.setBorderWidth(0.5);
-                l.setBorderColor(Some(&rgba(1.0, 1.0, 1.0, 0.14).CGColor()));
-            }
-            let disc = shape_view(self.mtm, rect(6.0, 6.0, 22.0, 22.0), &crate::ui::rgb8(color), 11.0);
-            if sym == "spotify" {
-                disc.addSubview(&crate::ui::spotify_mark(self.mtm, rect(4.0, 4.0, 14.0, 14.0)));
-            } else {
-                disc.addSubview(&crate::ui::symbol_view(
-                    self.mtm,
-                    sym,
-                    12.0,
-                    &NSColor::blackColor(),
-                    rect(4.0, 4.0, 14.0, 14.0),
-                    title,
-                ));
-            }
-            tile.addSubview(&disc);
-            row.addSubview(&tile);
-            let inner = FlippedView::new(self.mtm, rect(icon_w, 0.0, w - icon_w, h));
-            self.put_texts(&inner, title, subtitle, text_w, h);
-            row.addSubview(&inner);
-        } else {
-            self.put_texts(&row, title, subtitle, text_w, h);
-        }
-        let mut x = w - 16.0;
-        let mut made = Vec::new();
-        for ((t, primary, f), width) in buttons.into_iter().zip(bw).rev() {
-            x -= width;
-            let target = self.targets.add(self.mtm, move |_| f());
-            let b = pill_button(self.mtm, t, &target, rect(x, (h - 28.0) / 2.0, width, 28.0), primary);
-            row.addSubview(&b);
-            made.push(b);
+        mark: Option<Mark<'_>>,
+    ) {
+        let widths: Vec<f64> = buttons.iter().map(|(t, _, _)| kit::button_width(t, BUTTON_H).max(64.0)).collect();
+        let status_w = status.map_or(0.0, |(t, _)| {
+            13.0 + text_width(&attributed(t, &font(12.0, Weight::Regular), &kit::text2())).ceil() + 2.0
+        });
+        let gaps = if status.is_some() && !buttons.is_empty() { 14.0 } else { 0.0 };
+        let control_w = widths.iter().sum::<f64>() + 8.0 * (widths.len().saturating_sub(1)) as f64 + status_w + gaps;
+        let (card, top, h) = self.texts(title, subtitle, control_w, mark);
+        let mut x = MAIN_W - ROW_PAD;
+        for ((t, primary, f), w) in buttons.into_iter().zip(widths).rev() {
+            x -= w;
+            let kind = if primary { Btn::Primary } else { Btn::Secondary };
+            card.addSubview(&kit::button(
+                self.mtm,
+                self.targets,
+                t,
+                kind,
+                rect(x, top + (h - BUTTON_H) / 2.0, w, BUTTON_H),
+                f,
+            ));
             x -= 8.0;
         }
-        if let Some((chip, cw)) = chip {
-            chip.setFrameOrigin(objc2_foundation::NSPoint::new(x - cw - 2.0, (h - 26.0) / 2.0));
-            row.addSubview(&chip);
+        if let Some((t, tone)) = status {
+            let (v, w) = status_view(self.mtm, t, tone, 18.0);
+            let right = if gaps > 0.0 { x + 8.0 - gaps } else { MAIN_W - ROW_PAD };
+            v.setFrameOrigin(NSPoint::new(right - w, top + (h - 18.0) / 2.0));
+            card.addSubview(&v);
         }
-        made
     }
 
-    /// A monospaced snippet in its own dark card, with a Copy button.
-    fn code_block(&self, title: &str, runs: &[(&str, Retained<NSColor>)], copy: Box<dyn Fn()>) {
-        self.finish_row();
-        let lines = 1 + runs.iter().map(|(t, _)| t.matches('\n').count()).sum::<usize>();
-        let body_h = lines as f64 * 18.0 + 24.0;
-        let h = 34.0 + body_h;
-        let card =
-            glass_card(self.mtm, rect(CONTENT_PAD, self.y.get(), GROUP_W, h), &rgba(0.0, 0.0, 0.0, 0.34), TILE_R);
-        card.addSubview(&label(
+    /// The accent: one swatch per preset and a well for any other colour.
+    fn accents(&self, current: &str) {
+        let d = 22.0;
+        let n = kit::ACCENTS.len() as f64;
+        let well_w = d;
+        let control_w = n * (d + 10.0) + 6.0 + well_w;
+        let (card, top, h) =
+            self.texts("Accent", Some("Switches, sliders and the main button in every space"), control_w, None);
+        let mut x = MAIN_W - ROW_PAD - control_w;
+        let rings: Rc<RefCell<Vec<Retained<FlippedView>>>> = Rc::default();
+        for (i, (key, name, (r, g, b))) in kit::ACCENTS.iter().enumerate() {
+            let ring = shape_view(
+                self.mtm,
+                rect(x, top + (h - d - 6.0) / 2.0, d + 6.0, d + 6.0),
+                &NSColor::clearColor(),
+                (d + 6.0) / 2.0,
+            );
+            if let Some(l) = ring.layer() {
+                l.setBorderWidth(2.0);
+                l.setBorderColor(Some(&kit::text().CGColor()));
+            }
+            ring.setHidden(*key != current);
+            card.addSubview(&ring);
+            rings.borrow_mut().push(ring);
+            let sw = kit::dot(self.mtm, x + 3.0, top + (h - d) / 2.0, d, &rgba(*r, *g, *b, 1.0));
+            let (draft, rings_c, value) = (self.draft.clone(), rings.clone(), (*key).to_owned());
+            let t = self.targets.add(self.mtm, move |_| {
+                for (j, ring) in rings_c.borrow().iter().enumerate() {
+                    ring.setHidden(j != i);
+                }
+                draft.borrow_mut().appearance.accent = value.clone();
+                Self::commit(&draft);
+                app::show_settings_soon();
+            });
+            sw.addSubview(&crate::ui::click_overlay(self.mtm, &t, rect(0.0, 0.0, d, d), name));
+            card.addSubview(&sw);
+            x += d + 10.0;
+        }
+        let well = objc2_app_kit::NSColorWell::colorWellWithStyle(objc2_app_kit::NSColorWellStyle::Minimal, self.mtm);
+        // A round swatch like the presets: grey until a colour of one's own is picked.
+        let custom = current.starts_with('#');
+        let ring = shape_view(
             self.mtm,
-            title,
-            &font(11.5, Weight::Regular),
-            &text_tertiary(),
-            rect(14.0, 9.0, GROUP_W - 120.0, 16.0),
+            rect(x + 3.0, top + (h - d - 6.0) / 2.0, d + 6.0, d + 6.0),
+            &NSColor::clearColor(),
+            (d + 6.0) / 2.0,
+        );
+        if let Some(l) = ring.layer() {
+            l.setBorderWidth(2.0);
+            l.setBorderColor(Some(&kit::text().CGColor()));
+        }
+        ring.setHidden(!custom);
+        card.addSubview(&ring);
+        rings.borrow_mut().push(ring);
+        well.setFrame(rect(x + 6.0, top + (h - d) / 2.0, d, d));
+        well.setWantsLayer(true);
+        if let Some(l) = well.layer() {
+            l.setCornerRadius(d / 2.0);
+            l.setMasksToBounds(true);
+        }
+        well.setColor(&crate::ui::hex_to_color(if custom { current } else { "#8E8E93" }));
+        crate::ui::set_accessibility_label(&well, "Custom accent colour");
+        let (draft, rings_c) = (self.draft.clone(), rings.clone());
+        let t = self.targets.add(self.mtm, move |sender: Option<&AnyObject>| {
+            if let Some(w) = sender.and_then(|s| s.downcast_ref::<objc2_app_kit::NSColorWell>()) {
+                let rings = rings_c.borrow();
+                for (j, ring) in rings.iter().enumerate() {
+                    ring.setHidden(j + 1 != rings.len());
+                }
+                draft.borrow_mut().appearance.accent = crate::ui::color_to_hex(&w.color());
+                Self::commit(&draft);
+            }
+        });
+        // SAFETY: target kept alive by `targets`.
+        unsafe {
+            well.setTarget(Some(t.as_any()));
+            well.setAction(Some(ActionTarget::action()));
+        }
+        card.addSubview(&well);
+    }
+
+    /// A monospaced snippet on black, with a Copy button.
+    fn code(&self, title: &str, runs: &[(&str, Retained<NSColor>)], copy: Box<dyn Fn()>) {
+        self.end();
+        let lines = 1 + runs.iter().map(|(t, _)| t.matches('\n').count()).sum::<usize>();
+        let h = 44.0 + lines as f64 * 18.0 + 14.0;
+        let card = shape_view(self.mtm, rect(MARGIN, self.y.get(), MAIN_W, h), &NSColor::blackColor(), GROUP_R);
+        if let Some(l) = card.layer() {
+            l.setBorderWidth(1.0);
+            l.setBorderColor(Some(&kit::raised().CGColor()));
+        }
+        card.addSubview(&kit::heading(self.mtm, title, rect(ROW_PAD, 14.0, MAIN_W - 120.0, 16.0)));
+        let w = kit::button_width("Copy", 26.0);
+        card.addSubview(&kit::button(
+            self.mtm,
+            self.targets,
+            "Copy",
+            Btn::Secondary,
+            rect(MAIN_W - 10.0 - w, 9.0, w, 26.0),
+            copy,
         ));
-        let target = self.targets.add(self.mtm, move |_| copy());
-        let b = pill_button(self.mtm, "Copy", &target, rect(GROUP_W - 8.0 - 76.0, 4.0, 76.0, 26.0), false);
-        b.setImage(crate::ui::symbol_image("doc.on.doc", 11.0, "").as_deref());
-        b.setImagePosition(objc2_app_kit::NSCellImagePosition::ImageLeft);
-        b.setContentTintColor(Some(&rgba(1.0, 1.0, 1.0, 0.7)));
-        b.setControlSize(NSControlSize::Regular);
-        card.addSubview(&b);
-        card.addSubview(&shape_view(self.mtm, rect(0.0, 34.0, GROUP_W, 0.5), &hairline(), 0.0));
         let mono = objc2_app_kit::NSFont::monospacedSystemFontOfSize_weight(11.5, crate::ui::weight(Weight::Regular));
         let parts: Vec<(&str, &objc2_app_kit::NSFont, &NSColor)> =
             runs.iter().map(|(t, c)| (*t, &*mono, &**c)).collect();
@@ -926,31 +796,27 @@ impl Form<'_> {
             self.mtm,
             "",
             &mono,
-            &text_primary(),
-            rect(14.0, 46.0, GROUP_W - 28.0, lines as f64 * 18.0),
+            &kit::text(),
+            rect(ROW_PAD, 44.0, MAIN_W - 2.0 * ROW_PAD, lines as f64 * 18.0),
             0,
         );
         body.setAttributedStringValue(&crate::ui::attributed_parts(&parts));
         card.addSubview(&body);
         self.doc.addSubview(&card);
-        self.y.set(self.y.get() + h + TILE_GAP);
+        self.y.set(self.y.get() + h + SECTION_GAP);
     }
 
-    fn permission(&self, p: Permission) {
-        self.permission_as(p, p.title(), p.rationale(), None);
-    }
-
-    fn permission_as(&self, p: Permission, title: &str, rationale: &str, forced: Option<PermissionState>) {
+    fn permission(&self, p: Permission, title: &str, why: &str, forced: Option<PermissionState>) {
         let state = forced.unwrap_or_else(|| permissions::state(p));
         let (word, tone) = match state {
             PermissionState::Granted => ("Allowed", Tone::Ok),
-            PermissionState::NotRequired => ("Not required", Tone::Neutral),
+            PermissionState::NotRequired => ("Not needed", Tone::Neutral),
             PermissionState::Denied => ("Not allowed", Tone::Warn),
             PermissionState::NotDetermined => ("Not asked yet", Tone::Neutral),
             PermissionState::Unknown => ("Unknown", Tone::Neutral),
         };
         let mut buttons: Vec<RowButton<'_>> = Vec::new();
-        if !matches!(state, PermissionState::Granted | PermissionState::NotRequired) {
+        if !allowed(state) {
             buttons.push((
                 "Allow…",
                 true,
@@ -961,9 +827,18 @@ impl Form<'_> {
                 }),
             ));
         } else if state == PermissionState::Granted {
-            buttons.push(("Open Settings", false, Box::new(move || permissions::open_settings(p))));
+            buttons.push(("Open", false, Box::new(move || permissions::open_settings(p))));
         }
-        self.action_row(title, Some(rationale), Some((word, tone)), buttons, None);
+        let symbol = match p {
+            Permission::Accessibility => "accessibility",
+            Permission::FullDiskAccess => "internaldrive",
+            Permission::Location => "location",
+            Permission::Notifications => "bell.badge",
+            Permission::Bluetooth => "dot.radiowaves.left.and.right",
+            Permission::Automation => "gearshape.2",
+            Permission::Calendar => "calendar",
+        };
+        self.action(title, Some(why), Some((word, tone)), buttons, Some(Mark::Symbol(symbol)));
     }
 }
 
@@ -974,16 +849,16 @@ fn index_of<T: PartialEq>(items: &[T], v: &T) -> usize {
 /// The sidebar's rows and captions, placed (and re-placed by search) together.
 struct SideRows {
     items: Vec<(Pane, Retained<FlippedView>)>,
-    captions: Vec<Retained<NSTextField>>,
+    captions: Vec<Option<Retained<NSTextField>>>,
 }
 
-const NAV_TOP: f64 = 112.0;
-const NAV_ITEM_H: f64 = 32.0;
+const NAV_TOP: f64 = 84.0;
+const NAV_ITEM_H: f64 = 30.0;
 
 impl SideRows {
     /// Lay out the captions and the rows that match `query`.
     fn place(&self, query: &str) {
-        let q = query.to_lowercase();
+        let q = query.trim().to_lowercase();
         let mut y = NAV_TOP;
         for (si, (_, panes)) in Pane::SECTIONS.iter().enumerate() {
             let hits: Vec<Pane> = panes
@@ -991,20 +866,20 @@ impl SideRows {
                 .copied()
                 .filter(|p| q.is_empty() || p.title().to_lowercase().contains(&q) || p.keywords().contains(&q))
                 .collect();
-            let cap = &self.captions[si];
-            cap.setHidden(hits.is_empty());
-            if hits.is_empty() {
-                continue;
+            if let Some(cap) = &self.captions[si] {
+                cap.setHidden(hits.is_empty());
+                if !hits.is_empty() {
+                    y += 12.0;
+                    cap.setFrameOrigin(NSPoint::new(20.0, y));
+                    y += 20.0;
+                }
             }
-            y += 14.0;
-            cap.setFrameOrigin(objc2_foundation::NSPoint::new(18.0, y));
-            y += 20.0;
             for (pane, view) in &self.items {
                 if panes.contains(pane) {
                     let hit = hits.contains(pane);
                     view.setHidden(!hit);
                     if hit {
-                        view.setFrameOrigin(objc2_foundation::NSPoint::new(8.0, y));
+                        view.setFrameOrigin(NSPoint::new(10.0, y));
                         y += NAV_ITEM_H + 2.0;
                     }
                 }
@@ -1032,16 +907,15 @@ impl SettingsWindow {
         window.setTitle(&ns("Notchisland Settings"));
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
-        // See through to the desktop, under the ground's blur and veil.
-        window.setOpaque(false);
-        window.setBackgroundColor(Some(&NSColor::clearColor()));
+        window.setMovableByWindowBackground(true);
+        window.setBackgroundColor(Some(&NSColor::blackColor()));
         // SAFETY: AppKit's appearance-name constant.
         if let Some(dark) = NSAppearance::appearanceNamed(unsafe { objc2_app_kit::NSAppearanceNameDarkAqua }) {
             window.setAppearance(Some(&dark));
         }
         // SAFETY: we own the window strongly.
         unsafe { window.setReleasedWhenClosed(false) };
-        Self { window, targets: Rc::new(Targets::default()), pane: Rc::new(Cell::new(Pane::General)) }
+        Self { window, targets: Rc::new(Targets::default()), pane: Rc::new(Cell::new(Pane::Island)) }
     }
 
     pub fn content_view(&self) -> Option<Retained<NSView>> {
@@ -1063,25 +937,25 @@ impl SettingsWindow {
     pub fn show(&self, config: &Config) {
         let mtm = MainThreadMarker::from(&*self.window);
         self.targets.clear();
-        let root = ground(mtm);
+        // Controls tint with the accent the user picked.
+        kit::set_accent(&config.appearance.accent);
+        let root = shape_view(mtm, rect(0.0, 0.0, WIDTH, HEIGHT), &NSColor::blackColor(), 0.0);
         root.addSubview(&self.sidebar(mtm));
 
         let pane = self.pane.get();
         self.header(mtm, &root, pane, config);
         let doc = FlippedView::new(mtm, rect(0.0, 0.0, WIDTH - SIDEBAR, 2400.0));
         let form = Form {
-            sub_ok: Cell::new(false),
             mtm,
             doc: &doc,
             y: Cell::new(4.0),
             targets: &self.targets,
             draft: Rc::new(RefCell::new(config.clone())),
-            waiting: RefCell::new(None),
-            in_section: Cell::new(false),
+            group: RefCell::new(None),
         };
         build_pane(&form, pane, config);
         form.end();
-        let total = form.y.get() + 6.0;
+        let total = form.y.get() + 8.0;
         let view_h = HEIGHT - HEADER_H;
         doc.setFrame(rect(0.0, 0.0, WIDTH - SIDEBAR, total.max(view_h)));
         let scroll =
@@ -1089,9 +963,10 @@ impl SettingsWindow {
         scroll.setDrawsBackground(false);
         scroll.setHasVerticalScroller(true);
         scroll.setAutohidesScrollers(true);
+        scroll.setScrollerStyle(objc2_app_kit::NSScrollerStyle::Overlay);
         scroll.setDocumentView(Some(&doc));
         root.addSubview(&scroll);
-        doc.scrollPoint(objc2_foundation::NSPoint::new(0.0, 0.0));
+        doc.scrollPoint(NSPoint::new(0.0, 0.0));
 
         let content: &NSView = &root;
         self.window.setContentView(Some(content));
@@ -1104,109 +979,78 @@ impl SettingsWindow {
         self.window.makeFirstResponder(None);
     }
 
-    /// The pane's icon tile, title, one-line description and status chip.
+    /// The page's title, one line under it, and its live status.
     fn header(&self, mtm: MainThreadMarker, root: &FlippedView, pane: Pane, c: &Config) {
-        let x0 = SIDEBAR + CONTENT_PAD;
-        let tile = gradient_tile(mtm, rect(x0, 26.0, 40.0, 40.0), pane.gradient(), 11.0);
-        tile.addSubview(&crate::ui::symbol_view(
-            mtm,
-            pane.icon().0,
-            20.0,
-            &NSColor::whiteColor(),
-            rect(8.0, 8.0, 24.0, 24.0),
-            "",
-        ));
-        root.addSubview(&tile);
-        let chip = pane.chip(c).map(|(t, tone)| chip_view(mtm, &t, tone));
-        let chip_w = chip.as_ref().map_or(0.0, |(_, w)| w + 16.0);
-        let text_x = x0 + 54.0;
-        let text_w = WIDTH - CONTENT_PAD - text_x - chip_w;
+        let x0 = SIDEBAR + MARGIN;
+        let chip = pane.chip(c).map(|(t, tone)| {
+            let f = font(12.0, Weight::Semibold);
+            let tw = text_width(&attributed(&t, &f, &kit::text())).ceil();
+            let w = 11.0 + 7.0 + 7.0 + tw + 11.0;
+            let v = shape_view(mtm, rect(WIDTH - MARGIN - w, 44.0, w, 24.0), &kit::tile(), 12.0);
+            v.addSubview(&kit::dot(mtm, 11.0, 8.5, 7.0, &tone.color()));
+            v.addSubview(&label(mtm, &t, &f, &kit::text(), rect(25.0, 4.0, tw + 2.0, 16.0)));
+            crate::ui::set_accessibility_label(&v, &t);
+            (v, w)
+        });
+        let text_w = WIDTH - MARGIN - x0 - chip.as_ref().map_or(0.0, |(_, w)| w + 16.0);
         root.addSubview(&label(
             mtm,
             pane.title(),
-            &font(24.0, Weight::Semibold),
-            &text_primary(),
-            rect(text_x, 22.0, text_w, 30.0),
+            &font(22.0, Weight::Semibold),
+            &kit::text(),
+            rect(x0, 38.0, text_w, 28.0),
         ));
         root.addSubview(&label(
             mtm,
             pane.blurb(),
             &font(13.0, Weight::Regular),
-            &text_secondary(),
-            rect(text_x, 53.0, text_w, 17.0),
+            &kit::text2(),
+            rect(x0, 68.0, text_w, 17.0),
         ));
-        if let Some((chip, w)) = chip {
-            chip.setFrameOrigin(objc2_foundation::NSPoint::new(WIDTH - CONTENT_PAD - w, 33.0));
-            root.addSubview(&chip);
+        if let Some((v, _)) = chip {
+            root.addSubview(&v);
         }
     }
 
     fn sidebar(&self, mtm: MainThreadMarker) -> Retained<NSView> {
-        let side = glass_card(mtm, rect(SIDE_INSET, SIDE_INSET, SIDE_W, SIDE_H), &side_bg(), 20.0);
+        let side = FlippedView::new(mtm, rect(0.0, 0.0, SIDEBAR, HEIGHT));
+        side.addSubview(&shape_view(mtm, rect(SIDEBAR - 1.0, 0.0, 1.0, HEIGHT), &edge(), 0.0));
 
-        // Brand: the app icon (it carries its own transparent margin) and name.
-        let icon = NSImageView::new(mtm);
-        icon.setImage(objc2_app_kit::NSApplication::sharedApplication(mtm).applicationIconImage().as_deref());
-        icon.setImageScaling(objc2_app_kit::NSImageScaling::ScaleProportionallyUpOrDown);
-        icon.setFrame(rect(10.0, 30.0, 44.0, 44.0));
-        side.addSubview(&icon);
-        side.addSubview(&label(
-            mtm,
-            "Notchisland",
-            &font(14.0, Weight::Semibold),
-            &text_primary(),
-            rect(60.0, 37.0, SIDE_W - 72.0, 18.0),
-        ));
-        side.addSubview(&label(
-            mtm,
-            "Settings",
-            &font(11.5, Weight::Regular),
-            &text_secondary(),
-            rect(60.0, 55.0, SIDE_W - 72.0, 15.0),
-        ));
-
-        // Search filters the pane list in place.
-        let search = NSSearchField::initWithFrame(NSSearchField::alloc(mtm), rect(12.0, 80.0, SIDE_W - 24.0, 28.0));
-        search.setPlaceholderString(Some(&ns("Search settings")));
+        // Search filters the page list in place. (The traffic lights sit above it.)
+        let search = NSSearchField::initWithFrame(NSSearchField::alloc(mtm), rect(10.0, 44.0, SIDEBAR - 20.0, 28.0));
+        search.setPlaceholderString(Some(&ns("Search")));
         crate::ui::set_accessibility_label(&search, "Search settings");
 
         let current = self.pane.get();
+        let attention = permissions_need_you();
         let mut rows = SideRows { items: Vec::new(), captions: Vec::new() };
         for (cap, _) in Pane::SECTIONS {
-            let c = caption(mtm, cap, 10.5, rect(18.0, 0.0, SIDE_W - 36.0, 14.0));
-            side.addSubview(&c);
-            rows.captions.push(c);
+            rows.captions.push((!cap.is_empty()).then(|| {
+                let c = label(mtm, cap, &font(11.0, Weight::Semibold), &text4(), rect(20.0, 0.0, SIDEBAR - 40.0, 14.0));
+                side.addSubview(&c);
+                c
+            }));
         }
+        let item_w = SIDEBAR - 20.0;
         for pane in Pane::ALL {
             let selected = pane == current;
-            let bg = rgba(1.0, 1.0, 1.0, if selected { 0.16 } else { 0.0 });
-            let item = shape_view(mtm, rect(8.0, 0.0, SIDE_W - 16.0, NAV_ITEM_H), &bg, 10.0);
-            let tile = gradient_tile(mtm, rect(9.0, 5.0, 22.0, 22.0), pane.gradient(), 6.0);
-            tile.addSubview(&crate::ui::symbol_view(
-                mtm,
-                pane.icon().0,
-                11.0,
-                &NSColor::whiteColor(),
-                rect(4.0, 4.0, 14.0, 14.0),
-                "",
-            ));
-            item.addSubview(&tile);
+            let bg = if selected { kit::raised() } else { NSColor::clearColor() };
+            let item = shape_view(mtm, rect(10.0, 0.0, item_w, NAV_ITEM_H), &bg, 8.0);
+            let tint = if selected { kit::accent() } else { kit::text3() };
+            item.addSubview(&crate::ui::symbol_view(mtm, pane.symbol(), 13.0, &tint, rect(9.0, 7.0, 16.0, 16.0), ""));
             let (fg, weight) =
-                if selected { (NSColor::whiteColor(), Weight::Semibold) } else { (text_primary(), Weight::Regular) };
-            item.addSubview(&label(
-                mtm,
-                pane.title(),
-                &font(13.0, weight),
-                &fg,
-                rect(41.0, 7.0, SIDE_W - 16.0 - 52.0, 17.0),
-            ));
+                if selected { (kit::text(), Weight::Semibold) } else { (rgba(0.82, 0.82, 0.84, 1.0), Weight::Regular) };
+            item.addSubview(&label(mtm, pane.title(), &font(13.0, weight), &fg, rect(34.0, 6.5, item_w - 60.0, 17.0)));
+            if pane == Pane::Permissions && attention {
+                item.addSubview(&kit::dot(mtm, item_w - 18.0, 11.5, 7.0, &kit::amber()));
+            }
             let pc = self.pane.clone();
             let t = self.targets.add(mtm, move |_| {
                 pc.set(pane);
                 // Deferred: rebuilding now would free this button's own target.
                 dispatch2::DispatchQueue::main().exec_async(app::show_settings);
             });
-            let b = crate::ui::click_overlay(mtm, &t, rect(0.0, 0.0, SIDE_W - 16.0, NAV_ITEM_H), pane.title());
+            let b = crate::ui::click_overlay(mtm, &t, rect(0.0, 0.0, item_w, NAV_ITEM_H), pane.title());
             item.addSubview(&b);
             if selected {
                 // SAFETY: accessibility setter on NSView.
@@ -1229,293 +1073,315 @@ impl SettingsWindow {
         }
         side.addSubview(&search);
 
-        // Footer: provider health and the version.
-        side.addSubview(&shape_view(mtm, rect(14.0, SIDE_H - 46.0, SIDE_W - 28.0, 0.5), &hairline(), 0.0));
+        // Footer: whether every source is running, and the build.
         let (down, total) = app::with_controller(|c| {
             let snap = c.current_snapshot();
             (snap.providers.values().filter(|s| !s.is_healthy()).count(), snap.providers.len())
         })
         .unwrap_or((0, 0));
         let ok = down == 0 || total == 0;
-        let dot = if ok { rgba(0.188, 0.82, 0.345, 1.0) } else { rgba(1.0, 0.624, 0.039, 1.0) };
-        side.addSubview(&shape_view(mtm, rect(20.0, SIDE_H - 28.0, 7.0, 7.0), &dot, 3.5));
-        let status = if ok { "All providers running".to_owned() } else { format!("{down} need attention") };
-        side.addSubview(&label(
-            mtm,
-            &status,
-            &font(11.5, Weight::Regular),
-            &text_secondary(),
-            rect(34.0, SIDE_H - 32.0, SIDE_W - 34.0 - 14.0 - 76.0, 15.0),
-        ));
-        // Version plus the bundle's build number (the commit count bundle.sh
-        // stamps), so it is clear which build is running.
+        let fy = HEIGHT - 30.0;
+        side.addSubview(&kit::dot(mtm, 20.0, fy + 4.5, 7.0, &*if ok { kit::green() } else { kit::amber() }));
+        let status = if ok { "All sources running".to_owned() } else { format!("{down} need attention") };
+        side.addSubview(&label(mtm, &status, &font(12.0, Weight::Regular), &kit::text3(), rect(33.0, fy, 110.0, 16.0)));
         let build = objc2_foundation::NSBundle::mainBundle()
             .objectForInfoDictionaryKey(&ns("CFBundleVersion"))
             .and_then(|v| v.downcast::<objc2_foundation::NSString>().ok())
             .map(|v| v.to_string());
         let ver_text = match build {
-            Some(b) => format!("v{} ({b})", env!("CARGO_PKG_VERSION")),
-            None => concat!("v", env!("CARGO_PKG_VERSION")).to_owned(),
+            Some(b) => format!("{} ({b})", env!("CARGO_PKG_VERSION")),
+            None => env!("CARGO_PKG_VERSION").to_owned(),
         };
-        let ver = label(
-            mtm,
-            &ver_text,
-            &font(11.5, Weight::Regular),
-            &text_tertiary(),
-            rect(SIDE_W - 14.0 - 76.0, SIDE_H - 32.0, 76.0, 15.0),
-        );
+        let ver =
+            label(mtm, &ver_text, &font(12.0, Weight::Regular), &text4(), rect(SIDEBAR - 20.0 - 60.0, fy, 60.0, 16.0));
         ver.setAlignment(NSTextAlignment::Right);
         side.addSubview(&ver);
         Retained::into_super(side)
     }
 }
 
+/// A row button that re-opens Settings after `f`, so its state is fresh.
+fn and_refresh(f: impl Fn() + 'static) -> Box<dyn Fn()> {
+    Box::new(move || {
+        f();
+        app::show_settings_soon();
+    })
+}
+
 fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
     let prios: Vec<Priority> = PRIORITIES.iter().map(|p| p.1).collect();
     let prio_names: Vec<&str> = PRIORITIES.iter().map(|p| p.0).collect();
     match pane {
-        Pane::General => {
-            form.begin("");
-            let login_enabled = crate::login_item::is_enabled();
-            form.switch("Launch at login", None, login_enabled, |cfg, on| {
-                cfg.general.launch_at_login = on;
-                if let Err(e) = crate::login_item::set_enabled(on) {
-                    app::alert("Launch at login", &e);
-                }
-            });
-            form.switch("Show menu bar icon", None, c.general.show_menu_bar_icon, |cfg, on| {
-                cfg.general.show_menu_bar_icon = on
-            });
+        Pane::Island => {
+            form.section("Where it shows");
             let screens = [ScreenChoice::Notch, ScreenChoice::Main, ScreenChoice::Mouse];
             form.popup(
-                "Show on screen",
+                "Screen",
+                None,
                 &["Built-in (notch)", "Main display", "Display with pointer"],
                 index_of(&screens, &c.general.screen),
                 move |cfg, i| cfg.general.screen = screens[i],
             );
             form.switch(
-                "Hide in fullscreen apps",
-                Some("Get out of the way so the auto-revealed menu bar stays usable. A ringing call still shows."),
-                c.general.hide_in_fullscreen,
-                |cfg, on| cfg.general.hide_in_fullscreen = on,
-            );
-            form.switch(
-                "Show the island on every screen",
-                Some("A display-only copy of the collapsed island on each other screen — notch or floating pill"),
+                "Copy on other screens",
+                Some("A display-only island at the top of each other screen"),
                 c.general.island_on_all_screens,
                 |cfg, on| cfg.general.island_on_all_screens = on,
             );
-            form.slider("Hover delay", 0.0, 600.0, c.general.hover_delay_ms as f64, |cfg, v| {
-                cfg.general.hover_delay_ms = v.round() as u64
-            });
+            form.switch(
+                "Hide in fullscreen apps",
+                Some("So the menu bar stays usable. A ringing call still shows"),
+                c.general.hide_in_fullscreen,
+                |cfg, on| cfg.general.hide_in_fullscreen = on,
+            );
+
+            form.section("Opening");
+            form.slider(
+                "Open on hover after",
+                None,
+                (0.0, 600.0),
+                c.general.hover_delay_ms as f64,
+                |v| format!("{} ms", (v / 10.0).round() as u64 * 10),
+                |cfg, v| cfg.general.hover_delay_ms = (v / 10.0).round() as u64 * 10,
+            );
             let pl = prios.clone();
             form.popup(
-                "Peek for priority at least",
+                "Glance for",
+                Some("A notification below this waits quietly in Now"),
                 &prio_names,
                 index_of(&prios, &c.general.peek_min_priority),
                 move |cfg, i| cfg.general.peek_min_priority = pl[i],
             );
-            form.begin("Batteries");
-            form.switch("Mac battery", None, c.providers.battery, |cfg, on| cfg.providers.battery = on);
+
+            form.section("Shoulders");
             form.switch(
-                "Accessory batteries",
-                Some("AirPods, keyboards, mice and other connected devices"),
-                c.providers.bluetooth,
-                |cfg, on| cfg.providers.bluetooth = on,
-            );
-            form.switch(
-                "Calendar",
-                Some("Upcoming events from your connected calendar accounts on the Overview card"),
-                c.providers.calendar,
-                |cfg, on| cfg.providers.calendar = on,
-            );
-            form.begin("Media players");
-            form.switch(
-                "Spotify and Apple Music",
-                Some("Now playing, controls and playlists. Needs Automation."),
-                c.providers.media,
-                |cfg, on| cfg.providers.media = on,
-            );
-            form.begin("Advanced");
-            form.action_row(
-                "Configuration",
-                Some("Settings are stored in a TOML file you can edit by hand."),
-                None,
-                vec![
-                    ("Export…", false, Box::new(app::export_config)),
-                    ("Import…", false, Box::new(app::import_config)),
-                    ("Open Config File", false, Box::new(app::open_config_file)),
-                    ("Open Logs", false, Box::new(app::open_logs)),
-                    (
-                        "Reset…",
-                        false,
-                        Box::new(|| {
-                            app::send(Command::UpdateConfig(Box::default()));
-                            app::show_settings_soon();
-                        }),
-                    ),
-                ],
-                None,
-            );
-        }
-        Pane::Appearance => {
-            form.begin("");
-            let motions = [ReducedMotion::System, ReducedMotion::Always, ReducedMotion::Never];
-            form.popup(
-                "Reduce motion",
-                &["Follow system", "Always", "Never"],
-                index_of(&motions, &c.appearance.reduced_motion),
-                move |cfg, i| cfg.appearance.reduced_motion = motions[i],
-            );
-            form.slider("Animation speed", 0.5, 2.0, c.appearance.animation_speed, |cfg, v| {
-                cfg.appearance.animation_speed = v
-            });
-            form.switch(
-                "Live indicators beside the notch",
-                Some("Charging, unread count, tray files and Focus in the collapsed notch"),
+                "Live status beside the notch",
+                Some("A timer, charging, the playing song or a waiting agent"),
                 c.appearance.show_wings,
                 |cfg, on| cfg.appearance.show_wings = on,
             );
             form.switch(
-                "Avoid menu bar items",
-                Some("A wing with no room beside the notch is hidden rather than drawn over them"),
+                "Playing music in the shoulders",
+                Some("Cover art on the left, a level meter on the right"),
+                c.media.show_in_wings,
+                |cfg, on| cfg.media.show_in_wings = on,
+            );
+            form.switch(
+                "Stay clear of menu bar items",
+                Some("A shoulder with no room is hidden, not drawn over them"),
                 c.appearance.dodge_menu_bar,
                 |cfg, on| cfg.appearance.dodge_menu_bar = on,
             );
-            form.switch("High contrast text", None, c.appearance.high_contrast, |cfg, on| {
-                cfg.appearance.high_contrast = on
-            });
-            const ACCENTS: [&str; 5] = ["system", "sunset", "ocean", "violet", "forest"];
-            const ACCENT_NAMES: [&str; 5] = ["System", "Sunset", "Ocean", "Violet", "Forest"];
-            form.popup(
-                "Accent",
-                &ACCENT_NAMES,
-                ACCENTS.iter().position(|a| *a == c.appearance.accent).unwrap_or(0),
-                move |cfg, i| cfg.appearance.accent = ACCENTS[i].to_owned(),
-            );
-            form.text("Custom accent (hex)", &c.appearance.accent, "#5A8DFF", true, |cfg, v| {
-                if v.starts_with('#') {
-                    cfg.appearance.accent = v;
+
+            form.section("Startup");
+            form.switch("Open at login", None, crate::login_item::is_enabled(), |cfg, on| {
+                cfg.general.launch_at_login = on;
+                if let Err(e) = crate::login_item::set_enabled(on) {
+                    app::alert("Open at login", &e);
                 }
             });
-            form.note("A hex colour becomes the accent; empty presets win only when the field is not a hex value. The popup switches back to a preset.");
-            form.color_well("Pick an accent", &c.appearance.accent, |cfg, hex| cfg.appearance.accent = hex);
+            form.switch(
+                "Menu bar icon",
+                Some("Settings, pause and quit, and a small player"),
+                c.general.show_menu_bar_icon,
+                |cfg, on| cfg.general.show_menu_bar_icon = on,
+            );
         }
-        Pane::Notifications => {
-            form.begin("Behaviour");
+        Pane::Look => {
+            form.section("Colour");
+            form.accents(&c.appearance.accent);
+            form.switch(
+                "Higher contrast",
+                Some("Brighter secondary text and surfaces"),
+                c.appearance.high_contrast,
+                |cfg, on| cfg.appearance.high_contrast = on,
+            );
+            form.section("Motion");
+            let motions = [ReducedMotion::System, ReducedMotion::Always, ReducedMotion::Never];
+            form.popup(
+                "Reduce motion",
+                Some("Fade instead of spring when the island opens"),
+                &["Follow the Mac", "Always", "Never"],
+                index_of(&motions, &c.appearance.reduced_motion),
+                move |cfg, i| cfg.appearance.reduced_motion = motions[i],
+            );
+            form.slider(
+                "Animation speed",
+                None,
+                (0.5, 2.0),
+                c.appearance.animation_speed,
+                |v| format!("{:.1}×", (v * 10.0).round() / 10.0),
+                |cfg, v| cfg.appearance.animation_speed = (v * 10.0).round() / 10.0,
+            );
+        }
+        Pane::Now => {
+            form.section("Notifications");
+            form.switch(
+                "Show notifications from apps",
+                Some("Messages, mail and anything else in Notification Center"),
+                c.notifications.allow_other_apps,
+                |cfg, on| cfg.notifications.allow_other_apps = on,
+            );
             let pl = prios.clone();
             form.popup(
-                "While Focus is on, show at least",
+                "During Focus, show",
+                None,
                 &prio_names,
                 index_of(&prios, &c.notifications.focus_min_priority),
                 move |cfg, i| cfg.notifications.focus_min_priority = pl[i],
             );
-            form.switch("Show notifications from other apps", None, c.notifications.allow_other_apps, |cfg, on| {
-                cfg.notifications.allow_other_apps = on
-            });
-            form.switch(
-                "Close the native banner",
-                Some("Experimental. Uses Accessibility to dismiss a banner the notch already shows."),
-                c.notifications.suppress_native_banners,
-                |cfg, on| cfg.notifications.suppress_native_banners = on,
-            );
             form.switch(
                 "Quick reply",
-                Some("Answer messaging notifications (Discord, Messages, …) from the notch, through the app's own banner"),
+                Some("Answer Messages, Discord and others from the island"),
                 c.notifications.quick_reply,
                 |cfg, on| cfg.notifications.quick_reply = on,
             );
-            form.begin("Sources");
+            form.switch(
+                "Close the Mac's own banner",
+                Some("Experimental. When the island already shows it. Needs Accessibility"),
+                c.notifications.suppress_native_banners,
+                |cfg, on| cfg.notifications.suppress_native_banners = on,
+            );
+
+            form.section("Calls");
+            form.switch(
+                "Ring in the island",
+                Some("Calls from apps and browser tabs, with answer, decline and hang up"),
+                c.notifications.incoming_calls,
+                |cfg, on| cfg.notifications.incoming_calls = on,
+            );
+            form.action(
+                "Try it",
+                Some("Rings a sample call"),
+                None,
+                vec![("Test call", false, Box::new(|| app::send(Command::TestCall)))],
+                None,
+            );
+
+            form.section("Read from");
             form.switch(
                 "Notification Center",
-                Some("Reads delivered banners. Needs Full Disk Access."),
+                Some("Delivered notifications. Needs Full Disk Access"),
                 c.providers.notification_center,
                 |cfg, on| cfg.providers.notification_center = on,
             );
             form.switch(
-                "Banner reader fallback",
-                Some("Reads banners on screen. Needs Accessibility."),
+                "Banners on screen",
+                Some("A fallback that reads banners as they appear. Needs Accessibility"),
                 c.providers.accessibility_banners,
                 |cfg, on| cfg.providers.accessibility_banners = on,
             );
-            form.switch("Focus state", Some("Needs Full Disk Access."), c.providers.focus, |cfg, on| {
-                cfg.providers.focus = on
-            });
-            form.begin("Apps");
+            form.switch(
+                "Focus",
+                Some("Whether a Focus is on. Needs Full Disk Access"),
+                c.providers.focus,
+                |cfg, on| cfg.providers.focus = on,
+            );
+
+            form.section("Apps");
             for app_kind in KnownApp::ALL {
-                let key = app_kind.key();
-                let rule = c.notifications.apps.get(key).cloned().unwrap_or_default();
-                let k1 = key.to_owned();
+                let key = app_kind.key().to_owned();
+                let rule = c.notifications.apps.get(&key).cloned().unwrap_or_default();
                 form.switch(app_kind.display_name(), None, rule.enabled, move |cfg, on| {
-                    cfg.notifications.apps.entry(k1.clone()).or_default().enabled = on;
+                    cfg.notifications.apps.entry(key.clone()).or_default().enabled = on;
                 });
             }
-            form.note("Messaging apps are read from Notification Center. To avoid double banners, set an app's alert style to “None” in System Settings › Notifications; it still reaches the notch.");
+            form.note("To avoid seeing a message twice, set the app's alert style to None in System Settings › Notifications. It still reaches the island.");
+        }
+        Pane::Music => {
+            form.section("Players");
+            form.switch(
+                "Spotify and Apple Music",
+                Some("What's playing, controls and playlists"),
+                c.providers.media,
+                |cfg, on| cfg.providers.media = on,
+            );
+            let signed_in = app::spotify_signed_in() || preview();
+            form.action(
+                "Spotify",
+                Some(if preview() {
+                    "Signed in · 24 playlists"
+                } else if signed_in {
+                    "Your playlists show in Music"
+                } else {
+                    "Sign in to list your playlists. Playback works without it"
+                }),
+                Some(if signed_in { ("Signed in", Tone::Ok) } else { ("Not signed in", Tone::Neutral) }),
+                vec![if signed_in {
+                    (
+                        "Sign out",
+                        false,
+                        and_refresh(|| {
+                            crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyDisconnect)
+                        }),
+                    )
+                } else {
+                    (
+                        "Sign in…",
+                        true,
+                        Box::new(|| crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyConnect)),
+                    )
+                }],
+                Some(Mark::Spotify),
+            );
+            {
+                let snap = app::with_controller(|c| c.current_snapshot());
+                let installed = crate::media::is_installed(MediaPlayer::Music);
+                let running = snap.as_deref().is_some_and(|s| s.media.running.contains(&MediaPlayer::Music));
+                let automation = permissions::state(Permission::Automation);
+                let (word, tone, detail, buttons): (&str, Tone, &str, Vec<RowButton<'_>>) = if !installed {
+                    ("Not installed", Tone::Neutral, "The Music app isn't on this Mac", vec![])
+                } else if preview() || (running && automation == PermissionState::Granted) {
+                    ("Connected", Tone::Ok, "What's playing, controls and playlists", vec![])
+                } else if running && automation == PermissionState::Denied {
+                    (
+                        "Not allowed",
+                        Tone::Warn,
+                        "Automation for Music was turned off in System Settings",
+                        vec![("Open", true, Box::new(|| permissions::open_settings(Permission::Automation)))],
+                    )
+                } else {
+                    (
+                        "Not connected",
+                        Tone::Neutral,
+                        "Opens Music and asks the Mac to let the island control it",
+                        vec![("Connect", true, and_refresh(crate::media::connect_music))],
+                    )
+                };
+                form.action("Apple Music", Some(detail), Some((word, tone)), buttons, Some(Mark::Dot((250, 45, 72))));
+            }
+
+            form.section("More sound");
+            form.switch(
+                "Browser tabs",
+                Some("YouTube, SoundCloud and other tabs play as music. The Mac asks once per browser"),
+                c.media.browser_audio,
+                |cfg, on| cfg.media.browser_audio = on,
+            );
+            form.switch(
+                "Outputs and apps playing sound",
+                Some("Choose where sound goes from Music. No permission needed"),
+                c.providers.audio,
+                |cfg, on| cfg.providers.audio = on,
+            );
+            let polls = [5u64, 10, 30, 60];
+            form.popup(
+                "Check players every",
+                None,
+                &["5 seconds", "10 seconds", "30 seconds", "Minute"],
+                index_of(&polls, &c.media.poll_seconds),
+                move |cfg, i| cfg.media.poll_seconds = polls[i],
+            );
         }
         Pane::Agents => {
-            form.begin("Listening");
-            form.switch("Coding agents", Some("Webhook, Unix socket and inbox file"), c.providers.agents, |cfg, on| {
-                cfg.providers.agents = on
-            });
-            form.text_row(
-                "Webhook port",
-                Some("Loopback only"),
-                &c.agents.http_port.to_string(),
-                "47815",
-                true,
-                86.0,
-                false,
-                |cfg, v| {
-                    if let Ok(p) = v.parse::<u16>() {
-                        cfg.agents.http_port = p;
-                    }
-                },
-            );
-            form.text_row(
-                "Ask in the notch for",
-                Some("Seconds a tool request waits for Allow / Deny before the terminal asks. 0 turns it off"),
-                &c.agents.permission_wait_secs.to_string(),
-                "45",
-                true,
-                86.0,
-                false,
-                |cfg, v| {
-                    if let Ok(n) = v.trim().parse::<u64>() {
-                        cfg.agents.permission_wait_secs = n.min(570);
-                    }
-                },
-            );
-            form.text_row(
-                "Bearer token",
-                Some("Optional. Requests then need Authorization: Bearer"),
-                if preview() { "board-sample" } else { c.agents.token.as_deref().unwrap_or("") },
-                "Optional",
-                true,
-                190.0,
-                true,
-                |cfg, v| {
-                    cfg.agents.token = if v.is_empty() { None } else { Some(v) };
-                },
-            );
-            form.switch(
-                "Say when an agent session ends",
-                Some("Notices Claude Code, Codex, OpenCode, Cursor Agent, Gemini CLI and others finishing, with no setup"),
-                c.agents.watch_sessions,
-                |cfg, on| cfg.agents.watch_sessions = on,
-            );
-            form.switch(
-                "Show token usage",
-                Some("Reads token counts from Claude Code and Codex CLI logs on this Mac. Conversations are not kept or sent anywhere"),
-                c.agents.token_usage,
-                |cfg, on| cfg.agents.token_usage = on,
-            );
-            form.begin("Connect agents");
+            form.section("Connected agents");
             let env = connect::Env::current(c.agents.http_port, c.agents.token.clone());
             for def in connect::AGENTS {
-                let icon = match def.key {
-                    "claude" => ("sparkle", (217, 119, 87)),
-                    "chatgpt" => ("terminal.fill", (16, 163, 127)),
-                    _ => ("curlybraces", (170, 170, 178)),
+                let color = match def.key {
+                    "claude" => (217, 119, 87),
+                    "chatgpt" => (16, 163, 127),
+                    "gemini" => (66, 133, 244),
+                    _ => (142, 142, 147),
                 };
                 let (def, env) = (*def, env.clone());
                 let (word, tone, detail, button): (&str, Tone, String, RowButton<'_>) =
@@ -1523,364 +1389,309 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                         connect::Status::Connected => (
                             "Connected",
                             Tone::Ok,
-                            "Reports finished turns and requests for input.".to_owned(),
+                            "Reports finished turns and asks for input".to_owned(),
                             (
                                 "Disconnect",
                                 false,
-                                Box::new(move || {
+                                and_refresh(move || {
                                     if let Err(e) = connect::disconnect(&def, &env) {
                                         app::alert(&format!("Disconnect {}", def.name), &e);
                                     }
-                                    app::show_settings_soon();
                                 }),
                             ),
                         ),
                         connect::Status::NotConnected => (
-                            "Not connected",
+                            "",
                             Tone::Neutral,
                             def.detail.to_owned(),
                             (
                                 "Connect",
                                 true,
-                                Box::new(move || {
-                                    match connect::connect(&def, &env) {
-                                        Ok(note) => app::alert(&format!("{} connected", def.name), &note),
-                                        Err(e) => app::alert(&format!("Connect {}", def.name), &e),
-                                    }
-                                    app::show_settings_soon();
+                                and_refresh(move || match connect::connect(&def, &env) {
+                                    Ok(note) => app::alert(&format!("{} connected", def.name), &note),
+                                    Err(e) => app::alert(&format!("Connect {}", def.name), &e),
                                 }),
                             ),
                         ),
-                        connect::Status::Blocked(why) => (
-                            "Needs attention",
-                            Tone::Neutral,
-                            why,
-                            ("Check again", false, Box::new(app::show_settings_soon)),
-                        ),
+                        connect::Status::Blocked(why) => {
+                            ("Needs you", Tone::Warn, why, ("Check again", false, Box::new(app::show_settings_soon)))
+                        }
                     };
-                form.action_row(def.name, Some(&detail), Some((word, tone)), vec![button], Some(icon));
+                let status = (!word.is_empty()).then_some((word, tone));
+                form.action(def.name, Some(&detail), status, vec![button], Some(Mark::Dot(color)));
             }
-            {
-                let connected = app::claude_limits_connected();
-                let button: RowButton<'_> = if connected {
-                    (
-                        "Disconnect",
-                        false,
-                        Box::new(|| {
-                            app::disconnect_claude_limits();
-                            app::show_settings_soon();
-                        }),
-                    )
+            let connected = app::claude_limits_connected();
+            form.action(
+                "Claude Code limits",
+                Some("Reads them from its status line, which hides hints such as \u{201c}esc to interrupt\u{201d}"),
+                connected.then_some(("Connected", Tone::Ok)),
+                vec![if connected {
+                    ("Disconnect", false, and_refresh(app::disconnect_claude_limits))
                 } else {
-                    (
-                        "Connect",
-                        true,
-                        Box::new(|| {
-                            app::connect_claude_limits();
-                            app::show_settings_soon();
-                        }),
-                    )
-                };
-                form.action_row(
-                    "Claude Code limits",
-                    Some(
-                        "Uses its status line, which hides some footer hints such as \u{201c}esc to interrupt\u{201d}",
-                    ),
-                    Some(if connected { ("Connected", Tone::Ok) } else { ("Not connected", Tone::Neutral) }),
-                    vec![button],
-                    Some(("gauge.with.needle", (217, 119, 87))),
-                );
-            }
-            form.note("Connecting edits that agent's own configuration (a .notchforge.bak copy is kept) so it reports every finished turn here. It signs in to nothing: an agent is connected once it reports to the notch.");
-            form.begin("Approval");
+                    ("Connect", true, and_refresh(app::connect_claude_limits))
+                }],
+                Some(Mark::Symbol("gauge.with.needle")),
+            );
+            form.note("Connecting edits that agent's own settings (a .notchforge.bak copy is kept) so it reports here. It signs in to nothing.");
+
+            form.section("Asking");
+            form.field(
+                "Ask in the island for",
+                Some("Seconds before the terminal asks instead. 0 turns it off"),
+                &c.agents.permission_wait_secs.to_string(),
+                "45",
+                true,
+                64.0,
+                false,
+                |cfg, v| {
+                    if let Ok(n) = v.parse::<u64>() {
+                        cfg.agents.permission_wait_secs = n.min(570);
+                    }
+                },
+            );
             form.switch(
-                "Ask before a new agent shows notifications",
-                Some("The notch asks Allow or Deny the first time an agent sends something"),
+                "Approve new agents first",
+                Some("The island asks the first time an agent sends something"),
                 c.agents.require_approval,
                 |cfg, on| cfg.agents.require_approval = on,
             );
-            form.action_row(
-                "Remembered decisions",
+            form.action(
+                "Remembered answers",
                 Some("Forget every Allow and Deny so agents are asked again"),
                 None,
-                vec![(
-                    "Forget",
-                    false,
-                    Box::new(|| crate::app::send(notchforge_core::engine::Command::ForgetAgentDecisions)),
-                )],
+                vec![("Forget", false, Box::new(|| app::send(Command::ForgetAgentDecisions)))],
                 None,
             );
-            form.note(
-                "This is consent, not authentication: an agent is recognised by the source name it sends. Set a bearer token to keep other local processes from posting.",
+
+            form.section("Reporting");
+            form.switch(
+                "Say when a session ends",
+                Some("Claude Code, Codex, OpenCode, Cursor Agent, Gemini CLI and others, with no setup"),
+                c.agents.watch_sessions,
+                |cfg, on| cfg.agents.watch_sessions = on,
+            );
+            form.switch(
+                "Token usage",
+                Some("Counts from Claude Code and Codex logs on this Mac. Nothing is kept or sent"),
+                c.agents.token_usage,
+                |cfg, on| cfg.agents.token_usage = on,
+            );
+
+            form.section("Listening");
+            form.switch(
+                "Listen for agents",
+                Some("A local webhook, a Unix socket and an inbox file"),
+                c.providers.agents,
+                |cfg, on| cfg.providers.agents = on,
+            );
+            form.field(
+                "Port",
+                Some("This Mac only"),
+                &c.agents.http_port.to_string(),
+                "47815",
+                true,
+                80.0,
+                false,
+                |cfg, v| {
+                    if let Ok(p) = v.parse::<u16>() {
+                        cfg.agents.http_port = p;
+                    }
+                },
+            );
+            form.field(
+                "Bearer token",
+                Some("Optional. Keeps other programs on this Mac from posting"),
+                if preview() { "board-sample" } else { c.agents.token.as_deref().unwrap_or("") },
+                "None",
+                true,
+                170.0,
+                true,
+                |cfg, v| cfg.agents.token = (!v.is_empty()).then_some(v),
             );
             let port = c.agents.http_port;
             let cmd = format!(
                 "curl -s -X POST http://127.0.0.1:{port}/v1/notify -H 'Content-Type: application/json' -d '{{\"source\":\"claude\",\"kind\":\"task_finished\",\"title\":\"Tests passed\"}}'"
             );
-            let (blue, green) = (rgba(0.498, 0.69, 1.0, 1.0), rgba(0.482, 0.878, 0.627, 1.0));
+            let (blue, green) = (kit::accent(), rgba(0.482, 0.878, 0.627, 1.0));
             let l1 = format!(" -s -X POST http://127.0.0.1:{port}/v1/notify \\\n  -H ");
             let json = "'{\"source\":\"claude\",\"kind\":\"task_finished\",\"title\":\"Tests passed\"}'";
-            form.code_block(
+            form.code(
                 "Send a test event",
                 &[
                     ("curl", blue),
-                    (&l1, text_primary()),
+                    (&l1, kit::text()),
                     ("'Content-Type: application/json'", green.clone()),
-                    (" \\\n  -d ", text_primary()),
+                    (" \\\n  -d ", kit::text()),
                     (json, green),
                 ],
-                Box::new(move || {
-                    crate::sharing::copy_text(&cmd);
-                }),
+                Box::new(move || crate::sharing::copy_text(&cmd)),
             );
         }
-        Pane::Calls => {
-            form.begin("");
-            form.switch(
-                "Show incoming calls",
-                Some("Calls from apps and browser tabs ring in the notch, where you can answer, decline and hang up."),
-                c.notifications.incoming_calls,
-                |cfg, on| cfg.notifications.incoming_calls = on,
-            );
-            form.action_row(
-                "Try it",
-                Some("Rings a sample call in the notch"),
-                None,
-                vec![(
-                    "Test call",
-                    false,
-                    Box::new(|| {
-                        app::send(notchforge_core::engine::Command::TestCall);
-                    }),
-                )],
-                Some(("phone.fill", (36, 138, 61))),
-            );
-            form.begin("What calls need");
-            form.permission_as(
-                Permission::Accessibility,
-                "Accessibility",
-                "Finds the answer, decline and hang-up buttons in a call's window or tab.",
-                None,
-            );
-            form.permission_as(
-                Permission::FullDiskAccess,
-                "Full Disk Access",
-                "Reads call notifications from apps and from tabs in the background.",
-                None,
-            );
-        }
-        Pane::Weather => {
-            form.begin("");
+        Pane::Day => {
+            form.section("Weather");
             form.switch("Weather", None, c.providers.weather, |cfg, on| cfg.providers.weather = on);
-            form.text("Location", &c.weather.location, "auto, or a city", false, |cfg, v| {
-                cfg.weather.location = if v.is_empty() { "auto".into() } else { v };
-                cfg.weather.latitude = None;
-                cfg.weather.longitude = None;
-            });
+            form.field(
+                "Location",
+                Some("“auto” uses your approximate location"),
+                &c.weather.location,
+                "auto, or a city",
+                false,
+                170.0,
+                false,
+                |cfg, v| {
+                    cfg.weather.location = if v.is_empty() { "auto".into() } else { v };
+                    cfg.weather.latitude = None;
+                    cfg.weather.longitude = None;
+                },
+            );
             let units = [TemperatureUnit::Celsius, TemperatureUnit::Fahrenheit];
-            form.popup("Units", &["Celsius", "Fahrenheit"], index_of(&units, &c.weather.unit), move |cfg, i| {
+            form.popup("Units", None, &["Celsius", "Fahrenheit"], index_of(&units, &c.weather.unit), move |cfg, i| {
                 cfg.weather.unit = units[i]
             });
             let refresh = [10u64, 20, 30, 60];
             form.popup(
                 "Refresh every",
-                &["10 minutes", "20 minutes", "30 minutes", "60 minutes"],
+                None,
+                &["10 minutes", "20 minutes", "30 minutes", "Hour"],
                 index_of(&refresh, &c.weather.refresh_minutes),
                 move |cfg, i| cfg.weather.refresh_minutes = refresh[i],
             );
-            form.note("Forecasts come from Open-Meteo. “auto” uses your approximate location.");
+            form.note("Forecasts come from Open-Meteo.");
+
+            form.section("Calendar");
+            form.switch(
+                "Today's events",
+                Some("From the calendar accounts on this Mac"),
+                c.providers.calendar,
+                |cfg, on| cfg.providers.calendar = on,
+            );
+            form.switch(
+                "Focus during meetings",
+                Some("On 15 minutes before a meeting, off when it ends"),
+                c.controls.auto_focus_meetings,
+                |cfg, on| cfg.controls.auto_focus_meetings = on,
+            );
+
+            form.section("Batteries");
+            form.switch("This Mac", None, c.providers.battery, |cfg, on| cfg.providers.battery = on);
+            form.switch(
+                "Accessories",
+                Some("AirPods, keyboards, mice and other connected devices"),
+                c.providers.bluetooth,
+                |cfg, on| cfg.providers.bluetooth = on,
+            );
+
+            form.section("Focus");
+            const HOURS: [&str; 25] = [
+                "Off", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00",
+                "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00",
+                "21:00", "22:00", "23:00",
+            ];
+            let (from, to) = c.controls.focus_schedule.unwrap_or((0, 0));
+            let idx = |h: u8| if c.controls.focus_schedule.is_none() { 0 } else { h as usize + 1 };
+            form.popup("Every day from", None, &HOURS, idx(from), move |cfg, i| {
+                cfg.controls.focus_schedule = (i > 0).then(|| (i as u8 - 1, to));
+            });
+            form.popup("Until", None, &HOURS, idx(to), move |cfg, i| {
+                cfg.controls.focus_schedule = (i > 0).then(|| (from, i as u8 - 1));
+            });
+            form.field(
+                "Focus on shortcut",
+                None,
+                &c.controls.focus_on_shortcut,
+                "Shortcut name",
+                false,
+                170.0,
+                false,
+                |cfg, v| cfg.controls.focus_on_shortcut = v,
+            );
+            form.field(
+                "Focus off shortcut",
+                None,
+                &c.controls.focus_off_shortcut,
+                "Shortcut name",
+                false,
+                170.0,
+                false,
+                |cfg, v| cfg.controls.focus_off_shortcut = v,
+            );
+            form.note("Make these two in the Shortcuts app with the Set Focus action; the island runs them to turn Focus on and off.");
         }
-        Pane::Media => {
-            form.begin("Beside the notch");
+        Pane::Shelf => {
+            form.section("Fills itself with");
             form.switch(
-                "Now playing beside the notch",
-                Some("Cover on the left, an equaliser on the right"),
-                c.media.show_in_wings,
-                |cfg, on| cfg.media.show_in_wings = on,
-            );
-            form.switch(
-                "Audio outputs and apps playing sound",
-                Some("Reads CoreAudio. No permission needed."),
-                c.providers.audio,
-                |cfg, on| cfg.providers.audio = on,
-            );
-            form.switch(
-                "Browser audio as music",
-                Some("YouTube, SoundCloud and other tabs, titled from the playing tab. macOS asks once per browser."),
-                c.media.browser_audio,
-                |cfg, on| cfg.media.browser_audio = on,
-            );
-            let polls = [5u64, 10, 30, 60];
-            form.popup(
-                "Re-read players every",
-                &["5 seconds", "10 seconds", "30 seconds", "1 minute"],
-                index_of(&polls, &c.media.poll_seconds),
-                move |cfg, i| cfg.media.poll_seconds = polls[i],
-            );
-            form.begin("Spotify");
-            let signed_in = app::spotify_signed_in() || preview();
-            let (status, status_tone) =
-                if signed_in { ("Connected", Tone::Ok) } else { ("Not connected", Tone::Neutral) };
-            let button: RowButton<'_> = if signed_in {
-                (
-                    "Disconnect",
-                    false,
-                    Box::new(|| {
-                        crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyDisconnect);
-                        app::show_settings_soon();
-                    }),
-                )
-            } else {
-                (
-                    "Sign in…",
-                    true,
-                    Box::new(|| {
-                        crate::media::send(notchforge_core::provider::ProviderCommand::SpotifyConnect);
-                    }),
-                )
-            };
-            form.sub_ok.set(preview());
-            let made = form.action_row(
-                "Spotify account",
-                Some(if preview() {
-                    "Connected · 24 playlists"
-                } else if signed_in {
-                    "Your playlists appear in Now Playing."
-                } else {
-                    "Sign in to list your playlists."
-                }),
-                if preview() { None } else { Some((status, status_tone)) },
-                vec![button],
-                Some(("spotify", (30, 215, 96))),
-            );
-            let _ = &made;
-            form.sub_ok.set(false);
-            form.note("Sign-in only lists your playlists; play, pause and skip work without it.");
-            form.begin("Apple Music");
-            {
-                let snap = app::with_controller(|c| c.current_snapshot());
-                let installed = crate::media::is_installed(MediaPlayer::Music);
-                let running = snap.as_deref().is_some_and(|s| s.media.running.contains(&MediaPlayer::Music));
-                let automation = permissions::state(Permission::Automation);
-                let (word, tone, detail, buttons): (&str, Tone, &str, Vec<RowButton<'_>>) = if !installed {
-                    ("Not installed", Tone::Neutral, "The Music app was not found on this Mac.", vec![])
-                } else if running && automation == PermissionState::Granted {
-                    ("Connected", Tone::Ok, "Now playing, controls and playlists.", vec![])
-                } else if running && automation == PermissionState::Denied {
-                    (
-                        "Not allowed",
-                        Tone::Neutral,
-                        "Automation for Music was refused in System Settings.",
-                        vec![("Open Settings", true, Box::new(|| permissions::open_settings(Permission::Automation)))],
-                    )
-                } else {
-                    (
-                        "Not connected",
-                        Tone::Neutral,
-                        "Opens Music and asks macOS to let Notchisland read and control it.",
-                        vec![(
-                            "Connect",
-                            true,
-                            Box::new(|| {
-                                crate::media::connect_music();
-                                app::show_settings_soon();
-                            }),
-                        )],
-                    )
-                };
-                form.action_row(
-                    "Apple Music",
-                    Some(detail),
-                    Some((word, tone)),
-                    buttons,
-                    Some(("music.note", (250, 45, 72))),
-                );
-            }
-            form.begin("Permissions");
-            let forced =
-                |ok: bool| preview().then_some(if ok { PermissionState::Granted } else { PermissionState::Denied });
-            form.permission_as(
-                Permission::Automation,
-                "Automation · Spotify and Music",
-                "Read what's playing, control playback, list playlists",
-                forced(true),
-            );
-            form.permission_as(
-                Permission::Accessibility,
-                "Accessibility",
-                "Play and skip in other apps through the media keys",
-                forced(false),
-            );
-        }
-        Pane::Tray => {
-            form.begin("");
-            form.switch(
-                "Keep tray contents after quitting",
-                Some("Files are referenced, never copied."),
-                c.tray.persist,
-                |cfg, on| cfg.tray.persist = on,
-            );
-            form.switch(
-                "Downloads go to the tray",
-                Some("A finished download appears in the tray, ready to drag anywhere."),
+                "Downloads",
+                Some("A finished download lands on the shelf, ready to drag anywhere"),
                 c.tray.downloads,
                 |cfg, on| cfg.tray.downloads = on,
             );
             form.switch(
-                "Screenshots go to the tray",
-                Some("Every screenshot on the Desktop appears in the tray, ready to drag out."),
+                "Screenshots",
+                Some("Each new screenshot on the Desktop lands on the shelf"),
                 c.tray.screenshots,
                 |cfg, on| cfg.tray.screenshots = on,
             );
-        }
-        Pane::Controls => {
-            form.begin("Show");
-            form.switch("Brightness slider", None, c.controls.brightness, |cfg, on| cfg.controls.brightness = on);
-            form.switch("Volume slider", None, c.controls.volume, |cfg, on| cfg.controls.volume = on);
-            form.switch("Resolution switcher", None, c.controls.resolution, |cfg, on| cfg.controls.resolution = on);
+            form.section("Keeping");
             form.switch(
-                "Focus during meetings",
-                Some("Turns Focus on 15 minutes before a calendar meeting and off when it ends."),
-                c.controls.auto_focus_meetings,
-                |cfg, on| cfg.controls.auto_focus_meetings = on,
-            );
-            const HOURS: [&str; 25] = [
-                "off", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-                "17", "18", "19", "20", "21", "22", "23",
-            ];
-            let (from, to) = c.controls.focus_schedule.unwrap_or((0, 0));
-            let to_idx = |h: u8| if c.controls.focus_schedule.is_none() { 0 } else { h as usize + 1 };
-            let f0 = from;
-            let t0 = to;
-            form.popup("Focus from", &HOURS, to_idx(f0), {
-                let to = t0;
-                move |cfg, i| {
-                    cfg.controls.focus_schedule = if i == 0 { None } else { Some((i as u8 - 1, to)) };
-                }
-            });
-            form.popup("Focus until", &HOURS, to_idx(t0), {
-                let from = f0;
-                move |cfg, i| {
-                    cfg.controls.focus_schedule = if i == 0 { None } else { Some((from, i as u8 - 1)) };
-                }
-            });
-            form.begin("Focus");
-            form.text("“Focus on” shortcut", &c.controls.focus_on_shortcut, "Shortcut name", false, |cfg, v| {
-                cfg.controls.focus_on_shortcut = v
-            });
-            form.text("“Focus off” shortcut", &c.controls.focus_off_shortcut, "Shortcut name", false, |cfg, v| {
-                cfg.controls.focus_off_shortcut = v
-            });
-            form.note(
-                "Create these in the Shortcuts app with the “Set Focus” action. Notchisland runs them to toggle Focus.",
+                "Keep the shelf after quitting",
+                Some("Files are only referenced, never copied"),
+                c.tray.persist,
+                |cfg, on| cfg.tray.persist = on,
             );
         }
         Pane::Permissions => {
-            form.begin("");
+            form.section("");
             for p in Permission::ALL {
-                form.permission(p);
+                form.permission(p, p.title(), p.rationale(), None);
             }
-            form.note("Every permission is optional. Features that need one stay off until it is granted.");
+            form.note("Nothing here is required. A feature that needs a permission stays off until it is allowed.");
+        }
+        Pane::Advanced => {
+            form.section("Configuration");
+            form.action(
+                "Settings file",
+                Some("Everything here is stored in a TOML file you can edit by hand"),
+                None,
+                vec![("Open", false, Box::new(app::open_config_file))],
+                Some(Mark::Symbol("doc.text")),
+            );
+            form.action(
+                "Back up",
+                Some("Save your settings to a file, or load them from one"),
+                None,
+                vec![
+                    ("Import…", false, Box::new(app::import_config)),
+                    ("Export…", false, Box::new(app::export_config)),
+                ],
+                Some(Mark::Symbol("arrow.up.arrow.down")),
+            );
+            form.section("Trouble");
+            form.action(
+                "Logs",
+                Some("What the island has been doing, for a bug report"),
+                None,
+                vec![("Open", false, Box::new(app::open_logs))],
+                Some(Mark::Symbol("list.bullet.rectangle")),
+            );
+            form.action(
+                "Reset all settings",
+                Some("Back to how the island came. Connected agents stay connected"),
+                None,
+                vec![(
+                    "Reset…",
+                    false,
+                    and_refresh(|| {
+                        if app::confirm(
+                            "Reset all settings?",
+                            "Every setting goes back to how the island came. This can't be undone.",
+                            "Reset",
+                        ) {
+                            app::send(Command::UpdateConfig(Box::default()));
+                        }
+                    }),
+                )],
+                Some(Mark::Symbol("arrow.counterclockwise")),
+            );
         }
     }
 }

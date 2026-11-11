@@ -456,8 +456,11 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             // window takes the pointer only over its shape.)
             let at = notchforge_core::geometry::Point { x: center.x, y: center.y };
             let (st, ignores, anim) =
-                with_controller(|c| (c.machine_state(), !c.accepts_click_at(at), c.last_animation()))
-                    .unwrap_or((State::Collapsed, true, AnimStats::default()));
+                with_controller(|c| (c.machine_state(), !c.accepts_click_at(at), c.last_animation())).unwrap_or((
+                    State::Collapsed,
+                    true,
+                    AnimStats::default(),
+                ));
             // The real pointer moved away (someone is using the Mac): hover
             // again and check on the next tick, once.
             if st != State::Hover && !ctx.retried.replace(true) {
@@ -605,7 +608,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
         13 => {
             crate::settings::set_preview(true);
             crate::settings::set_solid_ground(true);
-            app::show_settings_pane(crate::settings::Pane::Media)
+            app::show_settings_pane(crate::settings::Pane::Music)
         }
         14 => {
             let visible = app::settings_visible();
@@ -614,14 +617,13 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             for (name, pane) in [
                 ("05-settings", None),
                 ("05b-settings-agents", Some(crate::settings::Pane::Agents)),
-                ("05c-settings-general", Some(crate::settings::Pane::General)),
+                ("05c-settings-island", Some(crate::settings::Pane::Island)),
                 ("05d-settings-permissions", Some(crate::settings::Pane::Permissions)),
-                ("05j-settings-calls", Some(crate::settings::Pane::Calls)),
-                ("05e-settings-appearance", Some(crate::settings::Pane::Appearance)),
-                ("05f-settings-notifications", Some(crate::settings::Pane::Notifications)),
-                ("05g-settings-weather", Some(crate::settings::Pane::Weather)),
-                ("05h-settings-tray", Some(crate::settings::Pane::Tray)),
-                ("05i-settings-controls", Some(crate::settings::Pane::Controls)),
+                ("05e-settings-look", Some(crate::settings::Pane::Look)),
+                ("05f-settings-now", Some(crate::settings::Pane::Now)),
+                ("05g-settings-day", Some(crate::settings::Pane::Day)),
+                ("05h-settings-shelf", Some(crate::settings::Pane::Shelf)),
+                ("05i-settings-advanced", Some(crate::settings::Pane::Advanced)),
             ] {
                 if let Some(p) = pane {
                     app::show_settings_pane(p);
@@ -632,19 +634,6 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 }
             }
             crate::settings::set_preview(false);
-            // The other panes the design boards cover, then close.
-            for (pane, name) in [
-                (crate::settings::Pane::Agents, "05b-settings-agents"),
-                (crate::settings::Pane::General, "05c-settings-general"),
-                (crate::settings::Pane::Permissions, "05d-settings-permissions"),
-            ] {
-                crate::settings::set_preview(pane == crate::settings::Pane::Agents);
-                app::show_settings_pane(pane);
-                match app::settings_content_view().as_deref().and_then(png_from_view) {
-                    Some(png) => emit_png(ctx, name, png),
-                    None => tracing::warn!(name, "could not render the Settings pane"),
-                }
-            }
             crate::settings::set_solid_ground(false);
             app::close_settings();
         }
