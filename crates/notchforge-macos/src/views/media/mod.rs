@@ -31,17 +31,16 @@ use crate::ui::{
 };
 use notchforge_core::engine::Snapshot;
 use notchforge_core::model::{
-    AudioState, MediaAction, MediaPlayer, MediaState, NowPlaying, PlaybackState, Playlist, PlaylistStatus,
-    UpNextVideo,
+    AudioState, MediaAction, MediaPlayer, MediaState, NowPlaying, PlaybackState, Playlist, PlaylistStatus, UpNextVideo,
 };
 use notchforge_core::provider::ProviderCommand;
 use notchforge_core::time::now_ms;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSSlider, 
-    NSButton, NSImageScaling, NSImageView, NSMenu, NSMenuItem, NSScrollView, NSScrollerStyle, NSTextAlignment,
-    NSTextField, NSView,
+use objc2_app_kit::{
+    NSButton, NSImageScaling, NSImageView, NSMenu, NSMenuItem, NSScrollView, NSScrollerStyle, NSSlider,
+    NSTextAlignment, NSTextField, NSView,
 };
 use objc2_foundation::{NSPoint, NSString};
 use std::cell::{Cell, RefCell};
@@ -559,7 +558,15 @@ impl MediaPage {
         let t = targets.add(mtm, move |_| {
             glue::send(ProviderCommand::SpotifyLike);
         });
-        let like = symbol_button(mtm, "heart", 13.0, "Save to your Spotify library", &p.primary, &t, rect(rw - PAD - 30.0, bar_y - 4.0, 28.0, 28.0));
+        let like = symbol_button(
+            mtm,
+            "heart",
+            13.0,
+            "Save to your Spotify library",
+            &p.primary,
+            &t,
+            rect(rw - PAD - 30.0, bar_y - 4.0, 28.0, 28.0),
+        );
         make_card(&like, &white(0.16), 14.0);
         like.setHidden(true);
         player.addSubview(&like);
@@ -756,15 +763,15 @@ impl MediaPage {
         let search_target = crate::ui::ActionTarget::new(mtm, |_| {
             crate::app::with_controller(|c| c.media_do_search());
         });
-        let search_field = NSTextField::initWithFrame(NSTextField::alloc(mtm), rect(10.0, 40.0, rw - 20.0 - 34.0, 24.0));
+        let search_field =
+            NSTextField::initWithFrame(NSTextField::alloc(mtm), rect(10.0, 40.0, rw - 20.0 - 34.0, 24.0));
         // SAFETY: target kept alive by the caller (Targets).
         unsafe {
             search_field.setTarget(Some(search_target.as_any()));
             search_field.setAction(Some(crate::ui::ActionTarget::action()));
         }
-        search_field.setPlaceholderString(Some(&objc2_foundation::NSString::from_str(
-            "Search YouTube — Enter plays it here",
-        )));
+        search_field
+            .setPlaceholderString(Some(&objc2_foundation::NSString::from_str("Search YouTube — Enter plays it here")));
         search_field.setHidden(true);
         seg_track.addSubview(&seg_spotify);
         seg_track.addSubview(&seg_music);
@@ -1190,7 +1197,12 @@ impl MediaPage {
         self.state.borrow_mut().inputs =
             audio.inputs.iter().map(|d| (d.uid.clone(), d.name.clone(), d.is_default)).collect();
         let mic = audio.inputs.iter().find(|d| d.is_default);
-        set_button_symbol(&self.input_button, "mic.fill", 14.0, &format!("Microphone: {}", mic.map_or("None", |d| d.name.as_str())));
+        set_button_symbol(
+            &self.input_button,
+            "mic.fill",
+            14.0,
+            &format!("Microphone: {}", mic.map_or("None", |d| d.name.as_str())),
+        );
         self.input_button.setEnabled(!audio.inputs.is_empty());
         let name = audio.default_device().map_or("No output", |d| d.name.as_str());
         let symbol = audio.default_device().map_or("airplayaudio", |d| d.symbol());
@@ -1285,12 +1297,8 @@ impl MediaPage {
             match mapped {
                 Some(player) if !is_featured => {
                     let t = self.source_targets.add(self.mtm, move |_| glue::pin_source(player));
-                    let overlay = click_overlay(
-                        self.mtm,
-                        &t,
-                        rect(x, 0.0, 22.0 + tw, 24.0),
-                        &format!("Control {}", s.name),
-                    );
+                    let overlay =
+                        click_overlay(self.mtm, &t, rect(x, 0.0, 22.0 + tw, 24.0), &format!("Control {}", s.name));
                     // Spotify and Music answer their own volume: right-click
                     // offers a slider. Other apps have no public per-app
                     // volume on macOS, so nothing appears for them.
@@ -1312,7 +1320,13 @@ impl MediaPage {
                         slider.setMaxValue(100.0);
                         slider.setFrame(rect(0.0, 6.0, 200.0, 18.0));
                         let label_text = format!("{} volume", s.name);
-                        let lbl = label(self.mtm, &label_text, &font(11.0, Weight::Regular), &rgba(1.0, 1.0, 1.0, 0.84), rect(0.0, 26.0, 200.0, 14.0));
+                        let lbl = label(
+                            self.mtm,
+                            &label_text,
+                            &font(11.0, Weight::Regular),
+                            &rgba(1.0, 1.0, 1.0, 0.84),
+                            rect(0.0, 26.0, 200.0, 14.0),
+                        );
                         let holder = FlippedView::new(self.mtm, rect(0.0, 0.0, 220.0, 44.0));
                         holder.addSubview(&lbl);
                         holder.addSubview(&slider);
@@ -1392,7 +1406,11 @@ fn input_menu(anchor: &NSButton, devices: &[(String, String, bool)]) {
         }
         menu.addItem(&item);
     }
-    menu.popUpMenuPositioningItem_atLocation_inView(None, NSPoint::new(0.0, anchor.frame().size.height + 4.0), Some(anchor));
+    menu.popUpMenuPositioningItem_atLocation_inView(
+        None,
+        NSPoint::new(0.0, anchor.frame().size.height + 4.0),
+        Some(anchor),
+    );
 }
 
 fn output_menu(anchor: &NSButton, devices: &[(String, String, String, bool)]) {

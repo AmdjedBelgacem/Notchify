@@ -20,8 +20,6 @@ pub mod ffi;
 pub mod glass;
 #[cfg(target_os = "macos")]
 pub mod hotkey;
-pub mod screenshots;
-pub mod vision;
 #[cfg(target_os = "macos")]
 pub mod icons;
 #[cfg(target_os = "macos")]
@@ -47,6 +45,7 @@ pub mod permissions;
 pub mod private_api;
 #[cfg(target_os = "macos")]
 pub mod screen;
+pub mod screenshots;
 #[cfg(target_os = "macos")]
 pub mod selftest;
 #[cfg(target_os = "macos")]
@@ -60,5 +59,6 @@ pub mod ui;
 pub mod url_scheme;
 #[cfg(target_os = "macos")]
 pub mod views;
+pub mod vision;
 #[cfg(target_os = "macos")]
 pub mod windows;

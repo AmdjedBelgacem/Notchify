@@ -13,7 +13,14 @@ const XATTR_SCREENSHOT: &[u8] = b"com.apple.metadata:kMDItemIsScreenShot";
 
 #[link(name = "c")]
 unsafe extern "C" {
-    fn getxattr(path: *const std::ffi::c_char, name: *const std::ffi::c_char, value: *mut u8, size: usize, position: u32, options: i32) -> isize;
+    fn getxattr(
+        path: *const std::ffi::c_char,
+        name: *const std::ffi::c_char,
+        value: *mut u8,
+        size: usize,
+        position: u32,
+        options: i32,
+    ) -> isize;
 }
 
 /// Does this file carry the screenshot mark?

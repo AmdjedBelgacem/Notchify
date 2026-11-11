@@ -65,6 +65,8 @@ pub struct CallView {
     clock: std::cell::RefCell<Option<Retained<objc2_app_kit::NSTextField>>>,
     /// Keeps the Hide button's action alive.
     _fixed: Targets,
+    /// Hide until it stops ringing: in the footer, below the calls.
+    hide: Retained<objc2_app_kit::NSButton>,
 }
 
 impl CallView {
@@ -85,7 +87,7 @@ impl CallView {
             "Hide until it stops ringing",
             &p.primary,
             &t,
-            rect(s.width - 14.0 - 26.0, ((nh - 24.0) / 2.0).max(2.0), 26.0, 24.0),
+            rect(s.width - 18.0 - 26.0, nh + 84.0, 26.0, 24.0),
         );
         make_card(&hide, &rgba(1.0, 1.0, 1.0, 0.14), 12.0);
         root.addSubview(&hide);
@@ -98,6 +100,7 @@ impl CallView {
             content,
             clock: Default::default(),
             _fixed: fixed,
+            hide: hide.clone(),
         }
     }
 
@@ -206,7 +209,17 @@ impl CallView {
         }
     }
 
+    /// Top of the footer row for `count` ringing calls: below the call on
+    /// top and the waiting rows, matching the island's height.
+    fn footer_y(&self, count: usize) -> f64 {
+        let waiting = count.clamp(1, MAX_VISIBLE_CALLS) - 1;
+        let rows = if waiting > 0 { waiting as f64 * CALL_ROW_STEP + 6.0 } else { 0.0 };
+        self.nh + 84.0 + rows
+    }
+
     pub fn update(&self, calls: &[Call], animate: bool) {
+        let w = self.root.frame().size.width;
+        self.hide.setFrame(rect(w - 18.0 - 26.0, self.footer_y(calls.len()), 26.0, 24.0));
         self.targets.clear();
         *self.clock.borrow_mut() = None;
         remove_all_subviews(&self.content);
@@ -220,7 +233,7 @@ impl CallView {
                 &format!("+{} more ringing", calls.len() - MAX_VISIBLE_CALLS),
                 &font(12.0, Weight::Semibold),
                 &p.primary,
-                rect(16.0, ((self.nh - 16.0) / 2.0).max(4.0), 140.0, 16.0),
+                rect(20.0, self.footer_y(calls.len()) + 4.0, 160.0, 16.0),
             );
             self.content.addSubview(&more);
         }

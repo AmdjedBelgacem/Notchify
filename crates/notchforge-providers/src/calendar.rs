@@ -12,8 +12,8 @@ use notchforge_core::model::{CalendarEvent, PermissionState, ReminderItem};
 use notchforge_core::model::{CalendarState, ProviderStatus};
 #[cfg(target_os = "macos")]
 use notchforge_core::provider::Wake;
-use notchforge_core::provider::{ProviderCommand, 
-    BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent,
+use notchforge_core::provider::{
+    BoxFuture, Provider, ProviderCommand, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent,
 };
 #[cfg(target_os = "macos")]
 use std::time::Duration;

@@ -1393,17 +1393,11 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 ACCENTS.iter().position(|a| *a == c.appearance.accent).unwrap_or(0),
                 move |cfg, i| cfg.appearance.accent = ACCENTS[i].to_owned(),
             );
-            form.text(
-                "Custom accent (hex)",
-                &c.appearance.accent,
-                "#5A8DFF",
-                true,
-                |cfg, v| {
-                    if v.starts_with('#') {
-                        cfg.appearance.accent = v;
-                    }
-                },
-            );
+            form.text("Custom accent (hex)", &c.appearance.accent, "#5A8DFF", true, |cfg, v| {
+                if v.starts_with('#') {
+                    cfg.appearance.accent = v;
+                }
+            });
             form.note("A hex colour becomes the accent; empty presets win only when the field is not a hex value. The popup switches back to a preset.");
             form.color_well("Pick an accent", &c.appearance.accent, |cfg, hex| cfg.appearance.accent = hex);
         }
@@ -1858,28 +1852,18 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             let to_idx = |h: u8| if c.controls.focus_schedule.is_none() { 0 } else { h as usize + 1 };
             let f0 = from;
             let t0 = to;
-            form.popup(
-                "Focus from",
-                &HOURS,
-                to_idx(f0),
-                {
-                    let to = t0;
-                    move |cfg, i| {
-                        cfg.controls.focus_schedule = if i == 0 { None } else { Some((i as u8 - 1, to)) };
-                    }
-                },
-            );
-            form.popup(
-                "Focus until",
-                &HOURS,
-                to_idx(t0),
-                {
-                    let from = f0;
-                    move |cfg, i| {
-                        cfg.controls.focus_schedule = if i == 0 { None } else { Some((from, i as u8 - 1)) };
-                    }
-                },
-            );
+            form.popup("Focus from", &HOURS, to_idx(f0), {
+                let to = t0;
+                move |cfg, i| {
+                    cfg.controls.focus_schedule = if i == 0 { None } else { Some((i as u8 - 1, to)) };
+                }
+            });
+            form.popup("Focus until", &HOURS, to_idx(t0), {
+                let from = f0;
+                move |cfg, i| {
+                    cfg.controls.focus_schedule = if i == 0 { None } else { Some((from, i as u8 - 1)) };
+                }
+            });
             form.begin("Focus");
             form.text("“Focus on” shortcut", &c.controls.focus_on_shortcut, "Shortcut name", false, |cfg, v| {
                 cfg.controls.focus_on_shortcut = v

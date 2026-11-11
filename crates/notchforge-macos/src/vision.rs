@@ -9,8 +9,8 @@
 use std::ffi::c_void;
 use std::sync::OnceLock;
 
-use objc2::runtime::{AnyClass, AnyObject, Bool};
 use objc2::msg_send;
+use objc2::runtime::{AnyClass, AnyObject, Bool};
 
 static VISION: OnceLock<bool> = OnceLock::new();
 
@@ -24,8 +24,7 @@ fn vision_available() -> bool {
     *VISION.get_or_init(|| {
         // SAFETY: a system framework with a stable path; loading twice is a
         // no-op.
-        const VISION_FRAMEWORK: &std::ffi::CStr =
-            c"/System/Library/Frameworks/Vision.framework/Vision";
+        const VISION_FRAMEWORK: &std::ffi::CStr = c"/System/Library/Frameworks/Vision.framework/Vision";
         let handle = unsafe { libc::dlopen(VISION_FRAMEWORK.as_ptr().cast(), libc::RTLD_LAZY) };
         !handle.is_null() && cls("VNRecognizeTextRequest").is_some()
     })

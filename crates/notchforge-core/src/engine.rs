@@ -14,10 +14,9 @@ use crate::calls::{
 use crate::config::{Config, Paths};
 use crate::model::{
     AUTH_THREAD_AGENT, AUTH_THREAD_PERMISSION, AUTH_THREAD_SPOTIFY, AgentActive, AgentLimits, AgentUsage, AudioState,
-    BatteryStatus,
-    CalendarState, DeviceBattery, FocusState, MediaPlayer, MediaState, NewNotification, Notification, NotificationId,
-    NotificationKind, Origin, PlaylistStatus, Priority, ProviderStatus, TimerState, TrayItem, TrayItemId, UsageAgent,
-    Weather,
+    BatteryStatus, CalendarState, DeviceBattery, FocusState, MediaPlayer, MediaState, NewNotification, Notification,
+    NotificationId, NotificationKind, Origin, PlaylistStatus, Priority, ProviderStatus, TimerState, TrayItem,
+    TrayItemId, UsageAgent, Weather,
 };
 use crate::pipeline::{Outcome, Pipeline, PipelineFlags};
 use crate::provider::{ProviderCommand, ProviderEvent, Shutdown};
@@ -114,7 +113,10 @@ pub enum Command {
         label: String,
     },
     /// A pomodoro cycle: focus and break lengths that roll into each other.
-    StartPomodoro { work_ms: i64, break_ms: i64 },
+    StartPomodoro {
+        work_ms: i64,
+        break_ms: i64,
+    },
     /// Cancel the running timer.
     CancelTimer,
 }
@@ -327,10 +329,8 @@ impl Engine {
                 .as_ref()
                 .filter(|t| !t.expired)
                 .map(|t| std::time::Duration::from_millis((t.ends_at_ms - now_ms()).max(50) as u64));
-            let snooze_end = self
-                .snoozed
-                .first()
-                .map(|(due, _)| std::time::Duration::from_millis((due - now_ms()).max(50) as u64));
+            let snooze_end =
+                self.snoozed.first().map(|(due, _)| std::time::Duration::from_millis((due - now_ms()).max(50) as u64));
             tokio::select! {
                 biased;
                 _ = shutdown.wait() => break,
@@ -667,7 +667,8 @@ impl Engine {
                     return false;
                 }
                 let cfg = self.config();
-                let flags = PipelineFlags { paused: self.state.paused, focus_active: self.state.focus.active == Some(true) };
+                let flags =
+                    PipelineFlags { paused: self.state.paused, focus_active: self.state.focus.active == Some(true) };
                 for (_, n) in std::mem::take(&mut self.cleared) {
                     self.state.pipeline.ingest(n, &cfg.notifications, flags, now_ms());
                 }
@@ -1138,10 +1139,7 @@ impl Engine {
         if n.thread.as_deref() == Some("notchforge-remind") {
             let due_ms = n.body.parse::<i64>().ok();
             tracing::info!(title = %n.title, due_ms = ?due_ms, "reminder requested from the CLI");
-            let _ = self.provider_commands.send(ProviderCommand::AddReminder {
-                title: n.title.clone(),
-                due_ms,
-            });
+            let _ = self.provider_commands.send(ProviderCommand::AddReminder { title: n.title.clone(), due_ms });
             return false;
         }
         // Token usage reported along with an event is telemetry, not a message

@@ -107,6 +107,8 @@ pub struct Controller {
     /// Concave flares either side of the island's top edge (left, right).
     ears: [Retained<objc2_quartz_core::CAShapeLayer>; 2],
     ear_radius: Cell<f64>,
+    /// The island's outline: a narrow neck through the menu bar, the body below.
+    island_mask: Retained<objc2_quartz_core::CAShapeLayer>,
     /// Black at the notch, Liquid Glass at the ends.
     glass: crate::glass::Glass,
     /// Height the current or last opening travels above the notch.
@@ -243,6 +245,8 @@ impl Controller {
             l
         });
 
+        let island_mask = objc2_quartz_core::CAShapeLayer::layer();
+        island_mask.setFillColor(Some(&objc2_app_kit::NSColor::blackColor().CGColor()));
         let glass = crate::glass::Glass::install(mtm, &island, notch.height);
         if let Some(l) = root.layer() {
             crate::glass::smooth_edges(&l);
@@ -254,7 +258,10 @@ impl Controller {
         }
         let panel = NotchPanel::create(mtm, frame, &root);
         let shape = layout.shape(LayoutKind::Collapsed);
-        let palette = Palette::for_theme(config.appearance.high_contrast || system_increase_contrast(), &config.appearance.accent);
+        let palette = Palette::for_theme(
+            config.appearance.high_contrast || system_increase_contrast(),
+            &config.appearance.accent,
+        );
 
         let this = Rc::new(Self {
             mtm,
@@ -263,6 +270,7 @@ impl Controller {
             island,
             ears,
             ear_radius: Cell::new(0.0),
+            island_mask,
             glass,
             glass_span: Cell::new(0.0),
             calls_showing: Cell::new(false),
@@ -397,7 +405,14 @@ impl Controller {
     // ── state machine plumbing ───────────────────────────────────────────
 
     pub fn handle(&self, event: Event) {
+        let was = self.machine.borrow().state();
         let effects = self.machine.borrow_mut().handle(event);
+        // Hovering opens the panel on Now: whatever matters most right now.
+        if self.machine.borrow().state() == State::Hover
+            && matches!(was, State::Collapsed | State::Arming | State::Peek)
+        {
+            self.views.borrow().expanded.show_tab(crate::views::expanded::Tab::Overview);
+        }
         for e in effects {
             self.apply_effect(e);
         }
@@ -471,11 +486,37 @@ impl Controller {
             && self.views.borrow().collapsed.media_showing()
     }
 
-    /// The panel ignores mouse events unless the machine opened it, calls are
-    /// showing, or the collapsed media wings are clickable.
+    /// The panel takes the pointer only while the machine opened it (or calls
+    /// are showing) *and* the pointer is over the island's visible shape.
+    /// Everywhere else — the window's margins, the bigger frame while it
+    /// animates, the menu bar beside the notch, and the whole collapsed island
+    /// with its wings — clicks go straight to the app underneath, so nothing
+    /// has to be replayed and no menu bar item is ever covered.
     fn update_interactive(&self) {
-        let on = self.wanted_interactive.get() || self.calls_showing.get() || self.media_wing_clickable();
-        self.panel.setIgnoresMouseEvents(!on);
+        let wanted = self.wanted_interactive.get() || self.calls_showing.get();
+        let m = NSEvent::mouseLocation();
+        let on = wanted && self.takes_pointer_at(Point { x: m.x, y: m.y });
+        if self.panel.ignoresMouseEvents() == on {
+            self.panel.setIgnoresMouseEvents(!on);
+        }
+    }
+
+    /// Would a click at `p` (global) land on the island right now?
+    pub fn accepts_click_at(&self, p: Point) -> bool {
+        (self.wanted_interactive.get() || self.calls_showing.get()) && self.takes_pointer_at(p)
+    }
+
+    /// Is `p` on the part of the island that owns the pointer? A file drag
+    /// keeps the whole window as its drop target.
+    fn takes_pointer_at(&self, p: Point) -> bool {
+        if matches!(self.machine.borrow().state(), State::DropTarget { .. }) {
+            return true;
+        }
+        let island = {
+            let s = *self.spring.borrow();
+            self.layout.borrow().island_global(s.width.value, s.height.value)
+        };
+        island.contains_inclusive(p) && !self.passes_through(p, island)
     }
 
     /// The playing audio was clicked in a collapsed wing: toggle it. What the
@@ -805,10 +846,8 @@ impl Controller {
         }
         self.show_container(kind);
         let notch_h = self.layout.borrow().notch.rect.height;
-        if shape.height > notch_h + 1.0 {
-            self.glass_span.set(shape.height - notch_h);
-            self.glass.set_open_panel(kind == LayoutKind::Expanded, self.high_contrast());
-        }
+        // The island stays true black at every size (no glass), like the notch.
+        let _ = notch_h;
         {
             let mut s = self.spring.borrow_mut();
             s.animate_to(shape.width, shape.height, shape.corner_radius, speed);
@@ -887,12 +926,29 @@ impl Controller {
         // the window clips its rounded top corners away and the island merges
         // with the bezel. The floating capsule stays whole: every corner is
         // rounded, nothing touches the screen's top edge.
-        let overhang = if floating { 0.0 } else { radius.ceil() };
+        let overhang = 0.0;
         self.island.setFrame(rect(g.x - win.origin.x, g.y - win.origin.y, w, h + overhang));
+        let notch = self.layout.borrow().notch.rect;
+        let notch_h = notch.height;
+        // Taller than the notch: only a notch-wide neck crosses the menu bar.
+        // The floating capsule's neck keeps its rounded top.
+        let top_r = if floating { notch_h / 2.0 } else { 0.0 };
+        let neck = (h > notch_h + 1.0 && w > notch.width + 1.0).then_some((notch.width, notch_h, top_r));
         if let Some(layer) = self.island.layer() {
-            layer.setCornerRadius(radius);
+            if floating && neck.is_none() {
+                layer.setCornerRadius(radius);
+                // SAFETY: clearing the mask.
+                unsafe { layer.setMask(None) };
+            } else {
+                layer.setCornerRadius(0.0);
+                crate::ui::without_animation(|| {
+                    self.island_mask.setFrame(rect(0.0, 0.0, w, h));
+                    self.island_mask.setPath(Some(&crate::ui::island_outline(w, h, radius, neck)));
+                });
+                // SAFETY: the shape layer is ours and outlives the island's use of it.
+                unsafe { layer.setMask(Some(&self.island_mask)) };
+            }
         }
-        let notch_h = self.layout.borrow().notch.rect.height;
         let t = notchforge_core::geometry::glass_progress(h, notch_h, self.glass_span.get());
         self.glass.apply(w, h, overhang, radius, t);
         if floating {
@@ -902,7 +958,11 @@ impl Controller {
                 self.ears[1].setHidden(true);
             });
         } else {
-            self.place_ears(g.x - win.origin.x, w, win.size.height, radius);
+            match neck {
+                // The bezel flares hug the neck, as on the real notch.
+                Some((nw, _, _)) => self.place_ears(g.x - win.origin.x + (w - nw) / 2.0, nw, win.size.height, 12.0),
+                None => self.place_ears(g.x - win.origin.x, w, win.size.height, radius),
+            }
         }
         let views = self.views.borrow();
         let c = views.container(self.kind.get());
@@ -916,10 +976,9 @@ impl Controller {
         };
         c.setFrameOrigin(NSPoint::new(ox, h - cs.height));
         c.setAlphaValue(s.content_alpha.value.clamp(0.0, 1.0));
-    }
-
-    fn high_contrast(&self) -> bool {
-        self.config.borrow().appearance.high_contrast || system_increase_contrast()
+        drop(views);
+        // The shape moves under a still pointer while it animates.
+        self.update_interactive();
     }
 
     /// Put the flares against the island's left and right edges at the top of
@@ -985,7 +1044,8 @@ impl Controller {
 
     fn rebuild_views(&self) {
         let cfg = self.config.borrow().clone();
-        *self.palette.borrow_mut() = Palette::for_theme(cfg.appearance.high_contrast || system_increase_contrast(), &cfg.appearance.accent);
+        *self.palette.borrow_mut() =
+            Palette::for_theme(cfg.appearance.high_contrast || system_increase_contrast(), &cfg.appearance.accent);
         for v in self.views.borrow().all() {
             v.removeFromSuperview();
         }
@@ -1089,7 +1149,7 @@ impl Controller {
                     layout.activation_zone().contains_inclusive(p)
                         || layout.retention_zone(LayoutKind::Peek).contains_inclusive(p)
                 }
-                State::Hover => layout.retention_zone(LayoutKind::Compact).contains_inclusive(p),
+                State::Hover => layout.retention_zone(LayoutKind::Expanded).contains_inclusive(p),
                 State::Expanded | State::DropTarget { .. } => {
                     layout.retention_zone(LayoutKind::Expanded).contains_inclusive(p)
                 }
@@ -1098,6 +1158,7 @@ impl Controller {
         if inside != self.pointer_inside.replace(inside) {
             self.handle(if inside { Event::PointerEnteredZone } else { Event::PointerLeftZone });
         }
+        self.update_interactive();
     }
 
     pub fn root_mouse_down(&self, window_point: NSPoint) {
@@ -1115,8 +1176,7 @@ impl Controller {
     /// Should a click at `global` fall through to whatever is under the
     /// window? True in the window's margins outside the island (ears, and the
     /// bigger frame while animating), and — while a glance is open — in the
-    /// menu-bar strip beside the notch, where no control of ours lives. The
-    /// pinned panel keeps its whole top row interactive.
+    /// menu-bar strip beside the notch, where no control of ours lives.
     fn passes_through(&self, global: Point, island: Rect) -> bool {
         if !island.contains_inclusive(global) {
             return true;
@@ -1125,8 +1185,12 @@ impl Controller {
         let beside_notch = global.x < notch.x || global.x > notch.max_x();
         let in_band = global.y <= island.y + notch.height;
         match self.kind.get() {
-            LayoutKind::Peek | LayoutKind::Compact | LayoutKind::Incoming(_) => in_band && beside_notch,
-            LayoutKind::Collapsed | LayoutKind::CollapsedWithWings(_) | LayoutKind::Expanded => false,
+            // Open or glancing, only the neck crosses the menu bar: beside the
+            // notch is the app's menu bar, never ours.
+            LayoutKind::Peek | LayoutKind::Compact | LayoutKind::Incoming(_) | LayoutKind::Expanded => {
+                in_band && beside_notch
+            }
+            LayoutKind::Collapsed | LayoutKind::CollapsedWithWings(_) => false,
         }
     }
 
@@ -1736,27 +1800,20 @@ impl Controller {
             return;
         }
         let now = now_ms();
-        let in_meeting = snap
-            .calendar
-            .events
-            .iter()
-            .any(|e| now + 15 * 60_000 >= e.starts_at_ms && now <= e.ends_at_ms)
-            || cfg
-                .controls
-                .focus_schedule
-                .map(|(from, to)| {
-                    if from == to {
-                        return false;
-                    }
-                    // Local hour of day; a window may span midnight.
-                    let hour = local_hour(now);
-                    if from < to {
-                        (from..to).contains(&hour)
-                    } else {
-                        hour >= from || hour < to
-                    }
-                })
-                .unwrap_or(false);
+        let in_meeting =
+            snap.calendar.events.iter().any(|e| now + 15 * 60_000 >= e.starts_at_ms && now <= e.ends_at_ms)
+                || cfg
+                    .controls
+                    .focus_schedule
+                    .map(|(from, to)| {
+                        if from == to {
+                            return false;
+                        }
+                        // Local hour of day; a window may span midnight.
+                        let hour = local_hour(now);
+                        if from < to { (from..to).contains(&hour) } else { hour >= from || hour < to }
+                    })
+                    .unwrap_or(false);
         if in_meeting == self.meeting_focus.get() {
             return;
         }

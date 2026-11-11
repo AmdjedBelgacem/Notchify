@@ -87,8 +87,7 @@ impl Tray {
             texts -= 1;
         }
         self.next_id += 1;
-        let first_unpinned =
-            self.items.iter().position(|i| !i.pinned).unwrap_or(self.items.len());
+        let first_unpinned = self.items.iter().position(|i| !i.pinned).unwrap_or(self.items.len());
         self.items.insert(
             first_unpinned,
             TrayItem {

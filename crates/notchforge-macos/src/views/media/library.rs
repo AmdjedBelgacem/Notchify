@@ -207,12 +207,8 @@ impl MediaPage {
             self.list_doc.addSubview(&head);
             base += header_h.max(20.0);
             for (i, t) in recent.iter().enumerate() {
-                let row = shape_view(
-                    self.mtm,
-                    rect(0.0, base + i as f64 * row_h, w, row_h),
-                    &rgba(1.0, 1.0, 1.0, 0.0),
-                    13.0,
-                );
+                let row =
+                    shape_view(self.mtm, rect(0.0, base + i as f64 * row_h, w, row_h), &rgba(1.0, 1.0, 1.0, 0.0), 13.0);
                 let cy = (row_h - 40.0) / 2.0;
                 let cover = shape_view(self.mtm, rect(8.0, cy, 40.0, 40.0), &rgb8(t.player.color()), 8.0);
                 cover.addSubview(&symbol_view(

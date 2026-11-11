@@ -54,7 +54,7 @@ const GAP: f64 = 10.0;
 const ROW_GAP: f64 = 10.0;
 const MAX_ROWS: usize = 40;
 const TILE_H: f64 = 64.0;
-const TILE_R: f64 = 20.0;
+const TILE_R: f64 = 16.0;
 const CONTROL_BUTTON: f64 = 30.0;
 /// Inside the controls tile, between its edge and its buttons.
 const CONTROL_INSET: f64 = 10.0;
@@ -97,8 +97,19 @@ impl Tab {
 }
 
 /// The tabs in the order of their buttons.
-pub const TABS: [Tab; 5] = [Tab::Overview, Tab::Planner, Tab::Media, Tab::Live, Tab::Agents];
-const TAB_W: f64 = 34.0;
+/// In the tab row's order: Now, Music, Agents, Day, Usage (⌘1–5).
+pub const TABS: [Tab; 5] = [Tab::Overview, Tab::Media, Tab::Live, Tab::Planner, Tab::Agents];
+
+/// Each tab's name in the tab row, and the width of its pill.
+fn tab_title(tab: Tab) -> (&'static str, f64) {
+    match tab {
+        Tab::Overview => ("Now", 52.0),
+        Tab::Media => ("Music", 62.0),
+        Tab::Live => ("Agents", 68.0),
+        Tab::Planner => ("Day", 50.0),
+        Tab::Agents => ("Usage", 62.0),
+    }
+}
 
 pub struct ExpandedView {
     pub root: Retained<FlippedView>,
@@ -201,14 +212,14 @@ fn ink(a: f64) -> Retained<NSColor> {
     rgba(0.07, 0.07, 0.094, a)
 }
 
-/// One widget tile on the glass.
+/// The one surface on the black island: a flat, slightly lifted tile.
+pub fn tile_color() -> Retained<NSColor> {
+    rgba(0.086, 0.086, 0.094, 1.0)
+}
+
+/// One widget tile on the black island: flat, no outline.
 pub fn glass_tile(mtm: MainThreadMarker, frame: NSRect) -> Retained<FlippedView> {
-    let v = shape_view(mtm, frame, &ink(0.46), TILE_R);
-    if let Some(l) = v.layer() {
-        l.setBorderWidth(0.5);
-        l.setBorderColor(Some(&white(0.18).CGColor()));
-    }
-    v
+    shape_view(mtm, frame, &tile_color(), TILE_R)
 }
 
 /// A small rounded label beside the notch, right-aligned at `right`.
@@ -339,13 +350,17 @@ impl ExpandedView {
         let p = &palette;
         let s = layout.shape(LayoutKind::Expanded);
         let (w, h) = (s.width, s.height);
-        let nh = layout.notch.rect.height;
+        // The tab row sits just below the notch; every page starts below it.
+        // Nothing is drawn in the menu bar beside the notch (the neck).
+        let notch_h = layout.notch.rect.height;
+        let nh = notch_h + notchforge_core::geometry::TAB_BAR;
         let root = FlippedView::new(mtm, rect(0.0, 0.0, w, h));
         let targets = Targets::default();
-        let ty = ((nh - 24.0) / 2.0).max(2.0);
+        let ty = notch_h + (notchforge_core::geometry::TAB_BAR - 24.0) / 2.0 + 2.0;
 
         // ── top row: page switch and clock (left), now playing and battery (right) ──
-        let side = (w - layout.notch.rect.width) / 2.0;
+        // The right half of the tab row, beside nothing now.
+        let side = w / 2.0;
         let date_top = label(
             mtm,
             "",
@@ -404,13 +419,20 @@ impl ExpandedView {
         let ht = targets.add(mtm, move |_| {
             with_controller(|c| c.apply_history_filter());
         });
-        let history_field =
-            NSTextField::initWithFrame(NSTextField::alloc(mtm), rect(c1x + 6.0, body_y + 30.0 + 2.0, c1w - 12.0, 22.0));
+        // A rounded tile behind a borderless field, its text centred in it.
+        let history_bg = shape_view(mtm, rect(c1x + 6.0, body_y + 30.0 + 1.0, c1w - 12.0, 24.0), &tile_color(), 8.0);
+        overview.addSubview(&history_bg);
+        let history_field = NSTextField::initWithFrame(
+            NSTextField::alloc(mtm),
+            rect(c1x + 16.0, body_y + 30.0 + 5.0, c1w - 32.0, 16.0),
+        );
         history_field.setEditable(true);
         history_field.setBordered(false);
-        history_field.setBezeled(true);
-        history_field.setBezelStyle(objc2_app_kit::NSTextFieldBezelStyle::SquareBezel);
-        history_field.setFont(Some(&font(11.5, Weight::Regular)));
+        history_field.setBezeled(false);
+        history_field.setDrawsBackground(false);
+        history_field.setFocusRingType(objc2_app_kit::NSFocusRingType::None);
+        history_field.setTextColor(Some(&p.primary));
+        history_field.setFont(Some(&font(12.0, Weight::Regular)));
         history_field.setPlaceholderString(Some(&crate::ui::ns("Search history, ⏎ to filter")));
         // SAFETY: a valid target and selector; the target outlives the field.
         unsafe {
@@ -426,15 +448,7 @@ impl ExpandedView {
         if let Some(l) = weather_card.layer() {
             l.setCornerRadius(TILE_R);
             l.setMasksToBounds(true);
-            l.setBorderWidth(0.5);
-            l.setBorderColor(Some(&white(0.22).CGColor()));
-            let g = crate::ui::gradient_layer(
-                &[(0.090, 0.251, 0.498, 1.0), (0.204, 0.424, 0.690, 1.0)],
-                NSPoint::new(0.5, 0.0),
-                NSPoint::new(0.5, 1.0),
-            );
-            g.setFrame(rect(0.0, 0.0, c2w, weather_h));
-            l.addSublayer(&g);
+            l.setBackgroundColor(Some(&tile_color().CGColor()));
         }
         overview.addSubview(&weather_card);
 
@@ -697,39 +711,35 @@ impl ExpandedView {
         call_pill.addSubview(&hang_up);
         call_pill.setHidden(true);
         root.addSubview(&call_pill);
-        let track = shape_view(mtm, rect(PAD, ty - 2.0, TABS.len() as f64 * TAB_W + 4.0, 28.0), &white(0.12), 14.0);
-        root.addSubview(&track);
-        let tabs: [(&str, &str, Tab); 5] = [
-            ("square.grid.2x2.fill", "Overview", Tab::Overview),
-            ("calendar", "Planner", Tab::Planner),
-            ("music.note", "Now Playing", Tab::Media),
-            ("waveform.path.ecg", "Live sessions", Tab::Live),
-            ("chart.bar.fill", "Usage", Tab::Agents),
-        ];
-        let tab_buttons: Vec<Retained<NSButton>> = tabs
+        // Text pills below the notch; the current one sits on a lighter pill.
+        let mut tab_x = PAD;
+        let tab_buttons: Vec<Retained<NSButton>> = TABS
             .iter()
-            .enumerate()
-            .map(|(i, (sym, tip, tab))| {
+            .map(|tab| {
                 let tab = *tab;
+                let (title, tw) = tab_title(tab);
                 let t = targets.add(mtm, move |_| {
                     with_controller(|c| c.show_expanded_tab(tab));
                 });
-                let b = symbol_button(
+                let b = pill_button(
                     mtm,
-                    sym,
-                    11.0,
-                    tip,
+                    title,
+                    None,
+                    &font(13.0, Weight::Medium),
                     &p.secondary,
+                    &white(0.0),
+                    14.0,
                     &t,
-                    rect(PAD + 2.0 + i as f64 * TAB_W, ty, TAB_W, 24.0),
+                    rect(tab_x, ty - 2.0, tw, 28.0),
                 );
+                tab_x += tw + 4.0;
                 root.addSubview(&b);
                 b
             })
             .collect();
 
         // ── quick reply bar: an overlay under the notch band ──
-        let reply_bar = FlippedView::new(mtm, rect(PAD, layout.notch.rect.height + 6.0, w - 2.0 * PAD, 48.0));
+        let reply_bar = FlippedView::new(mtm, rect(PAD, nh + 6.0, w - 2.0 * PAD, 48.0));
         reply_bar.setWantsLayer(true);
         if let Some(l) = reply_bar.layer() {
             l.setBackgroundColor(Some(&rgba(0.09, 0.09, 0.11, 0.98).CGColor()));
@@ -882,9 +892,12 @@ impl ExpandedView {
         }
         for (b, t) in self.tab_buttons.iter().zip(TABS) {
             let on = t == tab;
-            b.setContentTintColor(Some(if on { &self.palette.primary } else { &self.palette.tertiary }));
-            // Selected segment: a lighter pill inside the shared track.
-            make_card(b, &white(if on { 0.28 } else { 0.0 }), 12.0);
+            let (title, _) = tab_title(t);
+            let (fg, weight) =
+                if on { (&self.palette.primary, Weight::Semibold) } else { (&self.palette.secondary, Weight::Medium) };
+            b.setAttributedTitle(&attributed(title, &font(13.0, weight), fg));
+            // The current space: a lighter pill; the rest sit on black.
+            make_card(b, &white(if on { 0.17 } else { 0.0 }), 14.0);
         }
         self.sync_pills();
         self.media.set_active(self.visible.get() && tab == Tab::Media);
@@ -1410,8 +1423,10 @@ impl ExpandedView {
             &if query.is_empty() {
                 notchforge_core::i18n::tr(lang, notchforge_core::i18n::Str::History).to_owned()
             } else {
-                format!("{} — \u{201c}{query}\u{201d}",
-                    notchforge_core::i18n::tr(lang, notchforge_core::i18n::Str::History))
+                format!(
+                    "{} — \u{201c}{query}\u{201d}",
+                    notchforge_core::i18n::tr(lang, notchforge_core::i18n::Str::History)
+                )
             },
             &font(11.0, Weight::Semibold),
             &p.tertiary,
@@ -1425,8 +1440,7 @@ impl ExpandedView {
                 &p.tertiary,
                 rect(12.0, hy0 + 18.0, w - 24.0, 14.0),
             ));
-            self.notif_doc
-                .setFrame(rect(0.0, 0.0, w, (hy0 + 34.0).max(visible_h)));
+            self.notif_doc.setFrame(rect(0.0, 0.0, w, (hy0 + 34.0).max(visible_h)));
             return;
         }
         let mut hy = hy0 + 18.0;
@@ -1442,8 +1456,7 @@ impl ExpandedView {
             self.notif_doc.addSubview(&row);
             hy += 16.0;
         }
-        self.notif_doc
-            .setFrame(rect(0.0, 0.0, w, (hy - ROW_GAP).max(visible_h)));
+        self.notif_doc.setFrame(rect(0.0, 0.0, w, (hy - ROW_GAP).max(visible_h)));
     }
 
     /// A quiet tile holding a short message, so a short list leaves no hole.
@@ -2072,10 +2085,12 @@ mod tab_tests {
 
     #[test]
     fn arrows_wrap_around_the_tab_bar() {
-        assert_eq!(Tab::Overview.step(1), Tab::Planner);
+        // Now, Music, Agents, Day, Usage.
+        assert_eq!(Tab::Overview.step(1), Tab::Media);
         assert_eq!(Tab::Overview.step(-1), Tab::Agents);
         assert_eq!(Tab::Agents.step(1), Tab::Overview);
-        assert_eq!(Tab::nth(3), Some(Tab::Media));
+        assert_eq!(Tab::nth(2), Some(Tab::Media));
+        assert_eq!(Tab::nth(4), Some(Tab::Planner));
         assert_eq!(Tab::nth(0), None);
         assert_eq!(Tab::nth(6), None);
     }

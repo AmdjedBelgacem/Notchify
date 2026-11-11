@@ -145,7 +145,13 @@ impl PlannerPage {
         let plan_field = NSTextField::textFieldWithString(&ns(""), mtm);
         plan_field.setFrame(rect(24.0, 6.0, module_w - 2.0 * INSET - 150.0, 18.0));
         plan_field.setPlaceholderString(Some(&ns("Add a plan")));
-        let pomodoro_label = label(mtm, "", &font(11.0, Weight::Medium), &p.secondary, rect(module_w - 2.0 * INSET - 130.0, 6.0, 110.0, 16.0));
+        let pomodoro_label = label(
+            mtm,
+            "",
+            &font(11.0, Weight::Medium),
+            &p.secondary,
+            rect(module_w - 2.0 * INSET - 130.0, 6.0, 110.0, 16.0),
+        );
         pomodoro_label.setAlignment(NSTextAlignment::Right);
         field_box.addSubview(&pomodoro_label);
         plan_field.setBordered(false);

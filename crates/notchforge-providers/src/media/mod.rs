@@ -16,8 +16,8 @@
 //!   task so controls stay responsive.
 
 pub mod browser;
-pub mod script;
 pub mod lrclib;
+pub mod script;
 pub mod spotify;
 pub mod youtube;
 
@@ -296,11 +296,8 @@ impl Session {
             return;
         }
         self.last_played_key = Some(key);
-        if let Some(existing) = self
-            .state
-            .recently_played
-            .iter_mut()
-            .find(|t| t.title == n.title && t.player == n.player)
+        if let Some(existing) =
+            self.state.recently_played.iter_mut().find(|t| t.title == n.title && t.player == n.player)
         {
             existing.at_ms = n.sampled_at_ms;
             let mut list = std::mem::take(&mut self.state.recently_played);
@@ -642,12 +639,8 @@ impl Session {
                             let path = if dest.exists() {
                                 Some(dest.clone())
                             } else {
-                                download(
-                                    &self.http,
-                                    &format!("https://i.ytimg.com/vi/{vid}/mqdefault.jpg"),
-                                    &dest,
-                                )
-                                .await
+                                download(&self.http, &format!("https://i.ytimg.com/vi/{vid}/mqdefault.jpg"), &dest)
+                                    .await
                             };
                             v.thumb = path;
                         }

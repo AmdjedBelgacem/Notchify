@@ -561,6 +561,58 @@ pub fn set_notch_flare(layer: &objc2_quartz_core::CAShapeLayer, e: f64, left: bo
     layer.setPath(Some(&path));
 }
 
+/// The island's outline in its own layer (y-up, `w` × `h`), with square top
+/// corners where it meets the bezel and `rb` rounding the bottom ones.
+///
+/// With `neck` = (`nw`, `nh`, `top_r`), the top `nh` pt (the menu bar band) is
+/// only `nw` wide and centred — its top corners rounded by `top_r` for the
+/// floating capsule, square against a real notch — and the body below widens
+/// with rounded top corners and concave fillets where it meets the neck, so
+/// the open island never covers the menu bar beside the notch.
+pub fn island_outline(
+    w: f64,
+    h: f64,
+    rb: f64,
+    neck: Option<(f64, f64, f64)>,
+) -> objc2_core_foundation::CFRetained<objc2_core_graphics::CGMutablePath> {
+    use objc2_core_graphics::CGMutablePath as P;
+    let path = P::new();
+    let n = std::ptr::null();
+    let body_h = neck.map_or(h, |(_, nh, _)| h - nh);
+    let side = neck.map_or(0.0, |(nw, _, _)| (w - nw) / 2.0);
+    // SAFETY: null transforms are allowed; the path is owned by us.
+    unsafe {
+        match neck {
+            Some((nw, nh, top_r)) if body_h > 0.5 && side > 0.5 => {
+                let top_r = top_r.min(nw / 2.0).min(nh / 2.0);
+                let rb = rb.min(body_h / 2.0).min(w / 2.0);
+                // Fillet and body top corners share the space beside the neck.
+                let fillet = 12.0_f64.min(side / 2.0).min(body_h / 2.0);
+                let rt = 16.0_f64.min(side - fillet).min(body_h / 2.0).max(0.0);
+                let (x1, x2) = ((w - nw) / 2.0, (w + nw) / 2.0);
+                P::move_to_point(Some(&path), n, 0.0, body_h / 2.0);
+                P::add_arc_to_point(Some(&path), n, 0.0, 0.0, w / 2.0, 0.0, rb);
+                P::add_arc_to_point(Some(&path), n, w, 0.0, w, body_h / 2.0, rb);
+                P::add_arc_to_point(Some(&path), n, w, body_h, x2 + side / 2.0, body_h, rt);
+                P::add_arc_to_point(Some(&path), n, x2, body_h, x2, h, fillet);
+                P::add_arc_to_point(Some(&path), n, x2, h, w / 2.0, h, top_r);
+                P::add_arc_to_point(Some(&path), n, x1, h, x1, body_h, top_r);
+                P::add_arc_to_point(Some(&path), n, x1, body_h, x1 - side / 2.0, body_h, fillet);
+                P::add_arc_to_point(Some(&path), n, 0.0, body_h, 0.0, body_h / 2.0, rt);
+            }
+            _ => {
+                let rb = rb.min(h / 2.0).min(w / 2.0);
+                P::move_to_point(Some(&path), n, 0.0, h);
+                P::add_arc_to_point(Some(&path), n, 0.0, 0.0, w / 2.0, 0.0, rb);
+                P::add_arc_to_point(Some(&path), n, w, 0.0, w, h, rb);
+                P::add_line_to_point(Some(&path), n, w, h);
+            }
+        }
+        P::close_subpath(Some(&path));
+    }
+    path
+}
+
 /// A plain view that shows `img` through its layer's contents. Unlike an
 /// `NSImageView` nested in layer-backed views, this draws in every context
 /// (offscreen renders included).

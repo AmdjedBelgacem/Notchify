@@ -172,8 +172,14 @@ pub fn install() {
         // SAFETY: plain Carbon call with a valid out-pointer.
         unsafe {
             let id = EventHotKeyID { signature: u32::from_be_bytes(*b"NFrg"), id };
-            let status =
-                RegisterEventHotKey(key, COMMAND_KEY | CONTROL_KEY, id, GetApplicationEventTarget(), 0, &mut hotkey_ref);
+            let status = RegisterEventHotKey(
+                key,
+                COMMAND_KEY | CONTROL_KEY,
+                id,
+                GetApplicationEventTarget(),
+                0,
+                &mut hotkey_ref,
+            );
             if status != 0 {
                 tracing::warn!(status, "screen-cycle hotkey is taken by another app; it will not fire");
             }

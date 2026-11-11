@@ -182,9 +182,7 @@ impl Provider for BluetoothProvider {
                 // say so, at most once an hour per device.
                 let mut connected = Vec::new();
                 for d in &merged {
-                    let known = last_sent
-                        .as_ref()
-                        .is_some_and(|prev| prev.iter().any(|p| p.id == d.id));
+                    let known = last_sent.as_ref().is_some_and(|prev| prev.iter().any(|p| p.id == d.id));
                     if !known && !d.levels.is_empty() {
                         // The main level if the device reports one (left
                         // bud for AirPods, case ignored).
@@ -208,7 +206,12 @@ impl Provider for BluetoothProvider {
                             None => connect_alerts.push((id.clone(), Instant::now())),
                         }
                         let n = NewNotification {
-                            app: AppRef { known: None, bundle_id: None, display_name: "Bluetooth".into(), platform: None },
+                            app: AppRef {
+                                known: None,
+                                bundle_id: None,
+                                display_name: "Bluetooth".into(),
+                                platform: None,
+                            },
                             origin: Origin::Internal,
                             kind: NotificationKind::Info,
                             priority: Some(Priority::Low),

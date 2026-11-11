@@ -769,7 +769,8 @@ pub fn fill_banner_reply_in(bundle: Option<&str>, title: &str, text: &str) -> bo
 /// The running pids of an app (by bundle id) — a browser delivering web
 /// pushes owns its banners.
 fn running_pids(bundle: &str) -> Vec<i32> {
-    let apps = objc2_app_kit::NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(bundle));
+    let apps =
+        objc2_app_kit::NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(bundle));
     apps.iter().map(|a| a.processIdentifier()).collect()
 }
 

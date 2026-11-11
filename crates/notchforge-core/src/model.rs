@@ -385,8 +385,7 @@ impl TokenCounts {
     /// is an estimate, labelled as one.
     pub fn estimated_cost_cents(&self, in_rate: f64, out_rate: f64) -> u64 {
         let m = 1_000_000.0;
-        ((self.input as f64 * in_rate + self.output as f64 * out_rate + self.cache_read as f64 * in_rate * 0.1)
-            / m
+        ((self.input as f64 * in_rate + self.output as f64 * out_rate + self.cache_read as f64 * in_rate * 0.1) / m
             * 100.0) as u64
     }
 
@@ -1307,9 +1306,7 @@ impl Lyrics {
         if self.plain {
             return None;
         }
-        self.lines
-            .iter()
-            .rposition(|(at, text)| *at <= position_ms && !line_is_gap(text))
+        self.lines.iter().rposition(|(at, text)| *at <= position_ms && !line_is_gap(text))
     }
 
     /// Is any part of the song on screen at `position_ms`?
@@ -1590,7 +1587,7 @@ mod tests {
                 device_uids: vec![],
             }],
             sources_supported: true,
-        inputs: Vec::new(),
+            inputs: Vec::new(),
         };
         assert_eq!(state.route_label(&state.sources[0]), "AirPods Pro");
         assert_eq!(MediaPlayer::from_bundle_id("COM.SPOTIFY.CLIENT"), Some(MediaPlayer::Spotify));

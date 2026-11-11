@@ -217,6 +217,11 @@ pub struct IslandShape {
     pub corner_radius: f64,
 }
 
+/// Height of the open panel's tab row, just below the notch. Nothing of the
+/// open panel lives in the menu bar beside the notch: there the island is only
+/// as wide as the notch (its "neck"), so menus and status items stay usable.
+pub const TAB_BAR: f64 = 40.0;
+
 /// Width of a single wing in [`LayoutKind::CollapsedWithWings`].
 pub const WING_WIDTH: f64 = 64.0;
 /// Space around the largest island inside the window, for the shadow.
@@ -236,6 +241,8 @@ pub fn notch_ear_radius(corner_radius: f64) -> f64 {
 
 /// The most calls shown at once; further ones are counted beside the notch.
 pub const MAX_VISIBLE_CALLS: usize = 3;
+/// The call card's footer: hide, and how many more are ringing.
+pub const CALL_FOOTER: f64 = 28.0;
 /// A waiting call's row and the gap below it.
 pub const CALL_ROW_STEP: f64 = 54.0;
 
@@ -297,7 +304,7 @@ impl NotchLayout {
             },
             LayoutKind::Expanded => IslandShape {
                 width: a.expanded_width.max(n.width + 2.0 * WING_WIDTH),
-                height: n.height + a.expanded_height,
+                height: n.height + TAB_BAR + a.expanded_height,
                 corner_radius: 28.0,
             },
             LayoutKind::Incoming(shown) => {
@@ -305,7 +312,8 @@ impl NotchLayout {
                 let rows = if waiting > 0 { waiting as f64 * CALL_ROW_STEP + 6.0 } else { 0.0 };
                 IslandShape {
                     width: (n.width + 2.0 * WING_WIDTH + 120.0).max(500.0),
-                    height: n.height + 84.0 + rows,
+                    // A slim footer row holds "hide" and "+N more ringing".
+                    height: n.height + 84.0 + rows + CALL_FOOTER,
                     corner_radius: 26.0,
                 }
             }
@@ -596,9 +604,10 @@ mod tests {
     fn the_call_view_grows_with_each_waiting_call() {
         let layout = NotchLayout::new(mbp14(), AppearanceConfig::default());
         let nh = layout.notch.rect.height;
-        assert_eq!(layout.shape(LayoutKind::Incoming(1)).height, nh + 84.0);
-        assert_eq!(layout.shape(LayoutKind::Incoming(2)).height, nh + 84.0 + 60.0);
-        assert_eq!(layout.shape(LayoutKind::Incoming(3)).height, nh + 84.0 + 114.0);
+        let f = CALL_FOOTER;
+        assert_eq!(layout.shape(LayoutKind::Incoming(1)).height, nh + 84.0 + f);
+        assert_eq!(layout.shape(LayoutKind::Incoming(2)).height, nh + 84.0 + 60.0 + f);
+        assert_eq!(layout.shape(LayoutKind::Incoming(3)).height, nh + 84.0 + 114.0 + f);
         assert_eq!(layout.shape(LayoutKind::Incoming(9)), layout.shape(LayoutKind::Incoming(3)));
     }
 

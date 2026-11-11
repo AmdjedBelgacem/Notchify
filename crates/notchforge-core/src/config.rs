@@ -72,7 +72,8 @@ pub struct GeneralConfig {
     #[serde(default)]
     pub onboarded: bool,
     /// Say when a newer release is out (reads the release feed on GitHub).
-    pub check_updates: bool,    /// UI language: "en" (default), "fr" or "ar". Untranslated strings stay English.
+    pub check_updates: bool,
+    /// UI language: "en" (default), "fr" or "ar". Untranslated strings stay English.
     #[serde(default)]
     pub language: String,
 }
@@ -82,7 +83,7 @@ impl Default for GeneralConfig {
         Self {
             launch_at_login: false,
             screen: ScreenChoice::Notch,
-            hover_delay_ms: 120,
+            hover_delay_ms: 200,
             collapse_delay_ms: 350,
             peek_duration_ms: 4000,
             peek_min_priority: Priority::Normal,

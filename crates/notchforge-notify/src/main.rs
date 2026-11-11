@@ -89,9 +89,9 @@ fn parse() -> Result<Option<Args>, String> {
                 a.cache_write = Some(value("--cache-write")?.parse().map_err(|_| "invalid --cache-write")?)
             }
             "--model" => a.model = Some(value("--model")?),
-    "--timer" => a.timer = Some(value("--timer")?),
-    "--remind" => a.remind = Some(value("--remind")?),
-    "--when" => a.when = Some(value("--when")?),
+            "--timer" => a.timer = Some(value("--timer")?),
+            "--remind" => a.remind = Some(value("--remind")?),
+            "--when" => a.when = Some(value("--when")?),
             "--best-effort" => a.best_effort = true,
             "-h" | "--help" => return Ok(None),
             // A bare JSON argument (the Codex CLI `notify` hook passes one).
@@ -320,10 +320,7 @@ fn parse_when(spec: &str) -> Option<i64> {
     }
     let rest = spec.strip_prefix("at ").unwrap_or(spec);
     // HH:MM, optionally "tomorrow" before it.
-    let (day_offset, hm) = rest
-        .strip_prefix("tomorrow ")
-        .map(|r| (1i64, r))
-        .unwrap_or((0, rest));
+    let (day_offset, hm) = rest.strip_prefix("tomorrow ").map(|r| (1i64, r)).unwrap_or((0, rest));
     let (h, m) = hm.split_once(':')?;
     let hour: i64 = h.trim().parse().ok()?;
     let minute: i64 = m.trim().parse().ok()?;
@@ -341,10 +338,7 @@ fn parse_when(spec: &str) -> Option<i64> {
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
 fn local_utc_offset_minutes(now_ms: i64) -> i32 {

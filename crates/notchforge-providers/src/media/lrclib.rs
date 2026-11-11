@@ -42,10 +42,7 @@ pub fn parse(json: &str) -> Option<Lyrics> {
         if plain_only.is_none() {
             let plain = item.get("plainLyrics").and_then(|s| s.as_str()).unwrap_or_default();
             if !plain.trim().is_empty() {
-                plain_only = Some(Lyrics {
-                    lines: plain.lines().map(|l| (0, l.to_owned())).collect(),
-                    plain: true,
-                });
+                plain_only = Some(Lyrics { lines: plain.lines().map(|l| (0, l.to_owned())).collect(), plain: true });
             }
         }
     }
@@ -122,7 +119,8 @@ mod tests {
         assert_eq!(l.line_at(16_000), Some(1));
         assert_eq!(l.line_at(5_000), None);
         // Gap lines never highlight.
-        let with_gap = Lyrics { lines: vec![(0, "a".into()), (10_000, "♪".into()), (20_000, "b".into())], plain: false };
+        let with_gap =
+            Lyrics { lines: vec![(0, "a".into()), (10_000, "♪".into()), (20_000, "b".into())], plain: false };
         assert_eq!(with_gap.line_at(12_000), Some(0));
         assert_eq!(with_gap.line_at(22_000), Some(2));
     }

@@ -100,7 +100,7 @@ pub struct Timings {
 impl Default for Timings {
     fn default() -> Self {
         Self {
-            hover_intent: Duration::from_millis(120),
+            hover_intent: Duration::from_millis(200),
             collapse_grace: Duration::from_millis(350),
             peek: Duration::from_millis(4000),
             drag_exit_grace: Duration::from_millis(600),
@@ -134,7 +134,9 @@ impl NotchMachine {
         match self.state {
             State::Collapsed | State::Arming => self.collapsed_layout(),
             State::Peek => LayoutKind::Peek,
-            State::Hover => LayoutKind::Compact,
+            // Hover opens the panel itself (on Now); it folds back when the
+            // pointer leaves, and a click pins it.
+            State::Hover => LayoutKind::Expanded,
             State::Expanded | State::DropTarget { .. } => LayoutKind::Expanded,
         }
     }
@@ -301,11 +303,11 @@ mod tests {
         let mut m = m();
         let fx = m.handle(Event::PointerEnteredZone);
         assert_eq!(m.state(), State::Arming);
-        assert!(fx.contains(&Effect::Schedule(TimerKind::HoverIntent, Duration::from_millis(120))));
+        assert!(fx.contains(&Effect::Schedule(TimerKind::HoverIntent, Duration::from_millis(200))));
         assert!(layouts(&fx).is_empty());
         let fx = m.handle(Event::TimerFired(TimerKind::HoverIntent));
         assert_eq!(m.state(), State::Hover);
-        assert_eq!(layouts(&fx), vec![LayoutKind::Compact]);
+        assert_eq!(layouts(&fx), vec![LayoutKind::Expanded]);
         assert!(fx.contains(&Effect::SetInteractive(true)));
         assert!(fx.contains(&Effect::MarkSeen));
     }

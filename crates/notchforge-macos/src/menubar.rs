@@ -300,10 +300,7 @@ impl MenuBar {
         });
         menu.addItem(&shelve);
         // Bluetooth quick-connect, via `blueutil` when it is installed.
-        if let Ok(out) = std::process::Command::new("/opt/homebrew/bin/blueutil")
-            .args(["--paired"])
-            .output()
-        {
+        if let Ok(out) = std::process::Command::new("/opt/homebrew/bin/blueutil").args(["--paired"]).output() {
             let names: Vec<String> = String::from_utf8_lossy(&out.stdout)
                 .lines()
                 .filter_map(|l| l.split("name: ").nth(1).map(|n| n.trim_end_matches(',').trim().to_owned()))
@@ -313,9 +310,8 @@ impl MenuBar {
                 for name in &names {
                     let n = name.clone();
                     bt.addItem(&menu_item(mtm, &targets, name, "", move || {
-                        let _ = std::process::Command::new("/opt/homebrew/bin/blueutil")
-                            .args(["--connect", &n])
-                            .spawn();
+                        let _ =
+                            std::process::Command::new("/opt/homebrew/bin/blueutil").args(["--connect", &n]).spawn();
                     }));
                 }
                 let root = NSMenuItem::new(mtm);

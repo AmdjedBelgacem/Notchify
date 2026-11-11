@@ -18,10 +18,10 @@
 
 use crate::agents::usage::parse_time;
 use notchforge_core::model::{AgentLimits, LimitGauge, ProviderStatus, UsageAgent};
-use notchforge_core::time::now_ms;
 use notchforge_core::provider::{
     BoxFuture, Provider, ProviderContext, ProviderDescriptor, ProviderError, ProviderEvent, Wake,
 };
+use notchforge_core::time::now_ms;
 use serde::Deserialize;
 use std::time::Duration;
 

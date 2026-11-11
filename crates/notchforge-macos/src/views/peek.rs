@@ -13,14 +13,15 @@
 
 use super::{app_icon_view, set_app_icon};
 use crate::ui::{
-    FlippedView, Palette, Weight, attributed, font, label, pill_button, rect, rgba, set_accessibility_label,
-    set_gradient, set_text, shape_view, style_pill, Targets, without_animation,};
+    FlippedView, Palette, Targets, Weight, attributed, font, label, pill_button, rect, rgba, set_accessibility_label,
+    set_gradient, set_text, shape_view, style_pill, without_animation,
+};
 use notchforge_core::geometry::{LayoutKind, NotchLayout};
 use notchforge_core::i18n::Str;
 use notchforge_core::model::{AuthTarget, Notification, NotificationKind, Priority};
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
-use objc2_app_kit::{NSMenu, NSMenuItem, NSButton, NSImageView, NSTextField};
+use objc2_app_kit::{NSButton, NSImageView, NSMenu, NSMenuItem, NSTextField};
 use objc2_foundation::NSPoint;
 use std::cell::RefCell;
 
@@ -200,10 +201,7 @@ impl PeekView {
             tracing::info!(app = %app_name, "app muted from the peek");
         });
         let menu = NSMenu::new(mtm);
-        for (title, t) in [
-            ("Dismiss", &eng_t),
-            ("Never show this app", &mute_t),
-        ] {
+        for (title, t) in [("Dismiss", &eng_t), ("Never show this app", &mute_t)] {
             let item = NSMenuItem::new(mtm);
             item.setTitle(&crate::ui::ns(title));
             // SAFETY: target kept alive by `targets` (dropped after show).
@@ -229,8 +227,8 @@ impl PeekView {
     /// ordinary one, "Allow" + "Deny" for an agent asking for access, "Cancel"
     /// for a sign-in waiting on the browser.
     fn layout_buttons(&self, n: &Notification, p: &Palette) {
-        let lang = crate::app::with_config(|c| notchforge_core::i18n::Language::from_config(&c.general))
-            .unwrap_or_default();
+        let lang =
+            crate::app::with_config(|c| notchforge_core::i18n::Language::from_config(&c.general)).unwrap_or_default();
         let tr = |k: notchforge_core::i18n::Str| notchforge_core::i18n::tr(lang, k);
         let quick_reply = crate::app::with_config(|c| c.notifications.quick_reply).unwrap_or(true);
         let w = self.root.frame().size.width;

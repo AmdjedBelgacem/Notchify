@@ -165,7 +165,13 @@ fn video_from_compact(node: &serde_json::Value) -> Option<(String, UpNextVideo)>
     let duration = text_of(node.get("lengthText")).unwrap_or_default();
     Some((
         video_id.clone(),
-        UpNextVideo { title, author, duration, url: format!("https://www.youtube.com/watch?v={video_id}"), thumb: None },
+        UpNextVideo {
+            title,
+            author,
+            duration,
+            url: format!("https://www.youtube.com/watch?v={video_id}"),
+            thumb: None,
+        },
     ))
 }
 
@@ -218,7 +224,13 @@ fn video_from_lockup(node: &serde_json::Value) -> Option<(String, UpNextVideo)> 
     }
     Some((
         video_id.clone(),
-        UpNextVideo { title, author, duration, url: format!("https://www.youtube.com/watch?v={video_id}"), thumb: None },
+        UpNextVideo {
+            title,
+            author,
+            duration,
+            url: format!("https://www.youtube.com/watch?v={video_id}"),
+            thumb: None,
+        },
     ))
 }
 

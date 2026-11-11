@@ -128,7 +128,12 @@ impl Provider for BatteryProvider {
                             if free_gb <= 10.0 {
                                 disk_alerted = Some(now);
                                 let n = NewNotification {
-                                    app: AppRef { known: None, bundle_id: None, display_name: "Storage".into(), platform: None },
+                                    app: AppRef {
+                                        known: None,
+                                        bundle_id: None,
+                                        display_name: "Storage".into(),
+                                        platform: None,
+                                    },
                                     origin: Origin::Internal,
                                     kind: NotificationKind::Info,
                                     priority: Some(Priority::Normal),

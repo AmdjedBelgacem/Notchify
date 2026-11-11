@@ -367,11 +367,7 @@ impl UsagePage {
         } else {
             format!("≈ {}¢", r.cost_cents)
         };
-        let sub = if r.cost_cents > 0 {
-            format!("+ {cache} cache   ·   {cost}")
-        } else {
-            format!("+ {cache} cache")
-        };
+        let sub = if r.cost_cents > 0 { format!("+ {cache} cache   ·   {cost}") } else { format!("+ {cache} cache") };
         self.hero.addSubview(&label(
             mtm,
             &sub,

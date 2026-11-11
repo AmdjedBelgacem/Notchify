@@ -152,9 +152,24 @@ fn check_pixels(ctx: &Ctx, stage: &str, min_bright: f64, rounded_bottom: bool) {
         println!("|{line}|");
     }
     let corner = |x: usize, y: usize| r.at(x, y).0;
-    let (tl, bl) = (corner(0, 0), corner(0, r.h - 1));
+    // Taller than the notch, the island crosses the menu bar only as a
+    // notch-wide neck: the band beside it is meant to be empty, and the top
+    // edge to check is the neck's.
+    let notch = with_controller(|c| c.layout().notch.rect).unwrap_or_default();
+    let necked = r.h as f64 > notch.height + 1.0 && r.w as f64 > notch.width + 1.0;
+    let (band, neck_x) = if necked {
+        let side = (r.w as f64 - notch.width).max(0.0);
+        (side * notch.height / (r.w as f64 * r.h as f64), (side / 2.0) as usize + 3)
+    } else {
+        (0.0, 0)
+    };
+    let (tl, bl) = (corner(neck_x, 0), corner(0, r.h - 1));
     let mut rep = ctx.report.borrow_mut();
-    rep.check(&format!("{stage}: island fills its shape"), opaque > 0.85, format!("{:.1}% opaque", opaque * 100.0));
+    rep.check(
+        &format!("{stage}: island fills its shape"),
+        opaque > 0.85 * (1.0 - band),
+        format!("{:.1}% opaque, {:.1}% is the band beside the neck", opaque * 100.0, band * 100.0),
+    );
     rep.check(
         &format!("{stage}: content is drawn"),
         bright > min_bright,
@@ -394,9 +409,9 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                         "notch": rect_str(&layout.notch.rect),
                     }),
                 );
-                // Click-through, unless a wing is showing the playing audio
-                // (then the island is clickable for the quick toggle).
-                r.check("collapsed: click-through", ignores != quick, format!("quick toggle: {quick}"));
+                // The collapsed island and its wings never take a click, even
+                // while a wing shows the playing audio.
+                r.check("collapsed: click-through", ignores, format!("wing shows audio: {quick}"));
                 r.metrics.insert("system_reduce_motion".into(), json!(crate::views::system_reduce_motion()));
             }
             // The wings appear with the first snapshot, which can land after
@@ -456,7 +471,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
                 r.check("hover: open animation ran", anim.frames >= 10, format!("{} frames", anim.frames));
                 r.metrics.insert("open_animation".into(), anim_json(anim));
             }
-            check_settled(ctx, "hover", &[LayoutKind::Compact]);
+            check_settled(ctx, "hover", &[LayoutKind::Expanded]);
             check_pixels(ctx, "hover", 0.004, true);
             let island = with_controller(|c| c.island_global()).unwrap_or_default();
             screenshot(ctx, mtm, "02-hover", Some(island.outset(20.0, 20.0, 20.0, 0.0)));
@@ -546,7 +561,7 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             {
                 let mut r = ctx.report.borrow_mut();
                 r.check("collapse: state", st == State::Collapsed, format!("{st:?}"));
-                r.check("collapse: click-through again", ignores != quick, format!("quick toggle: {quick}"));
+                r.check("collapse: click-through again", ignores, format!("wing shows audio: {quick}"));
                 r.check("collapse: animation ran", anim.frames >= 10, format!("{} frames", anim.frames));
                 r.check(
                     "collapse: smooth (no frame > 50 ms)",
@@ -703,7 +718,13 @@ fn run_step(ctx: &Rc<Ctx>, mtm: MainThreadMarker, step: usize) {
             let kind = with_controller(|c| c.layout_kind());
             let snap = with_controller(|c| c.current_snapshot());
             let rang = snap.as_ref().is_some_and(|s| s.calls.len() == 1);
-            let interactive = with_controller(|c| !c.ignores_mouse()).unwrap_or(false);
+            // A click on the card lands on it (the pointer itself is elsewhere,
+            // so the window lets clicks through until it moves over the card).
+            let interactive = with_controller(|c| {
+                let g = c.island_global();
+                c.accepts_click_at(notchforge_core::geometry::Point { x: g.mid_x(), y: g.y + 20.0 })
+            })
+            .unwrap_or(false);
             let mut r = ctx.report.borrow_mut();
             r.check("call: test call rings", rang, "");
             r.check("call: the notch shows it", kind == Some(LayoutKind::Incoming(1)), format!("{kind:?}"));
@@ -1273,7 +1294,8 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
                 running: true,
                 project: Some("Notchify".into()),
                 gauges: vec![gauge("Session", 42, 130), gauge("Week", 83, 3 * 1440)],
-                context_percent: Some(18), active_ms: None,
+                context_percent: Some(18),
+                active_ms: None,
             },
             AgentLimits {
                 agent: UsageAgent::Codex,
@@ -1282,7 +1304,8 @@ pub fn sample_usage() -> notchforge_core::model::AgentUsage {
                 running: true,
                 project: Some("api-server".into()),
                 gauges: vec![gauge("Session", 12, 271), gauge("Week", 36, 5 * 1440)],
-                context_percent: Some(64), active_ms: None,
+                context_percent: Some(64),
+                active_ms: None,
             },
         ],
         running: {
@@ -1415,19 +1438,22 @@ fn notched_previews(ctx: &Rc<Ctx>, sample: &notchforge_core::engine::Snapshot) {
                 title: "Harder, Better, Faster, Stronger".into(),
                 author: "Daft Punk".into(),
                 duration: "3:45".into(),
-                url: "https://www.youtube.com/watch?v=sample".into(), thumb: None,
+                url: "https://www.youtube.com/watch?v=sample".into(),
+                thumb: None,
             },
             notchforge_core::model::UpNextVideo {
                 title: "Around the World".into(),
                 author: "Daft Punk".into(),
                 duration: "7:09".into(),
-                url: "https://www.youtube.com/watch?v=sample".into(), thumb: None,
+                url: "https://www.youtube.com/watch?v=sample".into(),
+                thumb: None,
             },
             notchforge_core::model::UpNextVideo {
                 title: "Digital Love".into(),
                 author: "Daft Punk".into(),
                 duration: "4:58".into(),
-                url: "https://www.youtube.com/watch?v=sample".into(), thumb: None,
+                url: "https://www.youtube.com/watch?v=sample".into(),
+                thumb: None,
             },
         ],
         ..Default::default()
@@ -1627,7 +1653,12 @@ fn board_snapshots(
             })
             .collect(),
         sources_supported: true,
-        inputs: vec![notchforge_core::model::InputDevice { uid: "mic-1".into(), name: "MacBook Pro Microphone".into(), transport: AudioTransport::BuiltIn, is_default: true }],
+        inputs: vec![notchforge_core::model::InputDevice {
+            uid: "mic-1".into(),
+            name: "MacBook Pro Microphone".into(),
+            transport: AudioTransport::BuiltIn,
+            is_default: true,
+        }],
     };
     let cover = dir.join("afterglow.png");
     if let Some(png) = art_png(
@@ -1695,12 +1726,18 @@ fn board_snapshots(
             notchforge_core::model::QueueTrack { title: "Meridian".into(), artist: "Kite Machine".into() },
         ],
         lyrics: None,
-        recently_played: vec![notchforge_core::model::PlayedTrack { title: "Earlier track".into(), artist: "NotchForge".into(), player: MediaPlayer::Spotify, at_ms: now - 600_000 }],
+        recently_played: vec![notchforge_core::model::PlayedTrack {
+            title: "Earlier track".into(),
+            artist: "NotchForge".into(),
+            player: MediaPlayer::Spotify,
+            at_ms: now - 600_000,
+        }],
         up_next: vec![notchforge_core::model::UpNextVideo {
             title: "Daft Punk - One More Time".into(),
             author: "Daft Punk".into(),
             duration: "5:20".into(),
-            url: "https://www.youtube.com/watch?v=FGBhQbmPwH8".into(), thumb: None,
+            url: "https://www.youtube.com/watch?v=FGBhQbmPwH8".into(),
+            thumb: None,
         }],
     };
     (overview, music)
