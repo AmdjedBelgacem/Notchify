@@ -329,8 +329,19 @@ pub fn wing_side(kind: LayoutKind) -> f64 {
 
 impl NotchLayout {
     pub fn new(screen: ScreenInfo, appearance: AppearanceConfig) -> Self {
-        let notch = detect_notch(&screen);
+        let mut notch = detect_notch(&screen);
+        // A floating notch (external display) takes its own width setting.
+        if notch.floating {
+            let w = appearance.external_notch().min(screen.frame.width * 0.4);
+            notch.rect = Rect::new(notch.rect.mid_x() - w / 2.0, notch.rect.y, w, notch.rect.height);
+        }
         Self { screen, notch, appearance, x_offset: 0.0, wing_side: 0.0 }
+    }
+
+    /// Shoulder width here: beside a hardware notch the main setting, on a
+    /// floating (external) notch its own.
+    pub fn wing(&self) -> f64 {
+        if self.notch.floating { self.appearance.external_wing() } else { self.appearance.wing() }
     }
 
     /// How far the island's top sits below the screen's top edge: the floating
@@ -348,7 +359,7 @@ impl NotchLayout {
             LayoutKind::Collapsed => IslandShape { width: n.width, height: n.height, corner_radius: base_radius },
             LayoutKind::CollapsedWithWings(mask) => {
                 let wings = u8::from(mask & WING_LEFT != 0) as f64 + u8::from(mask & WING_RIGHT != 0) as f64;
-                IslandShape { width: n.width + wings * a.wing(), height: n.height, corner_radius: base_radius }
+                IslandShape { width: n.width + wings * self.wing(), height: n.height, corner_radius: base_radius }
             }
             LayoutKind::Peek => IslandShape {
                 width: (n.width + 2.0 * WING_WIDTH + 80.0).max(440.0).min(a.compact_width),
@@ -398,7 +409,7 @@ impl NotchLayout {
         // A one-shouldered island keeps its other edge on the notch's: it is
         // shifted by half of what it adds (at most one shoulder, so opening
         // from it to the panel starts from where it was).
-        let grow = (width - self.notch.rect.width).clamp(0.0, self.appearance.wing());
+        let grow = (width - self.notch.rect.width).clamp(0.0, self.wing());
         let cx = self.notch.rect.mid_x() + self.x_offset + self.wing_side * grow / 2.0 - win.x;
         Rect::new(cx - width / 2.0, win.height - self.top_gap() - height, width, height)
     }
@@ -743,5 +754,24 @@ mod tests {
         layout.wing_side = wing_side(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
         let s = layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
         assert_eq!(layout.island_global(s.width, s.height).mid_x(), n.mid_x());
+    }
+
+    #[test]
+    fn external_displays_size_their_notch_on_their_own() {
+        let a = AppearanceConfig {
+            wing_width: 64.0,
+            external_width: 120.0,
+            external_wing_width: 50.0,
+            ..Default::default()
+        };
+        let ext = NotchLayout::new(external(), a.clone());
+        assert!(ext.notch.floating);
+        assert_eq!(ext.notch.rect.width, 120.0);
+        assert_eq!(ext.notch.rect.mid_x(), external().frame.mid_x());
+        assert_eq!(ext.wing(), 50.0);
+        // The built-in notch keeps its own size and shoulders.
+        let main = NotchLayout::new(mbp14(), a);
+        assert_eq!(main.notch.rect.width, 185.0);
+        assert_eq!(main.wing(), 64.0);
     }
 }

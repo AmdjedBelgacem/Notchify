@@ -125,10 +125,20 @@ pub struct AppearanceConfig {
     pub dodge_menu_bar: bool,
     /// Width of each shoulder beside the closed notch, in points (see [`Self::wing`]).
     pub wing_width: f64,
+    /// Width of the floating notch on displays without a hardware notch
+    /// (external displays), in points (see [`Self::external_notch`]).
+    pub external_width: f64,
+    /// Shoulder width on those displays (see [`Self::external_wing`]).
+    pub external_wing_width: f64,
     /// Respect "Increase contrast" by using brighter secondary text.
     pub high_contrast: bool,
     /// Accent colour theme: "system", "sunset", "ocean", "violet" or "forest".
     pub accent: String,
+}
+
+/// `v` held to `min`…`max`, or `fallback` when it is not a number.
+fn clamp_or(v: f64, min: f64, max: f64, fallback: f64) -> f64 {
+    if v.is_finite() { v.clamp(min, max) } else { fallback }
 }
 
 impl AppearanceConfig {
@@ -137,13 +147,25 @@ impl AppearanceConfig {
     /// Widest shoulder.
     pub const WING_MAX: f64 = 100.0;
 
-    /// The shoulder width in use, kept within [`Self::WING_MIN`]…[`Self::WING_MAX`].
+    /// Narrowest floating notch on an external display.
+    pub const EXTERNAL_MIN: f64 = 60.0;
+    /// Widest floating notch on an external display.
+    pub const EXTERNAL_MAX: f64 = 240.0;
+
+    /// The shoulder width beside the hardware notch, kept within
+    /// [`Self::WING_MIN`]…[`Self::WING_MAX`].
     pub fn wing(&self) -> f64 {
-        if self.wing_width.is_finite() {
-            self.wing_width.clamp(Self::WING_MIN, Self::WING_MAX)
-        } else {
-            crate::geometry::WING_WIDTH
-        }
+        clamp_or(self.wing_width, Self::WING_MIN, Self::WING_MAX, crate::geometry::WING_WIDTH)
+    }
+
+    /// The shoulder width on external displays (their own setting).
+    pub fn external_wing(&self) -> f64 {
+        clamp_or(self.external_wing_width, Self::WING_MIN, Self::WING_MAX, crate::geometry::WING_WIDTH)
+    }
+
+    /// The floating notch's width on external displays.
+    pub fn external_notch(&self) -> f64 {
+        clamp_or(self.external_width, Self::EXTERNAL_MIN, Self::EXTERNAL_MAX, crate::geometry::FLOATING_PILL_WIDTH)
     }
 }
 
@@ -159,6 +181,8 @@ impl Default for AppearanceConfig {
             show_wings: true,
             dodge_menu_bar: true,
             wing_width: crate::geometry::WING_WIDTH,
+            external_width: crate::geometry::FLOATING_PILL_WIDTH,
+            external_wing_width: crate::geometry::WING_WIDTH,
             high_contrast: false,
             accent: "system".to_owned(),
         }

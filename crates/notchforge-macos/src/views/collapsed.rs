@@ -69,7 +69,7 @@ impl CollapsedView {
         // bit is off (see `Controller::apply_frame` for the offset).
         let s = layout.shape(LayoutKind::CollapsedWithWings(WING_LEFT | WING_RIGHT));
         let (w, h) = (s.width, s.height);
-        let wing = layout.appearance.wing();
+        let wing = layout.wing();
         let root = FlippedView::new(mtm, rect(0.0, 0.0, w, h));
         let icon = 15.0;
         let iy = (h - icon) / 2.0;

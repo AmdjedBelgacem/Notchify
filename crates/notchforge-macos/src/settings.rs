@@ -1188,6 +1188,24 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                 |cfg, on| cfg.appearance.dodge_menu_bar = on,
             );
 
+            form.section("External displays");
+            form.slider(
+                "Notch width",
+                Some("The floating notch on displays without a hardware one"),
+                (AppearanceConfig::EXTERNAL_MIN, AppearanceConfig::EXTERNAL_MAX),
+                c.appearance.external_notch(),
+                |v| format!("{} pt", v.round() as u64),
+                |cfg, v| cfg.appearance.external_width = v.round(),
+            );
+            form.slider(
+                "Shoulder width",
+                Some("How far it reaches each side on those displays"),
+                (AppearanceConfig::WING_MIN, AppearanceConfig::WING_MAX),
+                c.appearance.external_wing(),
+                |v| format!("{} pt", v.round() as u64),
+                |cfg, v| cfg.appearance.external_wing_width = v.round(),
+            );
+
             form.section("Startup");
             form.switch("Open at login", None, crate::login_item::is_enabled(), |cfg, on| {
                 cfg.general.launch_at_login = on;

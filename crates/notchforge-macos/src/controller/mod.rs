@@ -58,6 +58,24 @@ const KEY_DIGITS: [u16; 5] = [18, 19, 20, 21, 23];
 /// click on them resumes it, before the wings fold back to the indicators.
 const PAUSED_WINGS_MS: i64 = 5 * 60 * 1000;
 
+/// What drives a running animation: the display's own refresh where the
+/// panel is on a screen (frames land exactly on vsync, at up to 120 Hz on
+/// ProMotion), a timer otherwise.
+enum Anim {
+    /// The link retains its target until it is invalidated.
+    Link(Retained<objc2_quartz_core::CADisplayLink>),
+    Timer(Retained<NSTimer>),
+}
+
+impl Anim {
+    fn stop(self) {
+        match self {
+            Anim::Link(link) => link.invalidate(),
+            Anim::Timer(t) => t.invalidate(),
+        }
+    }
+}
+
 /// Frame statistics of the most recent transition (exposed for the self-test).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct AnimStats {
@@ -108,7 +126,7 @@ pub fn wing_mask_for(layout: &NotchLayout, content: u8, occupancy: &[Rect]) -> u
     let mut mask = content;
     // A little past the shoulder's edge too: an item flush against it would
     // look covered.
-    let wing = layout.appearance.wing() + WING_MARGIN;
+    let wing = layout.wing() + WING_MARGIN;
     let left = Rect::new(notch.x - wing, notch.y, wing, notch.height);
     let right = Rect::new(notch.max_x(), notch.y, wing, notch.height);
     if occupancy.iter().any(|r| r.intersects(&left)) {
@@ -186,8 +204,10 @@ pub struct Controller {
     layout: RefCell<NotchLayout>,
     kind: Cell<LayoutKind>,
     timers: RefCell<HashMap<TimerKind, Retained<NSTimer>>>,
-    anim: RefCell<Option<Retained<NSTimer>>>,
+    anim: RefCell<Option<Anim>>,
     last_tick: Cell<Option<Instant>>,
+    /// The display link's last target timestamp.
+    last_target: Cell<Option<f64>>,
     anim_stats: Cell<AnimStats>,
     snapshot: RefCell<Arc<Snapshot>>,
     config: RefCell<Arc<Config>>,
@@ -328,6 +348,7 @@ impl Controller {
             timers: RefCell::new(HashMap::new()),
             anim: RefCell::new(None),
             last_tick: Cell::new(None),
+            last_target: Cell::new(None),
             anim_stats: Cell::new(AnimStats::default()),
             snapshot: RefCell::new(Arc::new(Snapshot::default())),
             config: RefCell::new(config),
@@ -437,7 +458,43 @@ impl Controller {
         for e in effects {
             self.apply_effect(e);
         }
+        // The pointer is resting on the notch: the panel is about to open.
+        let now_state = self.machine.borrow().state();
+        if was == State::Collapsed && now_state == State::Arming {
+            self.prewarm_expanded();
+        }
+        // It left again before opening: shrink the window back.
+        if was == State::Arming && now_state == State::Collapsed && self.anim.borrow().is_none() {
+            self.settle_window();
+        }
         self.update_visibility();
+    }
+
+    /// Build the open panel's content and draw it once, invisibly, while the
+    /// hover delay runs. Opening then only moves pixels that already exist;
+    /// otherwise the first frames stall while every label and image renders.
+    fn prewarm_expanded(&self) {
+        self.render_expanded(true);
+        // Grow the (still click-through) window to its full size now too:
+        // resizing it as the island starts moving stalls the first frames
+        // while the window server reallocates it.
+        let max = self.layout.borrow().window_frame();
+        self.panel.setFrame_display(screen::to_nsrect(max), false);
+        self.root.setFrame(rect(0.0, 0.0, max.width, max.height));
+        self.apply_frame();
+        let views = self.views.borrow();
+        let c = views.container(LayoutKind::Expanded);
+        if !c.isHidden() {
+            objc2_quartz_core::CATransaction::flush();
+            return;
+        }
+        let alpha = c.alphaValue();
+        c.setAlphaValue(0.0);
+        c.setHidden(false);
+        c.displayIfNeeded();
+        objc2_quartz_core::CATransaction::flush();
+        c.setHidden(true);
+        c.setAlphaValue(alpha);
     }
     fn apply_effect(&self, e: Effect) {
         match e {
@@ -912,6 +969,11 @@ impl Controller {
         self.panel.setFrame_display(screen::to_nsrect(max), false);
         self.root.setFrame(rect(0.0, 0.0, max.width, max.height));
         self.apply_frame();
+        // Commit the resized window and the new content now, before the first
+        // animation frame: left to the next run-loop pass, the window server
+        // takes the resize mid-animation and the opening stalls a few frames.
+        self.panel.displayIfNeeded();
+        objc2_quartz_core::CATransaction::flush();
         self.start_animation();
     }
 
@@ -924,20 +986,56 @@ impl Controller {
             return;
         }
         self.last_tick.set(None);
+        self.last_target.set(None);
         self.anim_stats.set(AnimStats::default());
+        if self.panel.screen().is_some() {
+            let target = crate::ui::ActionTarget::new(self.mtm, |sender| {
+                // The link's target timestamp is when this frame reaches the
+                // screen: stepping the spring to it keeps motion even.
+                let target = sender.map(|s| {
+                    // SAFETY: the display link passes itself as the sender.
+                    let link =
+                        unsafe { &*(s as *const objc2::runtime::AnyObject as *const objc2_quartz_core::CADisplayLink) };
+                    link.targetTimestamp()
+                });
+                crate::app::with_controller(|c| c.tick(target));
+            });
+            // SAFETY: a valid target and its one-argument selector.
+            let link = unsafe {
+                self.panel.displayLinkWithTarget_selector(target.as_any(), crate::ui::ActionTarget::action())
+            };
+            link.setPreferredFrameRateRange(objc2_quartz_core::CAFrameRateRange {
+                minimum: 60.0,
+                maximum: 120.0,
+                preferred: 120.0,
+            });
+            // SAFETY: the main run loop, in the common modes (keeps running during tracking).
+            unsafe { link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes) };
+            *self.anim.borrow_mut() = Some(Anim::Link(link));
+            return;
+        }
         let block = RcBlock::new(|_t: NonNull<NSTimer>| {
-            crate::app::with_controller(|c| c.tick());
+            crate::app::with_controller(|c| c.tick(None));
         });
         // SAFETY: documented NSTimer API.
         let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(FRAME_INTERVAL, true, &block) };
         // SAFETY: valid timer and mode.
         unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes) };
-        *self.anim.borrow_mut() = Some(timer);
+        *self.anim.borrow_mut() = Some(Anim::Timer(timer));
     }
 
-    fn tick(&self) {
+    /// One animation frame. `target` is the display link's timestamp for
+    /// when this frame will be shown (None when a timer drives it).
+    fn tick(&self, target: Option<f64>) {
         let now = Instant::now();
-        let dt = self.last_tick.replace(Some(now)).map_or(FRAME_INTERVAL, |t| (now - t).as_secs_f64());
+        let wall = self.last_tick.replace(Some(now)).map_or(FRAME_INTERVAL, |t| (now - t).as_secs_f64());
+        let dt = match (target, self.last_target.replace(target)) {
+            // Frame to frame on the display's clock, never a skipped-ahead
+            // jump larger than a few frames.
+            (Some(t), Some(prev)) if t > prev => (t - prev).min(4.0 * FRAME_INTERVAL.max(1.0 / 60.0)),
+            (Some(_), _) => FRAME_INTERVAL,
+            (None, _) => wall,
+        };
         let mut st = self.anim_stats.get();
         st.frames += 1;
         st.duration_secs += dt;
@@ -947,8 +1045,8 @@ impl Controller {
         self.pill_x.borrow_mut().step(dt);
         self.apply_frame();
         if self.spring.borrow().is_settled() && self.pill_x.borrow().is_settled() {
-            if let Some(t) = self.anim.borrow_mut().take() {
-                t.invalidate();
+            if let Some(a) = self.anim.borrow_mut().take() {
+                a.stop();
             }
             self.settle_window();
         }
@@ -2013,8 +2111,8 @@ impl Controller {
         for t in self.timers.borrow_mut().drain() {
             t.1.invalidate();
         }
-        if let Some(t) = self.anim.borrow_mut().take() {
-            t.invalidate();
+        if let Some(a) = self.anim.borrow_mut().take() {
+            a.stop();
         }
         let center = objc2_foundation::NSNotificationCenter::defaultCenter();
         for o in self.observers.borrow_mut().drain(..) {
