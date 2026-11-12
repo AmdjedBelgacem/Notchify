@@ -575,28 +575,31 @@ impl MediaPage {
             &t,
             rect(rw - PAD - 30.0, bar_y - 4.0, 28.0, 28.0),
         );
-        make_card(&like, &white(0.16), 14.0);
+        make_card(&like, &white(0.14), 15.0);
         like.setHidden(true);
         player.addSubview(&like);
 
         // ── volume and output ──
-        // ── volume: a thin bar between two speakers, the output at the end ──
+        // ── volume: a thin bar between two speakers, then the microphone and
+        // output buttons at the end ──
         let volume_y = row_y + 56.0 + 8.0;
         let output_right = lw - PAD;
+        // The two round buttons (30 pt each, 6 apart) and the gap before them.
+        let buttons_w = 30.0 + 6.0 + 30.0;
         let quiet = symbol_view(mtm, "speaker.fill", 11.0, &white(0.7), rect(PAD, volume_y + 7.0, 14.0, 14.0), "");
         let loud = symbol_view(
             mtm,
             "speaker.wave.3.fill",
             11.0,
             &white(0.7),
-            rect(output_right - 30.0 - 10.0 - 20.0, volume_y + 7.0, 20.0, 14.0),
+            rect(output_right - buttons_w - 12.0 - 20.0, volume_y + 7.0, 20.0, 14.0),
             "",
         );
         player.addSubview(&quiet);
         player.addSubview(&loud);
         let volume = ThinSlider::capsule(
             mtm,
-            rect(PAD + 22.0, volume_y + 4.0, output_right - 30.0 - 10.0 - 26.0 - PAD - 22.0, 20.0),
+            rect(PAD + 22.0, volume_y + 4.0, output_right - buttons_w - 12.0 - 26.0 - PAD - 22.0, 20.0),
             5.0,
             &white(0.2),
             &white(0.9),
@@ -848,6 +851,8 @@ impl MediaPage {
             rect(lw - PAD - lib_w, PAD, lib_w, 30.0),
         );
         player.addSubview(&library);
+        // The heart sits beside Library, clear of the progress line.
+        like.setFrame(rect(lw - PAD - lib_w - 8.0 - 30.0, PAD, 30.0, 30.0));
         let t = targets.add(mtm, move |_| c2.setHidden(true));
         let done = pill_button(
             mtm,
