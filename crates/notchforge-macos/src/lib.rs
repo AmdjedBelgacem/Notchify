@@ -10,6 +10,8 @@ pub mod app;
 pub mod bridge;
 #[cfg(target_os = "macos")]
 pub mod call_watch;
+/// Screenshots, screen recording and voice memos from the notch.
+pub mod capture;
 #[cfg(target_os = "macos")]
 pub mod controller;
 #[cfg(target_os = "macos")]
@@ -20,6 +22,8 @@ pub mod ffi;
 pub mod glass;
 #[cfg(target_os = "macos")]
 pub mod hotkey;
+/// Interface language (English, French, Arabic).
+pub mod i18n;
 #[cfg(target_os = "macos")]
 pub mod icons;
 #[cfg(target_os = "macos")]

@@ -328,10 +328,29 @@ pub fn request_automation() {
         crate::permissions::open_settings(Permission::Automation);
         return;
     }
-    std::thread::spawn(|| {
-        for p in MediaPlayer::ALL {
-            let _ = automation_status(p, true);
+    // macOS only asks about an app that is running: start each installed
+    // player hidden in the background, then ask for each one in turn.
+    let players: Vec<MediaPlayer> = MediaPlayer::ALL.into_iter().filter(|p| is_installed(*p)).collect();
+    for p in &players {
+        let running = !NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(p.bundle_id()))
+            .is_empty();
+        if !running {
+            let _ = std::process::Command::new("/usr/bin/open").args(["-g", "-j", "-b", p.bundle_id()]).status();
         }
+    }
+    std::thread::spawn(move || {
+        for p in players {
+            for _ in 0..15 {
+                if automation_status(p, true) != ERR_PROC_NOT_FOUND {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(700));
+            }
+        }
+        AUTOMATION.store(encode(compute_automation_state()), Ordering::Release);
         dispatch2::DispatchQueue::main().exec_async(|| send(ProviderCommand::MediaChanged(None)));
     });
 }
+
+/// `procNotFound`: the target app isn't running, so nothing can be asked.
+const ERR_PROC_NOT_FOUND: i32 = -600;

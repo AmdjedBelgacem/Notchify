@@ -160,6 +160,8 @@ pub struct Controller {
     hang_up_tried_ms: Cell<i64>,
     known_calls: RefCell<Vec<notchforge_core::calls::CallId>>,
     call_timer: RefCell<Option<Retained<NSTimer>>>,
+    /// Ticks once a second while a timer or stopwatch runs.
+    clock_timer: RefCell<Option<Retained<NSTimer>>>,
     /// What the machine last asked for, restored when calls stop.
     wanted_kind: Cell<LayoutKind>,
     wanted_interactive: Cell<bool>,
@@ -319,6 +321,7 @@ impl Controller {
             hang_up_tried_ms: Cell::new(0),
             known_calls: RefCell::new(Vec::new()),
             call_timer: RefCell::new(None),
+            clock_timer: RefCell::new(None),
             wanted_kind: Cell::new(LayoutKind::Collapsed),
             wanted_interactive: Cell::new(false),
             fs_active: Cell::new(false),
@@ -475,13 +478,6 @@ impl Controller {
     /// otherwise the first frames stall while every label and image renders.
     fn prewarm_expanded(&self) {
         self.render_expanded(true);
-        // Grow the (still click-through) window to its full size now too:
-        // resizing it as the island starts moving stalls the first frames
-        // while the window server reallocates it.
-        let max = self.layout.borrow().window_frame();
-        self.panel.setFrame_display(screen::to_nsrect(max), false);
-        self.root.setFrame(rect(0.0, 0.0, max.width, max.height));
-        self.apply_frame();
         let views = self.views.borrow();
         let c = views.container(LayoutKind::Expanded);
         if !c.isHidden() {
@@ -680,7 +676,7 @@ impl Controller {
         let recent_paused =
             current.filter(|n| !n.is_playing()).filter(|_| now_ms() - self.last_playing_ms.get() < PAUSED_WINGS_MS);
         let browser = snap.audio.playing_app().filter(|_| media_on && playing.is_none());
-        if !snap.wants_wings_with(media_on) && recent_paused.is_none() {
+        if !snap.wants_wings_with(media_on) && recent_paused.is_none() && crate::capture::active().is_none() {
             return 0;
         }
         if !cfg.appearance.dodge_menu_bar {
@@ -692,7 +688,9 @@ impl Controller {
         // An agent working now warrants a wing on either side (the render
         // picks whichever is free).
         let agent_wing = !snap.agent_active.is_empty();
+        let clock_wing = snap.clock_wants_wings() || crate::capture::active().is_some();
         let left = agent_wing
+            || clock_wing
             || call_wing
             || playing.is_some()
             || browser.is_some()
@@ -701,6 +699,7 @@ impl Controller {
             || snap.battery.as_ref().is_some_and(|b| b.present && b.charging)
             || !snap.tray.is_empty();
         let right = agent_wing
+            || clock_wing
             || call_wing
             || snap.unread > 0
             || snap.focus.active == Some(true)
@@ -966,14 +965,7 @@ impl Controller {
         // Give the animation room: the window grows to its maximum while moving
         // and shrinks back around the island once settled.
         let max = self.layout.borrow().window_frame();
-        self.panel.setFrame_display(screen::to_nsrect(max), false);
-        self.root.setFrame(rect(0.0, 0.0, max.width, max.height));
-        self.apply_frame();
-        // Commit the resized window and the new content now, before the first
-        // animation frame: left to the next run-loop pass, the window server
-        // takes the resize mid-animation and the opening stalls a few frames.
-        self.panel.displayIfNeeded();
-        objc2_quartz_core::CATransaction::flush();
+        self.resize_window(max);
         self.start_animation();
     }
 
@@ -1140,18 +1132,35 @@ impl Controller {
         self.ear_radius.set(e);
     }
 
-    /// Shrink the window to the island (plus room for the flares) so little
-    /// outside it intercepts clicks.
+    /// Keep the panel at its one fixed size for this screen (room for the
+    /// open panel and its shadow) and redraw the island in it. The window is
+    /// never resized while hovering, opening or closing: a resize shows the
+    /// new bounds a frame before the island inside has moved (the notch's
+    /// sides jump) and stalls the first frames of an animation. Outside the
+    /// island's shape it lets the pointer through.
     fn settle_window(&self) {
-        let s = *self.spring.borrow();
-        let g = self.layout.borrow().island_global(s.width.value, s.height.value);
-        // The flares need room beside a physical notch; the floating capsule
-        // only needs a pixel or two so its rounded corners are not clipped.
-        let ear = if self.layout.borrow().notch.floating { 2.0 } else { notchforge_core::geometry::NOTCH_EAR_MAX };
-        let win = notchforge_core::geometry::Rect::new(g.x - ear, g.y, g.width + 2.0 * ear, g.height);
-        self.panel.setFrame_display(screen::to_nsrect(win), true);
-        self.root.setFrame(rect(0.0, 0.0, win.width, win.height));
+        let frame = self.layout.borrow().window_frame();
+        self.resize_window(frame);
+    }
+
+    /// Move the panel to `frame` (global) only when it isn't there already,
+    /// then place the island for the current spring values.
+    fn resize_window(&self, frame: notchforge_core::geometry::Rect) {
+        let want = screen::to_nsrect(frame);
+        let have = self.panel.frame();
+        let moved = (have.origin.x - want.origin.x).abs() > 0.5
+            || (have.origin.y - want.origin.y).abs() > 0.5
+            || (have.size.width - want.size.width).abs() > 0.5
+            || (have.size.height - want.size.height).abs() > 0.5;
+        if moved {
+            self.panel.setFrame_display(want, false);
+            self.root.setFrame(rect(0.0, 0.0, frame.width, frame.height));
+        }
         self.apply_frame();
+        if moved {
+            self.panel.displayIfNeeded();
+            objc2_quartz_core::CATransaction::flush();
+        }
     }
 
     /// Screen configuration changed: recompute geometry and rebuild views.
@@ -1858,6 +1867,7 @@ impl Controller {
             self.last_playing_ms.set(now_ms());
         }
         self.sync_calls(&snap);
+        self.set_clock_timer(Self::clock_running(&snap));
         self.auto_focus_meeting(&snap);
         self.render_small(&snap);
         self.refresh_wing_mask();
@@ -1914,6 +1924,52 @@ impl Controller {
                     tracing::warn!(error = %e, "auto-focus could not run the Focus shortcuts");
                 }
             }
+        }
+    }
+
+    /// Something counting by the second: a timer, the stopwatch, a recording.
+    fn clock_running(snap: &Snapshot) -> bool {
+        snap.timer.as_ref().is_some_and(|t| !t.expired)
+            || snap.stopwatch.as_ref().is_some_and(|s| s.running())
+            || crate::capture::active().is_some()
+    }
+
+    /// A recording started or stopped: show it beside the notch, ticking.
+    pub fn capture_changed(&self) {
+        let snap = self.snapshot.borrow().clone();
+        self.set_clock_timer(Self::clock_running(&snap));
+        self.render_small(&snap);
+        self.refresh_wing_mask();
+        self.refresh_expanded();
+    }
+
+    /// Run the once-a-second clock tick while a timer or stopwatch counts.
+    fn set_clock_timer(&self, on: bool) {
+        let mut slot = self.clock_timer.borrow_mut();
+        if on && slot.is_none() {
+            let block = RcBlock::new(|_t: NonNull<NSTimer>| {
+                crate::app::with_controller(|c| c.clock_second());
+            });
+            // SAFETY: documented NSTimer API; the block is copied by the timer.
+            let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(1.0, true, &block) };
+            // SAFETY: valid timer and run loop mode constant.
+            unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes) };
+            *slot = Some(timer);
+        } else if !on {
+            if let Some(t) = slot.take() {
+                t.invalidate();
+            }
+        }
+    }
+
+    /// Once a second while a clock counts: move the shoulders and Day on,
+    /// from the last snapshot with the time brought up to now.
+    fn clock_second(&self) {
+        let mut snap = (**self.snapshot.borrow()).clone();
+        snap.now_ms = now_ms();
+        self.render_small(&snap);
+        if self.kind.get() == LayoutKind::Expanded {
+            self.views.borrow().expanded.tick_day(&snap);
         }
     }
 
@@ -2034,6 +2090,13 @@ impl Controller {
 
     pub fn ignores_mouse(&self) -> bool {
         self.panel.ignoresMouseEvents()
+    }
+
+    /// Redraw the open panel from the current snapshot (a page changed
+    /// what it shows without new data).
+    pub fn refresh_expanded(&self) {
+        self.expanded_dirty.set(true);
+        self.render_expanded(false);
     }
 
     pub fn current_snapshot(&self) -> Arc<Snapshot> {

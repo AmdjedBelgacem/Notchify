@@ -22,7 +22,7 @@
 
 use super::kit::{self, Btn, GAP, PAD};
 use crate::app::with_controller;
-use crate::ui::{FlippedView, Targets, Weight, click_overlay, font, label, rect, remove_all_subviews, shape_view};
+use crate::ui::{FlippedView, Targets, Weight, click_overlay, font, label, rect, remove_all_subviews};
 use notchforge_core::engine::{Command, Snapshot};
 use notchforge_core::model::{AuthTarget, Notification, NotificationKind};
 use objc2::MainThreadMarker;
@@ -407,11 +407,8 @@ impl NowPage {
         let l = crate::ui::rich_label(mtm, &line, rect(x, ay + 4.0, tw, 19.0));
         l.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingTail);
         self.doc.addSubview(&l);
-        // A short sweep that moves with the clock: busy, without a fake percentage.
-        let track = shape_view(mtm, rect(x, ay + 32.0, tw, 3.0), &kit::hairline(), 1.5);
-        let phase = ((now / 500) % 20) as f64 / 20.0;
-        track.addSubview(&shape_view(mtm, rect((tw * 0.7) * phase, 0.0, tw * 0.3, 3.0), &kit::accent(), 1.5));
-        self.doc.addSubview(&track);
+        // Busy, without a fake percentage: a sweep gliding along a track.
+        self.doc.addSubview(&kit::sweep(mtm, rect(x, ay + 32.0, tw, 3.0)));
         y + ROW_H
     }
 

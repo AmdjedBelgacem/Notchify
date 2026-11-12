@@ -35,10 +35,19 @@ pub struct DayPage {
     mtm: MainThreadMarker,
     body: Retained<FlippedView>,
     targets: Targets,
-    last: Cell<(u64, i64)>,
+    last: Rc<Cell<(u64, i64)>>,
     /// Reminders ticked off here, hidden before the calendar catches up.
     done: Rc<RefCell<Vec<String>>>,
     mic_muted: Cell<Option<bool>>,
+    /// Which clock tab shows: timer, alarm or stopwatch.
+    clock_tab: Rc<Cell<ClockTab>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClockTab {
+    Timer,
+    Alarm,
+    Stopwatch,
 }
 
 impl DayPage {
@@ -51,9 +60,10 @@ impl DayPage {
             mtm,
             body,
             targets: Targets::default(),
-            last: Cell::new((u64::MAX, 0)),
+            last: Rc::new(Cell::new((u64::MAX, 0))),
             done: Rc::default(),
             mic_muted: Cell::new(None),
+            clock_tab: Rc::new(Cell::new(ClockTab::Timer)),
         }
     }
 
@@ -63,8 +73,10 @@ impl DayPage {
     }
 
     pub fn update(&self, snap: &Snapshot) {
-        // The timer counts down by the second; otherwise every half minute.
-        let tick = if snap.timer.is_some() { snap.now_ms / 1_000 } else { snap.now_ms / 30_000 };
+        // A running timer or stopwatch counts by the second; otherwise every
+        // half minute.
+        let running = snap.timer.is_some() || snap.stopwatch.as_ref().is_some_and(|s| s.running());
+        let tick = if running { snap.now_ms / 1_000 } else { snap.now_ms / 30_000 };
         let key = (snap.generation, tick);
         if self.last.replace(key) == key {
             return;
@@ -78,7 +90,7 @@ impl DayPage {
         let y2 = TOP_H + 14.0;
         let foot = h - 30.0;
         self.reminders(snap, 0.0, y2, w - TIMER_W - PAD, foot - y2 - 8.0);
-        self.timer(snap, w - TIMER_W, y2);
+        self.clock(snap, w - TIMER_W, y2);
         self.footer(snap, foot, w);
     }
 
@@ -306,12 +318,146 @@ impl DayPage {
         }
     }
 
+    /// The clock: Timer, Alarm and Stopwatch tabs.
+    fn clock(&self, snap: &Snapshot, x: f64, y: f64) {
+        let mtm = self.mtm;
+        // Open on whatever is running, unless a tab was picked.
+        let tabs = [(ClockTab::Timer, "Timer"), (ClockTab::Alarm, "Alarm"), (ClockTab::Stopwatch, "Stopwatch")];
+        let mut tx = x + 4.0;
+        for (tab, title) in tabs {
+            let on = self.clock_tab.get() == tab;
+            let tw =
+                crate::ui::text_width(&crate::ui::attributed(title, &font(12.0, Weight::Semibold), &kit::text())) + 2.0;
+            let l = label(
+                mtm,
+                title,
+                &font(12.0, Weight::Semibold),
+                &*if on { kit::text() } else { kit::text3() },
+                rect(tx, y, tw + 4.0, 16.0),
+            );
+            self.body.addSubview(&l);
+            let (pick, last) = (self.clock_tab.clone(), self.last.clone());
+            let t = self.targets.add(mtm, move |_| {
+                pick.set(tab);
+                last.set((u64::MAX, 0));
+                with_controller(|c| c.refresh_expanded());
+            });
+            self.body.addSubview(&crate::ui::click_overlay(mtm, &t, rect(tx - 4.0, y - 4.0, tw + 10.0, 24.0), title));
+            tx += tw + 14.0;
+        }
+        match self.clock_tab.get() {
+            ClockTab::Timer => self.timer(snap, x, y + 22.0),
+            ClockTab::Alarm => self.alarms(snap, x, y + 22.0),
+            ClockTab::Stopwatch => self.stopwatch(snap, x, y + 22.0),
+        }
+    }
+
+    /// Alarms set, soonest first, and a way to add one.
+    fn alarms(&self, snap: &Snapshot, x: f64, y: f64) {
+        let mtm = self.mtm;
+        let w = TIMER_W;
+        let mut ry = y;
+        for a in snap.alarms.iter().take(2) {
+            let row = kit::tile_view(mtm, rect(x, ry, w, 40.0));
+            row.addSubview(&label(
+                mtm,
+                &kit::clock(a.at_ms),
+                &crate::ui::mono_digits(18.0, Weight::Medium),
+                &kit::text(),
+                rect(12.0, 9.0, 70.0, 22.0),
+            ));
+            let when = kit::due_label(a.at_ms, snap.now_ms);
+            let what = if a.label.is_empty() { when } else { format!("{} · {when}", a.label) };
+            row.addSubview(&kit::line(
+                mtm,
+                &what,
+                12.0,
+                Weight::Regular,
+                &kit::text2(),
+                rect(78.0, 12.0, w - 78.0 - 70.0, 16.0),
+            ));
+            let id = a.id;
+            let bw = kit::button_width("Remove", 26.0);
+            row.addSubview(&kit::button(
+                mtm,
+                &self.targets,
+                "Remove",
+                Btn::Secondary,
+                rect(w - 8.0 - bw, 7.0, bw, 26.0),
+                move || {
+                    crate::app::send(Command::RemoveAlarm(id));
+                },
+            ));
+            self.body.addSubview(&row);
+            ry += 46.0;
+        }
+        if snap.alarms.is_empty() {
+            self.body.addSubview(&kit::line(
+                mtm,
+                "No alarms set",
+                12.0,
+                Weight::Regular,
+                &kit::text3(),
+                rect(x + 4.0, ry + 2.0, w - 8.0, 16.0),
+            ));
+            ry += 24.0;
+        }
+        let b = kit::button(mtm, &self.targets, "Add alarm…", Btn::Secondary, rect(x, ry, w, 30.0), || {
+            if let Some((at_ms, label)) = crate::app::ask_alarm() {
+                crate::app::send(Command::AddAlarm { at_ms, label });
+            }
+        });
+        crate::ui::make_card(&b, &kit::tile(), 15.0);
+        self.body.addSubview(&b);
+    }
+
+    /// A stopwatch counting up: start, pause, reset.
+    fn stopwatch(&self, snap: &Snapshot, x: f64, y: f64) {
+        let mtm = self.mtm;
+        let w = TIMER_W;
+        let sw = snap.stopwatch.clone().unwrap_or_default();
+        let ms = sw.elapsed_at(snap.now_ms);
+        let secs = ms / 1000;
+        let text = if secs >= 3600 {
+            format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
+        } else {
+            format!("{:02}:{:02}", secs / 60, secs % 60)
+        };
+        let row = kit::tile_view(mtm, rect(x, y, w, 52.0));
+        row.addSubview(&label(
+            mtm,
+            &text,
+            &crate::ui::mono_digits(26.0, Weight::Medium),
+            &*if sw.running() { kit::text() } else { kit::text2() },
+            rect(14.0, 11.0, w - 28.0, 30.0),
+        ));
+        self.body.addSubview(&row);
+        let by = y + 60.0;
+        let (main_title, main_cmd) = if sw.running() {
+            ("Pause", Command::PauseStopwatch)
+        } else if ms > 0 {
+            ("Resume", Command::StartStopwatch)
+        } else {
+            ("Start", Command::StartStopwatch)
+        };
+        let half = (w - 6.0) / 2.0;
+        let start = kit::button(mtm, &self.targets, main_title, Btn::Primary, rect(x, by, half, 30.0), move || {
+            crate::app::send(main_cmd.clone());
+        });
+        self.body.addSubview(&start);
+        let reset =
+            kit::button(mtm, &self.targets, "Reset", Btn::Secondary, rect(x + half + 6.0, by, half, 30.0), || {
+                crate::app::send(Command::ResetStopwatch);
+            });
+        crate::ui::make_card(&reset, &kit::tile(), 15.0);
+        self.body.addSubview(&reset);
+    }
+
     /// The running timer, or one-tap presets.
     fn timer(&self, snap: &Snapshot, x: f64, y: f64) {
         let mtm = self.mtm;
         let w = TIMER_W;
-        self.body.addSubview(&kit::heading(mtm, "Timer", rect(x + 4.0, y, w - 8.0, 16.0)));
-        let mut ty = y + 22.0;
+        let mut ty = y;
         if let Some(t) = &snap.timer {
             let row = kit::tile_view(mtm, rect(x, ty, w, 44.0));
             let left = if t.expired { 0 } else { (t.ends_at_ms - snap.now_ms).max(0) };

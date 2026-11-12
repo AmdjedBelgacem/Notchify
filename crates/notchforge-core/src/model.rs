@@ -1197,6 +1197,35 @@ pub struct TimerState {
     pub round: u8,
 }
 
+/// An alarm: an alert at a time of day.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Alarm {
+    pub id: u64,
+    /// Unix epoch ms when it goes off.
+    pub at_ms: i64,
+    #[serde(default)]
+    pub label: String,
+}
+
+/// A stopwatch counting up. Running while `started_ms` is set; `elapsed_ms`
+/// holds the time banked before the last start.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Stopwatch {
+    pub started_ms: Option<i64>,
+    pub elapsed_ms: i64,
+}
+
+impl Stopwatch {
+    pub fn running(&self) -> bool {
+        self.started_ms.is_some()
+    }
+
+    /// Time on the stopwatch at `now_ms`.
+    pub fn elapsed_at(&self, now_ms: i64) -> i64 {
+        self.elapsed_ms + self.started_ms.map_or(0, |s| (now_ms - s).max(0))
+    }
+}
+
 /// Focus / break lengths of a pomodoro cycle.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PomodoroCycle {
@@ -1389,10 +1418,14 @@ pub enum Permission {
     Automation,
     /// Calendar events via EventKit (System Settings › Privacy › Calendars).
     Calendar,
+    /// The microphone, for voice memos.
+    Microphone,
+    /// Screen Recording, for screenshots and recordings from the notch.
+    ScreenRecording,
 }
 
 impl Permission {
-    pub const ALL: [Permission; 7] = [
+    pub const ALL: [Permission; 9] = [
         Permission::Accessibility,
         Permission::FullDiskAccess,
         Permission::Location,
@@ -1400,7 +1433,15 @@ impl Permission {
         Permission::Bluetooth,
         Permission::Automation,
         Permission::Calendar,
+        Permission::Microphone,
+        Permission::ScreenRecording,
     ];
+
+    /// Only needed when its feature is used (a voice memo, a recording):
+    /// not being asked yet is fine and needs no attention.
+    pub fn on_demand(self) -> bool {
+        matches!(self, Permission::Microphone | Permission::ScreenRecording)
+    }
 
     pub fn title(self) -> &'static str {
         match self {
@@ -1411,6 +1452,8 @@ impl Permission {
             Permission::Bluetooth => "Bluetooth",
             Permission::Automation => "Automation (Spotify & Music)",
             Permission::Calendar => "Calendar",
+            Permission::Microphone => "Microphone",
+            Permission::ScreenRecording => "Screen Recording",
         }
     }
 
@@ -1441,6 +1484,10 @@ impl Permission {
             Permission::Calendar => {
                 "Lets Notchisland show your upcoming events from every connected calendar \
                  account (iCloud, Google, Exchange, subscribed). Read-only."
+            }
+            Permission::Microphone => "Records voice memos you start from the notch. Asked the first time.",
+            Permission::ScreenRecording => {
+                "Takes screenshots and screen recordings you start from the notch. Asked the first time."
             }
         }
     }
@@ -1475,6 +1522,19 @@ impl ProviderStatus {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn stopwatch_banks_time_across_pauses() {
+        let mut sw = Stopwatch { started_ms: Some(1_000), elapsed_ms: 0 };
+        assert!(sw.running());
+        assert_eq!(sw.elapsed_at(4_000), 3_000);
+        // Paused at 4 s with 3 s on it, resumed at 10 s.
+        sw = Stopwatch { started_ms: None, elapsed_ms: 3_000 };
+        assert_eq!(sw.elapsed_at(9_999), 3_000);
+        sw.started_ms = Some(10_000);
+        assert_eq!(sw.elapsed_at(12_500), 5_500);
+    }
+
     use super::*;
 
     #[test]

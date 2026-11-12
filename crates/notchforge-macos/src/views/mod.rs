@@ -39,6 +39,12 @@ pub struct Views {
 impl Views {
     pub fn new(mtm: MainThreadMarker, layout: &NotchLayout, config: &Arc<Config>, engine: &EngineHandle) -> Self {
         kit::set_accent(&config.appearance.accent);
+        crate::i18n::set_language(&config.appearance.language);
+        kit::set_reduce_motion(match config.appearance.reduced_motion {
+            notchforge_core::config::ReducedMotion::Always => true,
+            notchforge_core::config::ReducedMotion::Never => false,
+            notchforge_core::config::ReducedMotion::System => system_reduce_motion(),
+        });
         let palette = Palette::for_theme(
             config.appearance.high_contrast || system_increase_contrast(),
             &config.appearance.accent,

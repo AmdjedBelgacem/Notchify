@@ -242,7 +242,11 @@ impl ExpandedView {
             .iter()
             .map(|tab| {
                 let tab = *tab;
-                let (title, tw) = tab_title(tab);
+                let (title, base) = tab_title(tab);
+                // At least the designed width; wider when a translation needs it.
+                let tw = base.max(
+                    crate::ui::text_width(&attributed(title, &font(13.0, Weight::Medium), &p.secondary)).ceil() + 24.0,
+                );
                 let t = targets.add(mtm, move |_| {
                     with_controller(|c| c.show_expanded_tab(tab));
                 });
@@ -280,6 +284,8 @@ impl ExpandedView {
         // As on the boards: the tab keys, then Settings. Focus and pausing
         // notifications are on Day, beside the microphone.
         row_button("gearshape", "Settings", 0.0, crate::app::show_settings);
+        // Quick capture: screenshots, screen recording, voice memos.
+        row_button("camera.viewfinder", "Capture", 2.55, crate::capture::show_menu);
         let keys = label(
             mtm,
             "⌘1–5",
@@ -404,6 +410,13 @@ impl ExpandedView {
     }
 
     /// Switch pages. Opening the music page asks the providers for fresh data.
+    /// A clock tick: Day redraws its running timer or stopwatch if it shows.
+    pub fn tick_day(&self, snap: &Snapshot) {
+        if self.tab.get() == Tab::Planner {
+            self.day.update(snap);
+        }
+    }
+
     pub fn show_tab(&self, tab: Tab) {
         let previous = self.tab.replace(tab);
         self.now.root.setHidden(tab != Tab::Overview);
@@ -769,7 +782,7 @@ impl ExpandedView {
             let item = unsafe {
                 NSMenuItem::initWithTitle_action_keyEquivalent(
                     NSMenuItem::alloc(mtm),
-                    &crate::ui::ns(title),
+                    &crate::ui::ns(&crate::i18n::tr(title)),
                     Some(crate::ui::ActionTarget::action()),
                     &crate::ui::ns(""),
                 )

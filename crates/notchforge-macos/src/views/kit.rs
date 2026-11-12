@@ -24,6 +24,55 @@ pub const BUTTON_H: f64 = 30.0;
 thread_local! {
     /// The accent the user picked (Settings › Look), as RGB.
     static ACCENT: std::cell::Cell<(f64, f64, f64)> = const { std::cell::Cell::new(CYAN) };
+    /// Motion is reduced (the setting, or the system's when it follows it).
+    static REDUCE_MOTION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Set whether looping motion (progress sweeps) should hold still.
+pub fn set_reduce_motion(on: bool) {
+    REDUCE_MOTION.with(|r| r.set(on));
+}
+
+/// An indeterminate progress sweep, `w` wide: a short accent bar gliding
+/// along a hairline track, looping on Core Animation (no redraws from us).
+/// Its phase follows the media clock, so a sweep rebuilt with its list keeps
+/// gliding from where the previous one was instead of jumping back.
+pub fn sweep(mtm: MainThreadMarker, frame: NSRect) -> Retained<FlippedView> {
+    use objc2_quartz_core::{CABasicAnimation, CAMediaTiming, CAMediaTimingFunction, kCAMediaTimingFunctionEaseInEaseOut};
+    const PERIOD: f64 = 1.6;
+    let w = frame.size.width;
+    let h = frame.size.height;
+    let track = shape_view(mtm, frame, &hairline(), h / 2.0);
+    if let Some(l) = track.layer() {
+        l.setMasksToBounds(true);
+    }
+    let bar_w = (w * 0.3).max(24.0);
+    let still = REDUCE_MOTION.with(|r| r.get());
+    let bar = shape_view(mtm, rect(if still { (w - bar_w) / 2.0 } else { -bar_w }, 0.0, bar_w, h), &accent(), h / 2.0);
+    track.addSubview(&bar);
+    if !still {
+        if let Some(l) = bar.layer() {
+            let anim = CABasicAnimation::animationWithKeyPath(Some(&objc2_foundation::NSString::from_str(
+                "transform.translation.x",
+            )));
+            let from = objc2_foundation::NSNumber::new_f64(0.0);
+            let to = objc2_foundation::NSNumber::new_f64(w + bar_w);
+            // SAFETY: NSNumber values for a scalar key path.
+            unsafe {
+                anim.setFromValue(Some(&from));
+                anim.setToValue(Some(&to));
+            }
+            anim.setDuration(PERIOD);
+            anim.setRepeatCount(f32::INFINITY);
+            // SAFETY: a system timing function name.
+            let ease = unsafe { CAMediaTimingFunction::functionWithName(kCAMediaTimingFunctionEaseInEaseOut) };
+            anim.setTimingFunction(Some(&ease));
+            anim.setTimeOffset(objc2_quartz_core::CACurrentMediaTime() % PERIOD);
+            anim.setRemovedOnCompletion(false);
+            l.addAnimation_forKey(&anim, Some(&objc2_foundation::NSString::from_str("sweep")));
+        }
+    }
+    track
 }
 
 /// The island's own accent, and the "system" choice.

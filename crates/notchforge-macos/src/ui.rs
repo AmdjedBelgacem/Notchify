@@ -295,7 +295,8 @@ fn text_frame(frame: NSRect) -> NSRect {
 pub fn label(mtm: MainThreadMarker, text: &str, f: &NSFont, color: &NSColor, frame: NSRect) -> Retained<NSTextField> {
     let _ = mtm;
     // SAFETY: NSTextField's label factory, sent to our subclass.
-    let l: Retained<NSTextField> = unsafe { msg_send![text_label_class(), labelWithString: &*ns(text)] };
+    let l: Retained<NSTextField> =
+        unsafe { msg_send![text_label_class(), labelWithString: &*ns(&crate::i18n::tr(text))] };
     l.setFont(Some(f));
     l.setTextColor(Some(color));
     l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
@@ -313,7 +314,8 @@ pub fn wrapping_label(
 ) -> Retained<NSTextField> {
     let _ = mtm;
     // SAFETY: NSTextField's wrapping label factory, sent to our subclass.
-    let l: Retained<NSTextField> = unsafe { msg_send![text_label_class(), wrappingLabelWithString: &*ns(text)] };
+    let l: Retained<NSTextField> =
+        unsafe { msg_send![text_label_class(), wrappingLabelWithString: &*ns(&crate::i18n::tr(text))] };
     l.setFont(Some(f));
     l.setTextColor(Some(color));
     l.setMaximumNumberOfLines(lines);
@@ -328,7 +330,7 @@ pub fn wrapping_label(
 }
 
 pub fn set_text(l: &NSTextField, text: &str) {
-    l.setStringValue(&ns(text));
+    l.setStringValue(&ns(&crate::i18n::tr(text)));
 }
 
 pub fn symbol_image(name: &str, point_size: f64, accessibility: &str) -> Option<Retained<NSImage>> {
@@ -426,7 +428,12 @@ pub fn set_button_symbol(b: &NSButton, symbol: &str, point_size: f64, tooltip: &
 pub fn text_button(mtm: MainThreadMarker, title: &str, target: &ActionTarget, frame: NSRect) -> Retained<NSButton> {
     // SAFETY: valid target/selector; target is kept alive by the caller.
     let b = unsafe {
-        NSButton::buttonWithTitle_target_action(&ns(title), Some(target.as_any()), Some(ActionTarget::action()), mtm)
+        NSButton::buttonWithTitle_target_action(
+            &ns(&crate::i18n::tr(title)),
+            Some(target.as_any()),
+            Some(ActionTarget::action()),
+            mtm,
+        )
     };
     b.setControlSize(NSControlSize::Small);
     b.setFrame(frame);
@@ -435,7 +442,7 @@ pub fn text_button(mtm: MainThreadMarker, title: &str, target: &ActionTarget, fr
 
 pub fn set_accessibility_label(view: &NSView, text: &str) {
     // SAFETY: setAccessibilityLabel: exists on every NSView (NSAccessibility protocol).
-    let _: () = unsafe { msg_send![view, setAccessibilityLabel: &*ns(text)] };
+    let _: () = unsafe { msg_send![view, setAccessibilityLabel: &*ns(&crate::i18n::tr(text))] };
 }
 
 /// Make a view layer-backed with a rounded "card" background.
@@ -467,7 +474,13 @@ pub fn attributed(text: &str, f: &NSFont, color: &NSColor) -> Retained<objc2_fou
     let cv: &AnyObject = color;
     let dict = NSDictionary::<NSString, AnyObject>::from_slices(&[fk, ck], &[fv, cv]);
     // SAFETY: the attributes have the documented value types.
-    unsafe { NSAttributedString::initWithString_attributes(NSAttributedString::alloc(), &ns(text), Some(&dict)) }
+    unsafe {
+        NSAttributedString::initWithString_attributes(
+            NSAttributedString::alloc(),
+            &ns(&crate::i18n::tr(text)),
+            Some(&dict),
+        )
+    }
 }
 
 /// Borderless rounded button with an optional leading SF Symbol: the pill
@@ -695,7 +708,13 @@ pub fn attributed_tracked(
     let kv: &AnyObject = &n;
     let dict = NSDictionary::<NSString, AnyObject>::from_slices(&[fk, ck, kk], &[fv, cv, kv]);
     // SAFETY: the attributes have the documented value types.
-    unsafe { NSAttributedString::initWithString_attributes(NSAttributedString::alloc(), &ns(text), Some(&dict)) }
+    unsafe {
+        NSAttributedString::initWithString_attributes(
+            NSAttributedString::alloc(),
+            &ns(&crate::i18n::tr(text)),
+            Some(&dict),
+        )
+    }
 }
 
 /// Run `f` without Core Animation's implicit 0.25 s animations.

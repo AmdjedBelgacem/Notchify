@@ -14,6 +14,13 @@
     <!-- Hardened Runtime resource access: CoreLocation for weather. -->
     <key>com.apple.security.personal-information.location</key>
     <true/>
+    <!-- Hardened Runtime resource access: Calendar and Reminders for Day.
+         Without it macOS refuses EventKit silently (no prompt ever shows). -->
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
+    <!-- Hardened Runtime: the microphone, for voice memos. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
     <!-- Hardened Runtime: send Apple Events to Spotify / Music (Automation). -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>

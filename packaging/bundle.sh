@@ -142,6 +142,17 @@ if [[ "${INSTALL:-0}" == "1" ]]; then
     sed -i '' "s#$LEGACY_DEST/#$DEST/#g" "$LOGIN_AGENT"
   fi
   ditto "$APP" "$DEST"
+  # Only the installed copy may stay registered with macOS: a build left in
+  # dist/ shows up as a second Notchisland in Spotlight, Launchpad and the
+  # Privacy & Security lists. The zip in dist/ (release builds) is kept.
+  LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  for stale in "$APP" "$DIST/$LEGACY_APP_NAME.app"; do
+    if [[ -d "$stale" ]]; then
+      "$LSREGISTER" -u "$stale" >/dev/null 2>&1 || true
+      rm -rf "$stale"
+    fi
+  done
+  "$LSREGISTER" -f "$DEST" >/dev/null 2>&1 || true
   open "$DEST"
   echo "==> Installed and launched build $BUILD"
 else

@@ -181,7 +181,9 @@ impl Pane {
             }
             Pane::Day => "weather location units celsius fahrenheit calendar battery airpods focus schedule shortcuts",
             Pane::Shelf => "files tray drop downloads screenshots airdrop",
-            Pane::Permissions => "accessibility full disk access location automation privacy bluetooth calendar",
+            Pane::Permissions => {
+                "accessibility full disk access location automation privacy bluetooth calendar microphone screen recording"
+            }
             Pane::Advanced => "config file toml export import logs reset",
         }
     }
@@ -197,7 +199,8 @@ impl Pane {
             Pane::Permissions => {
                 let ok = Permission::ALL.iter().filter(|p| allowed(permissions::state(**p))).count();
                 let all = Permission::ALL.len();
-                Some((format!("{ok} of {all} allowed"), if ok == all { Tone::Ok } else { Tone::Warn }))
+                let calm = Permission::ALL.iter().all(|p| settled(*p));
+                Some((format!("{ok} of {all} allowed"), if calm { Tone::Ok } else { Tone::Warn }))
             }
             _ => None,
         }
@@ -208,9 +211,16 @@ fn allowed(s: PermissionState) -> bool {
     matches!(s, PermissionState::Granted | PermissionState::NotRequired)
 }
 
+/// Needs nothing from the user right now: allowed, or an on-demand one
+/// (microphone, screen recording) that simply hasn't been asked yet.
+fn settled(p: Permission) -> bool {
+    let s = permissions::state(p);
+    allowed(s) || (p.on_demand() && s == PermissionState::NotDetermined)
+}
+
 /// Whether any permission still waits for the user (a dot in the sidebar).
 fn permissions_need_you() -> bool {
-    Permission::ALL.iter().any(|p| !allowed(permissions::state(*p)))
+    Permission::ALL.iter().any(|p| !settled(*p))
 }
 
 /// Meaning of a status: a dot's colour.
@@ -504,7 +514,7 @@ impl Form<'_> {
             let item = unsafe {
                 NSMenuItem::initWithTitle_action_keyEquivalent(
                     NSMenuItem::alloc(self.mtm),
-                    &ns(name),
+                    &ns(&crate::i18n::tr(name)),
                     Some(ActionTarget::action()),
                     &ns(""),
                 )
@@ -844,6 +854,8 @@ impl Form<'_> {
             Permission::Bluetooth => "dot.radiowaves.left.and.right",
             Permission::Automation => "gearshape.2",
             Permission::Calendar => "calendar",
+            Permission::Microphone => "mic",
+            Permission::ScreenRecording => "rectangle.dashed.badge.record",
         };
         self.action(title, Some(why), Some((word, tone)), buttons, Some(Mark::Symbol(symbol)));
     }
@@ -946,6 +958,7 @@ impl SettingsWindow {
         self.targets.clear();
         // Controls tint with the accent the user picked.
         kit::set_accent(&config.appearance.accent);
+        crate::i18n::set_language(&config.appearance.language);
         let root = shape_view(mtm, rect(0.0, 0.0, WIDTH, HEIGHT), &NSColor::blackColor(), 0.0);
         root.addSubview(&self.sidebar(mtm));
 
@@ -1221,6 +1234,18 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
             );
         }
         Pane::Look => {
+            form.section("Language");
+            let langs: Vec<&str> = crate::i18n::CHOICES.iter().map(|(_, name)| *name).collect();
+            let at = crate::i18n::CHOICES.iter().position(|(v, _)| *v == c.appearance.language).unwrap_or(0);
+            form.popup(
+                "Language",
+                Some("Notchisland's own text; Arabic keeps the left-to-right layout"),
+                &langs,
+                at,
+                |cfg, i| {
+                    cfg.appearance.language = crate::i18n::CHOICES[i].0.to_owned();
+                },
+            );
             form.section("Colour");
             form.accents(&c.appearance.accent);
             form.switch(

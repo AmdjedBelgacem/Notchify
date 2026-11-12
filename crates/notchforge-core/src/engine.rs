@@ -119,6 +119,19 @@ pub enum Command {
     },
     /// Cancel the running timer.
     CancelTimer,
+    /// Set an alarm for a moment (epoch ms).
+    AddAlarm {
+        at_ms: i64,
+        label: String,
+    },
+    /// Remove an alarm by id.
+    RemoveAlarm(u64),
+    /// Start (or resume) the stopwatch.
+    StartStopwatch,
+    /// Pause the stopwatch, keeping its time.
+    PauseStopwatch,
+    /// Put the stopwatch back to zero.
+    ResetStopwatch,
 }
 
 /// Immutable view of the state handed to the UI.
@@ -131,6 +144,9 @@ pub struct Snapshot {
     pub weather: Option<Weather>,
     pub calendar: CalendarState,
     pub timer: Option<TimerState>,
+    /// Alarms, soonest first.
+    pub alarms: Vec<crate::model::Alarm>,
+    pub stopwatch: Option<crate::model::Stopwatch>,
     pub focus: FocusState,
     pub audio: AudioState,
     pub media: MediaState,
@@ -169,6 +185,19 @@ impl Snapshot {
             || !self.agent_active.is_empty()
             || (media && (self.media.is_playing() || self.audio.is_playing()))
             || self.battery.as_ref().is_some_and(|b| b.charging || b.is_low())
+            || self.clock_wants_wings()
+    }
+
+    /// A running timer or stopwatch, or a meeting within 15 minutes: the
+    /// shoulders show the count (icon on the left, time on the right).
+    pub fn clock_wants_wings(&self) -> bool {
+        self.timer.is_some()
+            || self.stopwatch.as_ref().is_some_and(|s| s.running())
+            || self
+                .calendar
+                .events
+                .iter()
+                .any(|e| e.starts_at_ms > self.now_ms && e.starts_at_ms - self.now_ms <= 15 * 60_000)
     }
 }
 
@@ -216,6 +245,9 @@ struct AppState {
     calendar: CalendarState,
     /// A user-started countdown timer.
     timer: Option<TimerState>,
+    /// Alarms, soonest first.
+    alarms: Vec<crate::model::Alarm>,
+    stopwatch: Option<crate::model::Stopwatch>,
 }
 
 /// Cheap handle for sending commands from any thread.
@@ -287,6 +319,15 @@ impl Engine {
                 Err(e) => tracing::warn!(error = %e, "could not restore tray"),
             }
         }
+        // Alarms survive a restart; ones that went off meanwhile are dropped.
+        if let Ok(text) = std::fs::read_to_string(paths.alarms_state()) {
+            if let Ok(mut alarms) = serde_json::from_str::<Vec<crate::model::Alarm>>(&text) {
+                let now = now_ms();
+                alarms.retain(|a| a.at_ms > now);
+                alarms.sort_by_key(|a| a.at_ms);
+                state.alarms = alarms;
+            }
+        }
         match TrustStore::load(&paths.trust_file()) {
             Ok(t) => state.trust = t,
             Err(e) => tracing::warn!(error = %e, "could not read remembered agent decisions"),
@@ -329,6 +370,11 @@ impl Engine {
                 .as_ref()
                 .filter(|t| !t.expired)
                 .map(|t| std::time::Duration::from_millis((t.ends_at_ms - now_ms()).max(50) as u64));
+            let alarm_end = self
+                .state
+                .alarms
+                .first()
+                .map(|a| std::time::Duration::from_millis((a.at_ms - now_ms()).max(50) as u64));
             let snooze_end =
                 self.snoozed.first().map(|(due, _)| std::time::Duration::from_millis((due - now_ms()).max(50) as u64));
             tokio::select! {
@@ -433,6 +479,39 @@ impl Engine {
                     }
                 }
                 _ = async {
+                    match alarm_end {
+                        Some(d) => tokio::time::sleep(d).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    let now = now_ms();
+                    let due: Vec<crate::model::Alarm> =
+                        self.state.alarms.iter().filter(|a| a.at_ms <= now + 500).cloned().collect();
+                    self.state.alarms.retain(|a| a.at_ms > now + 500);
+                    self.persist_alarms();
+                    for a in due {
+                        self.ingest(NewNotification {
+                            app: crate::apps::AppRef {
+                                known: None,
+                                bundle_id: None,
+                                display_name: "Alarm".into(),
+                                platform: None,
+                            },
+                            origin: Origin::Internal,
+                            kind: NotificationKind::TaskFinished,
+                            priority: Some(Priority::High),
+                            title: if a.label.is_empty() { "Alarm".into() } else { a.label.clone() },
+                            subtitle: None,
+                            body: String::new(),
+                            timestamp_ms: now,
+                            thread: None,
+                            url: None,
+                            tokens: None,
+                        });
+                    }
+                    dirty = true;
+                }
+                _ = async {
                     match snooze_end {
                         Some(d) => tokio::time::sleep(d).await,
                         None => std::future::pending().await,
@@ -465,6 +544,20 @@ impl Engine {
         tracing::debug!("engine stopped");
     }
 
+    fn persist_alarms(&self) {
+        let path = self.paths.alarms_state();
+        let result = if self.state.alarms.is_empty() {
+            if path.exists() { std::fs::remove_file(&path) } else { Ok(()) }
+        } else {
+            serde_json::to_string(&self.state.alarms)
+                .map_err(std::io::Error::other)
+                .and_then(|t| std::fs::write(&path, t))
+        };
+        if let Err(e) = result {
+            tracing::warn!(error = %e, "could not save alarms");
+        }
+    }
+
     fn persist_tray(&self) {
         let cfg = self.config();
         let path = self.paths.tray_state();
@@ -488,6 +581,8 @@ impl Engine {
             weather: s.weather.clone(),
             calendar: s.calendar.clone(),
             timer: s.timer.clone(),
+            alarms: s.alarms.clone(),
+            stopwatch: s.stopwatch.clone(),
             focus: s.focus.clone(),
             audio: s.audio.clone(),
             media: s.media.clone(),
@@ -750,6 +845,35 @@ impl Engine {
                 true
             }
             Command::CancelTimer => self.state.timer.take().is_some(),
+            Command::AddAlarm { at_ms, label } => {
+                let id = self.state.alarms.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+                self.state.alarms.push(crate::model::Alarm { id, at_ms, label });
+                self.state.alarms.sort_by_key(|a| a.at_ms);
+                self.persist_alarms();
+                true
+            }
+            Command::RemoveAlarm(id) => {
+                let before = self.state.alarms.len();
+                self.state.alarms.retain(|a| a.id != id);
+                self.persist_alarms();
+                before != self.state.alarms.len()
+            }
+            Command::StartStopwatch => {
+                let sw = self.state.stopwatch.get_or_insert_with(Default::default);
+                if sw.started_ms.is_none() {
+                    sw.started_ms = Some(now_ms());
+                }
+                true
+            }
+            Command::PauseStopwatch => match self.state.stopwatch.as_mut() {
+                Some(sw) if sw.running() => {
+                    sw.elapsed_ms = sw.elapsed_at(now_ms());
+                    sw.started_ms = None;
+                    true
+                }
+                _ => false,
+            },
+            Command::ResetStopwatch => self.state.stopwatch.take().is_some(),
             Command::SnoozeNotification(id) => {
                 // Dismiss now, re-ingest the same content when the snooze is
                 // up (the pipeline re-ranks and re-peeks it like anything new).

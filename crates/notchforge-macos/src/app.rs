@@ -92,6 +92,17 @@ pub(crate) fn apply_snapshot(snap: Arc<Snapshot>) {
 pub(crate) fn apply_config(cfg: Arc<Config>) {
     let Some(old) = with_app(|a| a.config.replace(cfg.clone())) else { return };
     with_controller(|c| c.apply_config(cfg.clone()));
+    // A new language: Settings redraws in it (the island already rebuilt).
+    if old.appearance.language != cfg.appearance.language {
+        crate::i18n::set_language(&cfg.appearance.language);
+        with_app(|a| {
+            if let Some(s) = a.settings.borrow().as_ref() {
+                if s.is_visible() {
+                    s.show(&cfg);
+                }
+            }
+        });
+    }
     with_app(|a| {
         a.menubar.set_visible(cfg.general.show_menu_bar_icon);
         if old.providers.accessibility_banners != cfg.providers.accessibility_banners {
@@ -272,8 +283,8 @@ pub fn activate(mtm: MainThreadMarker) {
 pub fn alert(title: &str, message: &str) {
     let Some(mtm) = MainThreadMarker::new() else { return };
     let alert = NSAlert::new(mtm);
-    alert.setMessageText(&ns(title));
-    alert.setInformativeText(&ns(message));
+    alert.setMessageText(&ns(&crate::i18n::tr(title)));
+    alert.setInformativeText(&ns(&crate::i18n::tr(message)));
     crate::app::activate(mtm);
     alert.runModal();
 }
@@ -282,10 +293,10 @@ pub fn alert(title: &str, message: &str) {
 pub fn ask_text(title: &str, message: &str, placeholder: &str, ok: &str) -> Option<String> {
     let mtm = MainThreadMarker::new()?;
     let alert = NSAlert::new(mtm);
-    alert.setMessageText(&ns(title));
-    alert.setInformativeText(&ns(message));
+    alert.setMessageText(&ns(&crate::i18n::tr(title)));
+    alert.setInformativeText(&ns(&crate::i18n::tr(message)));
     alert.addButtonWithTitle(&ns(ok));
-    alert.addButtonWithTitle(&ns("Cancel"));
+    alert.addButtonWithTitle(&ns(&crate::i18n::tr("Cancel")));
     let field = objc2_app_kit::NSTextField::initWithFrame(
         <objc2_app_kit::NSTextField as objc2::MainThreadOnly>::alloc(mtm),
         objc2_foundation::NSRect::new(
@@ -308,22 +319,63 @@ pub fn ask_text(title: &str, message: &str, placeholder: &str, ok: &str) -> Opti
 pub fn confirm(title: &str, message: &str, yes: &str) -> bool {
     let Some(mtm) = MainThreadMarker::new() else { return false };
     let alert = NSAlert::new(mtm);
-    alert.setMessageText(&ns(title));
-    alert.setInformativeText(&ns(message));
-    alert.addButtonWithTitle(&ns(yes));
-    alert.addButtonWithTitle(&ns("Cancel"));
+    alert.setMessageText(&ns(&crate::i18n::tr(title)));
+    alert.setInformativeText(&ns(&crate::i18n::tr(message)));
+    alert.addButtonWithTitle(&ns(&crate::i18n::tr(yes)));
+    alert.addButtonWithTitle(&ns(&crate::i18n::tr("Cancel")));
     crate::app::activate(mtm);
     alert.runModal() == NSAlertFirstButtonReturn
+}
+
+/// Ask for an alarm: a time of day and an optional label. Returns the next
+/// moment that time comes round (today, or tomorrow if it has passed) as
+/// epoch ms, with the label.
+pub fn ask_alarm() -> Option<(i64, String)> {
+    use objc2_app_kit::{NSDatePicker, NSDatePickerElementFlags, NSDatePickerStyle, NSTextField, NSView};
+    let mtm = MainThreadMarker::new()?;
+    let alert = NSAlert::new(mtm);
+    alert.setMessageText(&ns(&crate::i18n::tr("New alarm")));
+    alert.setInformativeText(&ns(&crate::i18n::tr("The notch alerts you at this time.")));
+    alert.addButtonWithTitle(&ns(&crate::i18n::tr("Set alarm")));
+    alert.addButtonWithTitle(&ns(&crate::i18n::tr("Cancel")));
+    let box_view =
+        NSView::initWithFrame(<NSView as objc2::MainThreadOnly>::alloc(mtm), crate::ui::rect(0.0, 0.0, 240.0, 58.0));
+    let picker = NSDatePicker::new(mtm);
+    picker.setDatePickerStyle(NSDatePickerStyle::TextFieldAndStepper);
+    picker.setDatePickerElements(NSDatePickerElementFlags::HourMinute);
+    // Default: the next whole hour.
+    let now = objc2_foundation::NSDate::now().timeIntervalSince1970();
+    let next_hour = ((now / 3600.0).floor() + 1.0) * 3600.0;
+    picker.setDateValue(&objc2_foundation::NSDate::dateWithTimeIntervalSince1970(next_hour));
+    picker.setFrame(crate::ui::rect(0.0, 32.0, 120.0, 24.0));
+    let label = NSTextField::new(mtm);
+    label.setPlaceholderString(Some(&ns(&crate::i18n::tr("Label (optional)"))));
+    label.setFrame(crate::ui::rect(0.0, 0.0, 240.0, 24.0));
+    box_view.addSubview(&picker);
+    box_view.addSubview(&label);
+    alert.setAccessoryView(Some(&box_view));
+    crate::app::activate(mtm);
+    if alert.runModal() != NSAlertFirstButtonReturn {
+        return None;
+    }
+    let mut at = picker.dateValue().timeIntervalSince1970();
+    // The picker keeps today's date with the chosen time; a time already
+    // gone today means tomorrow.
+    let now = objc2_foundation::NSDate::now().timeIntervalSince1970();
+    while at <= now {
+        at += 86_400.0;
+    }
+    Some(((at * 1000.0) as i64, label.stringValue().to_string().trim().to_owned()))
 }
 
 /// Modal confirmation that resolves to "no" after `secs` seconds.
 pub fn confirm_with_timeout(title: &str, message: &str, yes: &str, no: &str, secs: u64) -> bool {
     let Some(mtm) = MainThreadMarker::new() else { return false };
     let alert = NSAlert::new(mtm);
-    alert.setMessageText(&ns(title));
+    alert.setMessageText(&ns(&crate::i18n::tr(title)));
     alert.setInformativeText(&ns(&format!("{message} Reverting in {secs} seconds.")));
-    alert.addButtonWithTitle(&ns(yes));
-    alert.addButtonWithTitle(&ns(no));
+    alert.addButtonWithTitle(&ns(&crate::i18n::tr(yes)));
+    alert.addButtonWithTitle(&ns(&crate::i18n::tr(no)));
     let block = RcBlock::new(move |_t: NonNull<NSTimer>| {
         if let Some(mtm) = MainThreadMarker::new() {
             NSApplication::sharedApplication(mtm).abortModal();

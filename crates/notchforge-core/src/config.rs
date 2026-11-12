@@ -134,6 +134,8 @@ pub struct AppearanceConfig {
     pub high_contrast: bool,
     /// Accent colour theme: "system", "sunset", "ocean", "violet" or "forest".
     pub accent: String,
+    /// Interface language: "system", "en", "fr" or "ar".
+    pub language: String,
 }
 
 /// `v` held to `min`…`max`, or `fallback` when it is not a number.
@@ -185,6 +187,7 @@ impl Default for AppearanceConfig {
             external_wing_width: crate::geometry::WING_WIDTH,
             high_contrast: false,
             accent: "system".to_owned(),
+            language: "system".to_owned(),
         }
     }
 }
@@ -642,6 +645,11 @@ impl Paths {
 
     pub fn tray_state(&self) -> PathBuf {
         self.data_dir.join("tray.json")
+    }
+
+    /// Alarms set in the clock (kept across restarts).
+    pub fn alarms_state(&self) -> PathBuf {
+        self.data_dir.join("alarms.json")
     }
 
     /// Cached cover art (safe to delete).

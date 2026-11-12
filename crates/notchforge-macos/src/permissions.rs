@@ -87,6 +87,37 @@ pub fn state(p: Permission) -> PermissionState {
         Permission::Bluetooth => PermissionState::NotRequired,
         Permission::Automation => crate::media::automation_state(),
         Permission::Calendar => notchforge_providers::calendar::authorization_state(),
+        Permission::Microphone => microphone_state(),
+        Permission::ScreenRecording => {
+            // SAFETY: a plain status query.
+            if unsafe { CGPreflightScreenCaptureAccess() } {
+                PermissionState::Granted
+            } else {
+                PermissionState::NotDetermined
+            }
+        }
+    }
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+unsafe extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+#[link(name = "AVFoundation", kind = "framework")]
+unsafe extern "C" {}
+
+/// AVCaptureDevice's authorization for audio ("soun").
+fn microphone_state() -> PermissionState {
+    let Some(cls) = objc2::runtime::AnyClass::get(c"AVCaptureDevice") else { return PermissionState::Unknown };
+    let media = NSString::from_str("soun");
+    // SAFETY: a documented class method taking an AVMediaType (an NSString).
+    let status: isize = unsafe { objc2::msg_send![cls, authorizationStatusForMediaType: &*media] };
+    match status {
+        3 => PermissionState::Granted,
+        1 | 2 => PermissionState::Denied,
+        _ => PermissionState::NotDetermined,
     }
 }
 
@@ -109,6 +140,8 @@ fn settings_url(p: Permission) -> &'static str {
         Permission::Bluetooth => "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
         Permission::Automation => "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
         Permission::Calendar => "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars",
+        Permission::Microphone => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+        Permission::ScreenRecording => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
     }
 }
 
@@ -146,6 +179,24 @@ pub fn request(p: Permission) {
                 let _ = notchforge_providers::calendar::on_main(notchforge_providers::calendar::request_access);
             }
         },
+        Permission::Microphone => {
+            if microphone_state() == PermissionState::Denied {
+                open_settings(p);
+                return;
+            }
+            let Some(cls) = objc2::runtime::AnyClass::get(c"AVCaptureDevice") else { return };
+            let media = NSString::from_str("soun");
+            let block = RcBlock::new(|_granted: Bool| {});
+            // SAFETY: documented class method; the block is copied by AVFoundation.
+            let _: () =
+                unsafe { objc2::msg_send![cls, requestAccessForMediaType: &*media, completionHandler: &*block] };
+        }
+        Permission::ScreenRecording => {
+            // SAFETY: shows the system prompt once; afterwards it does nothing.
+            if !unsafe { CGRequestScreenCaptureAccess() } {
+                open_settings(p);
+            }
+        }
         Permission::Notifications if is_bundled() => {
             let block = RcBlock::new(|granted: Bool, _err: *mut NSError| {
                 NOTIFICATION_STATE.store(if granted.as_bool() { 1 } else { 2 }, Ordering::Relaxed);

@@ -404,6 +404,35 @@ impl CollapsedView {
         let paused = current.filter(|n| !n.is_playing()).filter(|_| browser.is_none());
         let low = snap.battery.as_ref().is_some_and(|b| b.is_low());
 
+        // Recording the screen or a voice memo: a red dot and how long, above
+        // everything else.
+        if let Some((kind, started)) = crate::capture::active() {
+            let secs = (notchforge_core::time::now_ms() - started).max(0) / 1000;
+            let text = if self.wing < NARROW && secs >= 60 {
+                format!("{}m", secs / 60)
+            } else if self.wing < NARROW {
+                format!("{secs}s")
+            } else {
+                format!("{:02}:{:02}", secs / 60, secs % 60)
+            };
+            self.art.setHidden(true);
+            self.art_box.setHidden(true);
+            self.set_equalizer(false, &p.success, false);
+            let (sym, spoken) = match kind {
+                crate::capture::Recording::Screen => ("record.circle.fill", "Recording the screen"),
+                crate::capture::Recording::Voice => ("mic.fill", "Recording a voice memo"),
+            };
+            set_symbol(&self.left_icon, sym, 12.0, spoken);
+            self.left_icon.setContentTintColor(Some(&crate::ui::rgba(1.0, 0.27, 0.23, 1.0)));
+            self.left_icon.setHidden(false);
+            self.left_text.setHidden(true);
+            self.right_icon.setHidden(true);
+            set_text(&self.right_text, &text);
+            set_accessibility_label(&self.right_text, &format!("{spoken}, {text}"));
+            self.right_text.setHidden(false);
+            return;
+        }
+
         // A running countdown timer: mm:ss, above everything else.
         if let Some(timer) = snap.timer.as_ref() {
             let now = notchforge_core::time::now_ms();
@@ -432,6 +461,34 @@ impl CollapsedView {
                 &self.right_text,
                 &if timer.expired { "Timer finished".to_owned() } else { format!("Timer, {} remaining", text) },
             );
+            self.right_text.setHidden(false);
+            return;
+        }
+
+        // A running stopwatch: how long it has been going.
+        if let Some(sw) = snap.stopwatch.as_ref().filter(|s| s.running()) {
+            let secs = sw.elapsed_at(notchforge_core::time::now_ms()) / 1000;
+            let text = if self.wing < NARROW {
+                if secs >= 3600 {
+                    format!("{}h", secs / 3600)
+                } else if secs >= 60 {
+                    format!("{}m", secs / 60)
+                } else {
+                    format!("{secs}s")
+                }
+            } else {
+                format!("{:02}:{:02}", secs / 60, secs % 60)
+            };
+            self.art.setHidden(true);
+            self.art_box.setHidden(true);
+            self.set_equalizer(false, &p.success, false);
+            set_symbol(&self.left_icon, "stopwatch", 12.0, "Stopwatch");
+            self.left_icon.setContentTintColor(Some(&p.accent));
+            self.left_icon.setHidden(false);
+            self.left_text.setHidden(true);
+            self.right_icon.setHidden(true);
+            set_text(&self.right_text, &text);
+            set_accessibility_label(&self.right_text, &format!("Stopwatch, {text}"));
             self.right_text.setHidden(false);
             return;
         }

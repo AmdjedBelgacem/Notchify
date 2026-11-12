@@ -379,11 +379,17 @@ fn check_settled(ctx: &Ctx, stage: &str, expect: &[LayoutKind]) {
         close(island.max_y(), layout.screen.frame.max_y() - gap) && close(island.mid_x(), layout.notch.rect.mid_x()),
         rect_str(&island),
     );
-    let margin = if layout.notch.floating { 2.0 } else { notchforge_core::geometry::NOTCH_EAR_MAX };
+    // The window keeps one fixed frame (never resized mid-gesture, so the
+    // notch's sides never jump) and holds the whole island.
+    let frame = layout.window_frame();
     r.check(
-        &format!("{stage}: window shrunk to island (plus the notch flares)"),
-        close(panel.width, island.width + 2.0 * margin) && close(panel.height, island.height),
-        format!("panel {}", rect_str(&panel)),
+        &format!("{stage}: window keeps its fixed frame around the island"),
+        close(panel.x, frame.x)
+            && close(panel.width, frame.width)
+            && close(panel.height, frame.height)
+            && island.x >= panel.x - 0.5
+            && island.max_x() <= panel.max_x() + 0.5,
+        format!("panel {} vs {}", rect_str(&panel), rect_str(&frame)),
     );
 }
 
