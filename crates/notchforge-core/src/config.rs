@@ -136,6 +136,20 @@ pub struct AppearanceConfig {
     pub accent: String,
     /// Interface language: "system", "en", "fr" or "ar".
     pub language: String,
+    /// The open island's material: "black" (solid, like the notch) or
+    /// "glass" (Liquid Glass flowing out of the black notch).
+    pub theme: String,
+}
+
+impl AppearanceConfig {
+    /// The Liquid Glass theme is on.
+    pub fn glass(&self) -> bool {
+        // NOTCH_THEME overrides the setting (renders each theme for checks).
+        match std::env::var("NOTCH_THEME").ok().as_deref() {
+            Some(forced) => forced == "glass",
+            None => self.theme == "glass",
+        }
+    }
 }
 
 /// `v` held to `min`…`max`, or `fallback` when it is not a number.
@@ -188,6 +202,7 @@ impl Default for AppearanceConfig {
             high_contrast: false,
             accent: "system".to_owned(),
             language: "system".to_owned(),
+            theme: "black".to_owned(),
         }
     }
 }

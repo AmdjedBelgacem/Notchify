@@ -24,8 +24,19 @@ pub const BUTTON_H: f64 = 30.0;
 thread_local! {
     /// The accent the user picked (Settings › Look), as RGB.
     static ACCENT: std::cell::Cell<(f64, f64, f64)> = const { std::cell::Cell::new(CYAN) };
+    /// The Liquid Glass theme: surfaces are translucent so the glass shows.
+    static GLASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Motion is reduced (the setting, or the system's when it follows it).
     static REDUCE_MOTION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Switch the surfaces between the black and the Liquid Glass theme.
+pub fn set_glass(on: bool) {
+    GLASS.with(|g| g.set(on));
+}
+
+fn glass() -> bool {
+    GLASS.with(|g| g.get())
 }
 
 /// Set whether looping motion (progress sweeps) should hold still.
@@ -38,7 +49,9 @@ pub fn set_reduce_motion(on: bool) {
 /// Its phase follows the media clock, so a sweep rebuilt with its list keeps
 /// gliding from where the previous one was instead of jumping back.
 pub fn sweep(mtm: MainThreadMarker, frame: NSRect) -> Retained<FlippedView> {
-    use objc2_quartz_core::{CABasicAnimation, CAMediaTiming, CAMediaTimingFunction, kCAMediaTimingFunctionEaseInEaseOut};
+    use objc2_quartz_core::{
+        CABasicAnimation, CAMediaTiming, CAMediaTimingFunction, kCAMediaTimingFunctionEaseInEaseOut,
+    };
     const PERIOD: f64 = 1.6;
     let w = frame.size.width;
     let h = frame.size.height;
@@ -124,26 +137,29 @@ pub fn red() -> Retained<NSColor> {
 }
 /// The one surface on black.
 pub fn tile() -> Retained<NSColor> {
-    rgba(0.086, 0.086, 0.094, 1.0)
+    // On glass a tile is a frosted step lighter, so the material shows
+    // through it instead of a grey box sitting on top.
+    if glass() { rgba(1.0, 1.0, 1.0, 0.075) } else { rgba(0.086, 0.086, 0.094, 1.0) }
 }
 /// Buttons and the selected tab: a step lighter than a tile.
 pub fn raised() -> Retained<NSColor> {
-    rgba(0.173, 0.173, 0.188, 1.0)
+    if glass() { rgba(1.0, 1.0, 1.0, 0.14) } else { rgba(0.173, 0.173, 0.188, 1.0) }
 }
 /// Hairlines between rows.
 pub fn hairline() -> Retained<NSColor> {
-    rgba(0.11, 0.11, 0.122, 1.0)
+    if glass() { rgba(1.0, 1.0, 1.0, 0.10) } else { rgba(0.11, 0.11, 0.122, 1.0) }
 }
 pub fn text() -> Retained<NSColor> {
     rgba(0.96, 0.96, 0.97, 1.0)
 }
 /// Second line of a row: 7:1 or better on black and on a tile.
 pub fn text2() -> Retained<NSColor> {
-    rgba(0.631, 0.631, 0.651, 1.0)
+    // A touch brighter on glass, which is lighter behind the text than black.
+    if glass() { rgba(0.78, 0.78, 0.80, 1.0) } else { rgba(0.631, 0.631, 0.651, 1.0) }
 }
 /// Headings, times and hints.
 pub fn text3() -> Retained<NSColor> {
-    rgba(0.557, 0.557, 0.576, 1.0)
+    if glass() { rgba(0.68, 0.68, 0.70, 1.0) } else { rgba(0.557, 0.557, 0.576, 1.0) }
 }
 
 /// A flat tile.

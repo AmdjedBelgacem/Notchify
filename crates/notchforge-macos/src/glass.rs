@@ -20,7 +20,7 @@ use objc2_quartz_core::{CAGradientLayer, CALayer};
 /// How far the black reaches from the notch, as a fraction of the veil's radii.
 const REACH: f64 = 0.40;
 /// Black left at the ends of the open panel, where the glass is clearest.
-const TINT_OPEN: f64 = 0.26;
+const TINT_OPEN: f64 = 0.34;
 /// Hover and peek have free text on the material, so they keep more black.
 const TINT_SMALL: f64 = 0.52;
 const TINT_HIGH_CONTRAST: f64 = 0.70;

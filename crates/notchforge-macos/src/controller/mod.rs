@@ -947,8 +947,18 @@ impl Controller {
         self.views.borrow().expanded.set_visible(kind == LayoutKind::Expanded);
         self.show_container(kind);
         let notch_h = self.layout.borrow().notch.rect.height;
-        // The island stays true black at every size (no glass), like the notch.
-        let _ = notch_h;
+        // The black theme stays solid at every size, like the notch. The glass
+        // theme starts black at the notch and turns to Liquid Glass as the
+        // island opens below it: the neck through the menu bar and the row
+        // under the notch stay black, so it still grows out of the hardware.
+        if self.config.borrow().appearance.glass() {
+            if shape.height > notch_h + 1.0 {
+                self.glass_span.set(shape.height - notch_h);
+                self.glass.set_open_panel(kind == LayoutKind::Expanded, self.config.borrow().appearance.high_contrast);
+            }
+        } else {
+            self.glass_span.set(0.0);
+        }
         {
             let mut s = self.spring.borrow_mut();
             s.animate_to(shape.width, shape.height, shape.corner_radius, speed);

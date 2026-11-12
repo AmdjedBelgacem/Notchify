@@ -1,1822 +1,1838 @@
 {
- "Settings": {
-  "fr": "Réglages",
-  "ar": "الإعدادات"
- },
- "Now playing": {
-  "fr": "En cours de lecture",
-  "ar": "قيد التشغيل الآن"
- },
- "Show player": {
-  "fr": "Afficher le lecteur",
-  "ar": "إظهار المشغل"
- },
- "Nothing playing": {
-  "fr": "Aucune lecture",
-  "ar": "لا شيء قيد التشغيل"
- },
- "Playback position": {
-  "fr": "Position de lecture",
-  "ar": "موضع التشغيل"
- },
- "No timeline from this source": {
-  "fr": "Pas de chronologie pour cette source",
-  "ar": "لا يوجد خط زمني لهذا المصدر"
- },
- "Shuffle": {
-  "fr": "Aléatoire",
-  "ar": "خلط"
- },
- "Previous track": {
-  "fr": "Morceau précédent",
-  "ar": "المقطع السابق"
- },
- "Play": {
-  "fr": "Lire",
-  "ar": "تشغيل"
- },
- "Next track": {
-  "fr": "Morceau suivant",
-  "ar": "المقطع التالي"
- },
- "Repeat": {
-  "fr": "Répéter",
-  "ar": "تكرار"
- },
- "Open Spotify": {
-  "fr": "Ouvrir Spotify",
-  "ar": "فتح Spotify"
- },
- "Open Music": {
-  "fr": "Ouvrir Musique",
-  "ar": "فتح الموسيقى"
- },
- "Save to your Spotify library": {
-  "fr": "Enregistrer dans votre bibliothèque Spotify",
-  "ar": "حفظ في مكتبة Spotify"
- },
- "Volume": {
-  "fr": "Volume",
-  "ar": "مستوى الصوت"
- },
- "Output": {
-  "fr": "Sortie",
-  "ar": "المخرج"
- },
- "Microphone": {
-  "fr": "Micro",
-  "ar": "الميكروفون"
- },
- "Music": {
-  "fr": "Musique",
-  "ar": "الموسيقى"
- },
- "Up next": {
-  "fr": "À suivre",
-  "ar": "التالي"
- },
- "Lyrics": {
-  "fr": "Paroles",
-  "ar": "كلمات الأغنية"
- },
- "Play something from YouTube": {
-  "fr": "Lancez quelque chose depuis YouTube",
-  "ar": "شغّل شيئًا من YouTube"
- },
- "Library": {
-  "fr": "Bibliothèque",
-  "ar": "المكتبة"
- },
- "Done": {
-  "fr": "Terminé",
-  "ar": "تم"
- },
- "Sessions": {
-  "fr": "Sessions",
-  "ar": "الجلسات"
- },
- "Today": {
-  "fr": "Aujourd'hui",
-  "ar": "اليوم"
- },
- "Last 7 days": {
-  "fr": "7 derniers jours",
-  "ar": "آخر 7 أيام"
- },
- "Last 30 days": {
-  "fr": "30 derniers jours",
-  "ar": "آخر 30 يومًا"
- },
- "Connect": {
-  "fr": "Connecter",
-  "ar": "اتصال"
- },
- "Reading your agents' logs…": {
-  "fr": "Lecture des journaux de vos agents…",
-  "ar": "جارٍ قراءة سجلات الوكلاء…"
- },
- "Now": {
-  "fr": "Maintenant",
-  "ar": "الآن"
- },
- "Agents": {
-  "fr": "Agents",
-  "ar": "الوكلاء"
- },
- "Day": {
-  "fr": "Journée",
-  "ar": "اليوم"
- },
- "Shelf": {
-  "fr": "Étagère",
-  "ar": "الرف"
- },
- "Capture": {
-  "fr": "Capture",
-  "ar": "التقاط"
- },
- "Hang up": {
-  "fr": "Raccrocher",
-  "ar": "إنهاء المكالمة"
- },
- "Send": {
-  "fr": "Envoyer",
-  "ar": "إرسال"
- },
- "Music playing": {
-  "fr": "Musique en cours",
-  "ar": "الموسيقى قيد التشغيل"
- },
- "Open": {
-  "fr": "Ouvrir",
-  "ar": "فتح"
- },
- "Reply": {
-  "fr": "Répondre",
-  "ar": "رد"
- },
- "Deny": {
-  "fr": "Refuser",
-  "ar": "رفض"
- },
- "Hide until it stops ringing": {
-  "fr": "Masquer jusqu'à la fin de la sonnerie",
-  "ar": "إخفاء حتى يتوقف الرنين"
- },
- "Pause": {
-  "fr": "Pause",
-  "ar": "إيقاف مؤقت"
- },
- "Focus": {
-  "fr": "Concentration",
-  "ar": "التركيز"
- },
- "Calls": {
-  "fr": "Appels",
-  "ar": "المكالمات"
- },
- "Tray": {
-  "fr": "Bac",
-  "ar": "الدرج"
- },
- "Off": {
-  "fr": "Désactivé",
-  "ar": "إيقاف"
- },
- "Ringing on": {
-  "fr": "Sonnerie activée",
-  "ar": "الرنين مفعّل"
- },
- "Empty": {
-  "fr": "Vide",
-  "ar": "فارغ"
- },
- "Nothing needs you": {
-  "fr": "Rien ne vous attend",
-  "ar": "لا شيء يحتاج إليك"
- },
- "PLAYING AUDIO": {
-  "fr": "LECTURE AUDIO",
-  "ar": "تشغيل الصوت"
- },
- "Play or pause": {
-  "fr": "Lire ou mettre en pause",
-  "ar": "تشغيل أو إيقاف مؤقت"
- },
- "Loading playlists…": {
-  "fr": "Chargement des playlists…",
-  "ar": "جارٍ تحميل قوائم التشغيل…"
- },
- "Allow Calendar access to see today": {
-  "fr": "Autorisez l'accès au calendrier pour voir la journée",
-  "ar": "اسمح بالوصول إلى التقويم لرؤية اليوم"
- },
- "Reminders": {
-  "fr": "Rappels",
-  "ar": "التذكيرات"
- },
- "Allow Reminders access to see them": {
-  "fr": "Autorisez l'accès aux rappels pour les voir",
-  "ar": "اسمح بالوصول إلى التذكيرات لرؤيتها"
- },
- "Timer": {
-  "fr": "Minuteur",
-  "ar": "المؤقت"
- },
- "Alarm": {
-  "fr": "Alarme",
-  "ar": "المنبه"
- },
- "Stopwatch": {
-  "fr": "Chronomètre",
-  "ar": "ساعة الإيقاف"
- },
- "Mute mic": {
-  "fr": "Couper le micro",
-  "ar": "كتم الميكروفون"
- },
- "Pause alerts": {
-  "fr": "Suspendre les alertes",
-  "ar": "إيقاف التنبيهات مؤقتًا"
- },
- "No agents running": {
-  "fr": "Aucun agent actif",
-  "ar": "لا يعمل أي وكيل"
- },
- "Sessions show here as soon as an agent starts.": {
-  "fr": "Les sessions apparaissent ici dès qu'un agent démarre.",
-  "ar": "تظهر الجلسات هنا بمجرد بدء أحد الوكلاء."
- },
- "Limits": {
-  "fr": "Limites",
-  "ar": "الحدود"
- },
- "Connect an agent to see its limits.": {
-  "fr": "Connectez un agent pour voir ses limites.",
-  "ar": "صِل وكيلًا لرؤية حدوده."
- },
- "Usage details": {
-  "fr": "Détails d'utilisation",
-  "ar": "تفاصيل الاستخدام"
- },
- "Drop files on the notch": {
-  "fr": "Déposez des fichiers sur l'encoche",
-  "ar": "أفلت الملفات على النتوء"
- },
- "They wait here; drag them back out to move them anywhere": {
-  "fr": "Ils attendent ici ; faites-les glisser pour les déplacer n'importe où",
-  "ar": "تنتظر هنا؛ اسحبها للخارج لنقلها إلى أي مكان"
- },
- "Clipboard": {
-  "fr": "Presse-papiers",
-  "ar": "الحافظة"
- },
- "⌃⌥C shelves the clipboard": {
-  "fr": "⌃⌥C range le presse-papiers sur l'étagère",
-  "ar": "⌃⌥C يضع الحافظة على الرف"
- },
- "Nothing shelved yet": {
-  "fr": "Rien sur l'étagère",
-  "ar": "لا شيء على الرف بعد"
- },
- "Playing from YouTube": {
-  "fr": "Lecture depuis YouTube",
-  "ar": "قيد التشغيل من YouTube"
- },
- "No recommendations found.": {
-  "fr": "Aucune recommandation trouvée.",
-  "ar": "لم يتم العثور على توصيات."
- },
- "Drop to add": {
-  "fr": "Déposer pour ajouter",
-  "ar": "أفلت للإضافة"
- },
- "Quick Look": {
-  "fr": "Coup d'œil",
-  "ar": "نظرة سريعة"
- },
- "Copy Text": {
-  "fr": "Copier le texte",
-  "ar": "نسخ النص"
- },
- "Reveal in Finder": {
-  "fr": "Afficher dans le Finder",
-  "ar": "إظهار في Finder"
- },
- "AirDrop…": {
-  "fr": "AirDrop…",
-  "ar": "AirDrop…"
- },
- "Copy Path": {
-  "fr": "Copier le chemin",
-  "ar": "نسخ المسار"
- },
- "Remove from Tray": {
-  "fr": "Retirer du bac",
-  "ar": "إزالة من الدرج"
- },
- "AirDrop all": {
-  "fr": "Tout envoyer par AirDrop",
-  "ar": "إرسال الكل عبر AirDrop"
- },
- "Show in Finder": {
-  "fr": "Afficher dans le Finder",
-  "ar": "إظهار في Finder"
- },
- "Clear shelf": {
-  "fr": "Vider l'étagère",
-  "ar": "مسح الرف"
- },
- "Welcome to Notchisland": {
-  "fr": "Bienvenue dans Notchisland",
-  "ar": "مرحبًا بك في Notchisland"
- },
- "Accessibility": {
-  "fr": "Accessibilité",
-  "ar": "إمكانية الوصول"
- },
- "Answer and end calls, reply to message banners, and read video timelines in your browser.": {
-  "fr": "Répondre aux appels et y mettre fin, répondre aux bannières de messages et lire la chronologie des vidéos dans votre navigateur.",
-  "ar": "الرد على المكالمات وإنهاؤها، والرد على لافتات الرسائل، وقراءة الخط الزمني للفيديو في المتصفح."
- },
- "Granted": {
-  "fr": "Autorisé",
-  "ar": "ممنوح"
- },
- "Full Disk Access": {
-  "fr": "Accès complet au disque",
-  "ar": "الوصول الكامل إلى القرص"
- },
- "Read notifications from Notification Center so they appear in the notch.": {
-  "fr": "Lire les notifications du centre de notifications pour les afficher dans l'encoche.",
-  "ar": "قراءة الإشعارات من مركز الإشعارات لتظهر في النتوء."
- },
- "Open Settings": {
-  "fr": "Ouvrir les Réglages",
-  "ar": "فتح الإعدادات"
- },
- "Automation": {
-  "fr": "Automatisation",
-  "ar": "الأتمتة"
- },
- "Show and control Spotify, Music and the video playing in your browser.": {
-  "fr": "Afficher et contrôler Spotify, Musique et la vidéo en cours dans votre navigateur.",
-  "ar": "إظهار Spotify والموسيقى والفيديو قيد التشغيل في المتصفح والتحكم فيها."
- },
- "Calendars & Reminders": {
-  "fr": "Calendriers et rappels",
-  "ar": "التقويمات والتذكيرات"
- },
- "Your day, your next meeting with a Join button, and reminders you can tick off.": {
-  "fr": "Votre journée, votre prochaine réunion avec un bouton Rejoindre et des rappels à cocher.",
-  "ar": "يومك، واجتماعك التالي مع زر الانضمام، وتذكيرات يمكنك تحديدها كمنجزة."
- },
- "Allow": {
-  "fr": "Autoriser",
-  "ar": "سماح"
- },
- "Location": {
-  "fr": "Localisation",
-  "ar": "الموقع"
- },
- "Local weather and rain alerts. A city in Settings works too.": {
-  "fr": "Météo locale et alertes de pluie. Une ville dans les Réglages fonctionne aussi.",
-  "ar": "الطقس المحلي وتنبيهات المطر. يمكن أيضًا تحديد مدينة في الإعدادات."
- },
- "Notifications": {
-  "fr": "Notifications",
-  "ar": "الإشعارات"
- },
- "Alerts from the app itself, such as timers, while the notch is hidden.": {
-  "fr": "Alertes de l'app elle-même, comme les minuteurs, quand l'encoche est masquée.",
-  "ar": "تنبيهات من التطبيق نفسه، مثل المؤقتات، عندما يكون النتوء مخفيًا."
- },
- "Coding agents": {
-  "fr": "Agents de code",
-  "ar": "وكلاء البرمجة"
- },
- "See live sessions and their time left, and allow or deny tool requests from the notch. Works with Claude Code, Codex, Gemini CLI, Cursor, OpenCode and Aider.": {
-  "fr": "Voyez les sessions en direct et leur temps restant, et autorisez ou refusez les demandes d'outils depuis l'encoche. Fonctionne avec Claude Code, Codex, Gemini CLI, Cursor, OpenCode et Aider.",
-  "ar": "شاهد الجلسات المباشرة والوقت المتبقي لها، واسمح بطلبات الأدوات أو ارفضها من النتوء. يعمل مع Claude Code وCodex وGemini CLI وCursor وOpenCode وAider."
- },
- "Connect agents": {
-  "fr": "Connecter des agents",
-  "ar": "ربط الوكلاء"
- },
- "Continue": {
-  "fr": "Continuer",
-  "ar": "متابعة"
- },
- "You can change any of this later in Settings › Permissions.": {
-  "fr": "Vous pourrez modifier tout cela plus tard dans Réglages › Autorisations.",
-  "ar": "يمكنك تغيير أي من ذلك لاحقًا في الإعدادات › الأذونات."
- },
- "Needs you": {
-  "fr": "Vous attend",
-  "ar": "يحتاج إليك"
- },
- "now": {
-  "fr": "maintenant",
-  "ar": "الآن"
- },
- "Dismiss": {
-  "fr": "Ignorer",
-  "ar": "تجاهل"
- },
- "Earlier": {
-  "fr": "Plus tôt",
-  "ar": "سابقًا"
- },
- "Clear": {
-  "fr": "Effacer",
-  "ar": "مسح"
- },
- "Focus on": {
-  "fr": "Concentration activée",
-  "ar": "التركيز قيد التشغيل"
- },
- "Remove": {
-  "fr": "Supprimer",
-  "ar": "إزالة"
- },
- "Copy": {
-  "fr": "Copier",
-  "ar": "نسخ"
- },
- "Snooze": {
-  "fr": "Rappeler plus tard",
-  "ar": "تأجيل"
- },
- "Spotify sign-in": {
-  "fr": "Connexion à Spotify",
-  "ar": "تسجيل الدخول إلى Spotify"
- },
- "Approve Notchisland in your browser": {
-  "fr": "Approuvez Notchisland dans votre navigateur",
-  "ar": "وافق على Notchisland في المتصفح"
- },
- "Cancel": {
-  "fr": "Annuler",
-  "ar": "إلغاء"
- },
- "It asked to show notifications. Nothing appears until you decide.": {
-  "fr": "Il a demandé à afficher des notifications. Rien n'apparaît tant que vous n'avez pas décidé.",
-  "ar": "طلب إظهار الإشعارات. لن يظهر شيء حتى تقرر."
- },
- "Spotify's sign-in is open. Allow access there, then come back.": {
-  "fr": "La connexion Spotify est ouverte. Autorisez l'accès, puis revenez.",
-  "ar": "صفحة تسجيل الدخول إلى Spotify مفتوحة. اسمح بالوصول هناك ثم عُد."
- },
- "Open Agents": {
-  "fr": "Ouvrir Agents",
-  "ar": "فتح الوكلاء"
- },
- "Tokens": {
-  "fr": "Jetons",
-  "ar": "الرموز"
- },
- "Input": {
-  "fr": "Entrée",
-  "ar": "الإدخال"
- },
- "Cache read": {
-  "fr": "Lecture du cache",
-  "ar": "قراءة ذاكرة التخزين المؤقت"
- },
- "Cache write": {
-  "fr": "Écriture du cache",
-  "ar": "كتابة ذاكرة التخزين المؤقت"
- },
- "Running": {
-  "fr": "En cours",
-  "ar": "قيد التشغيل"
- },
- "Session": {
-  "fr": "Session",
-  "ar": "الجلسة"
- },
- "Week": {
-  "fr": "Semaine",
-  "ar": "الأسبوع"
- },
- "Context": {
-  "fr": "Contexte",
-  "ar": "السياق"
- },
- "By agent": {
-  "fr": "Par agent",
-  "ar": "حسب الوكيل"
- },
- "By model": {
-  "fr": "Par modèle",
-  "ar": "حسب النموذج"
- },
- "Heaviest sessions": {
-  "fr": "Sessions les plus lourdes",
-  "ar": "أثقل الجلسات"
- },
- "Claude limits": {
-  "fr": "Limites de Claude",
-  "ar": "حدود Claude"
- },
- "Tokens today": {
-  "fr": "Jetons aujourd'hui",
-  "ar": "رموز اليوم"
- },
- "THU": {
-  "fr": "JEU",
-  "ar": "خميس"
- },
- "Join": {
-  "fr": "Rejoindre",
-  "ar": "انضمام"
- },
- "Mark done": {
-  "fr": "Marquer comme fait",
-  "ar": "تحديد كمنجز"
- },
- "Tomorrow": {
-  "fr": "Demain",
-  "ar": "غدًا"
- },
- "Control Spotify": {
-  "fr": "Contrôler Spotify",
-  "ar": "التحكم في Spotify"
- },
- "Spotify volume": {
-  "fr": "Volume de Spotify",
-  "ar": "مستوى صوت Spotify"
- },
- "Back 10 seconds": {
-  "fr": "Reculer de 10 secondes",
-  "ar": "رجوع 10 ثوانٍ"
- },
- "Forward 10 seconds": {
-  "fr": "Avancer de 10 secondes",
-  "ar": "تقديم 10 ثوانٍ"
- },
- "Search settings": {
-  "fr": "Rechercher dans les réglages",
-  "ar": "البحث في الإعدادات"
- },
- "Spaces": {
-  "fr": "Espaces",
-  "ar": "المساحات"
- },
- "Island": {
-  "fr": "Îlot",
-  "ar": "الجزيرة"
- },
- "Look": {
-  "fr": "Apparence",
-  "ar": "المظهر"
- },
- "Permissions": {
-  "fr": "Autorisations",
-  "ar": "الأذونات"
- },
- "Advanced": {
-  "fr": "Avancé",
-  "ar": "متقدم"
- },
- "What plays in the island, and how music apps connect.": {
-  "fr": "Ce qui est lu dans l'îlot et comment les apps de musique se connectent.",
-  "ar": "ما يُشغَّل في الجزيرة وكيفية اتصال تطبيقات الموسيقى."
- },
- "Players": {
-  "fr": "Lecteurs",
-  "ar": "المشغلات"
- },
- "What's playing, controls and playlists": {
-  "fr": "Lecture en cours, commandes et playlists",
-  "ar": "ما يُشغَّل الآن وعناصر التحكم وقوائم التشغيل"
- },
- "Spotify and Apple Music": {
-  "fr": "Spotify et Apple Music",
-  "ar": "Spotify وApple Music"
- },
- "Sign out": {
-  "fr": "Se déconnecter",
-  "ar": "تسجيل الخروج"
- },
- "Signed in": {
-  "fr": "Connecté",
-  "ar": "تم تسجيل الدخول"
- },
- "Connected": {
-  "fr": "Connecté",
-  "ar": "متصل"
- },
- "More sound": {
-  "fr": "Plus de son",
-  "ar": "مزيد من الصوت"
- },
- "YouTube, SoundCloud and other tabs play as music. The Mac asks once per browser": {
-  "fr": "YouTube, SoundCloud et les autres onglets sont lus comme de la musique. Le Mac demande une fois par navigateur",
-  "ar": "تُشغَّل علامات تبويب YouTube وSoundCloud وغيرها كموسيقى. يسأل Mac مرة واحدة لكل متصفح"
- },
- "Browser tabs": {
-  "fr": "Onglets du navigateur",
-  "ar": "علامات تبويب المتصفح"
- },
- "Choose where sound goes from Music. No permission needed": {
-  "fr": "Choisissez où va le son depuis Musique. Aucune autorisation requise",
-  "ar": "اختر وجهة الصوت من الموسيقى. لا يلزم أي إذن"
- },
- "Outputs and apps playing sound": {
-  "fr": "Sorties et apps qui émettent du son",
-  "ar": "المخارج والتطبيقات التي تشغّل الصوت"
- },
- "5 seconds": {
-  "fr": "5 secondes",
-  "ar": "5 ثوانٍ"
- },
- "10 seconds": {
-  "fr": "10 secondes",
-  "ar": "10 ثوانٍ"
- },
- "30 seconds": {
-  "fr": "30 secondes",
-  "ar": "30 ثانية"
- },
- "Minute": {
-  "fr": "Minute",
-  "ar": "دقيقة"
- },
- "Check players every": {
-  "fr": "Vérifier les lecteurs toutes les",
-  "ar": "التحقق من المشغلات كل"
- },
- "Coding agents report to the island and ask it for permission.": {
-  "fr": "Les agents de code rendent compte à l'îlot et lui demandent l'autorisation.",
-  "ar": "يُبلغ وكلاء البرمجة الجزيرة ويطلبون منها الإذن."
- },
- "Connected agents": {
-  "fr": "Agents connectés",
-  "ar": "الوكلاء المتصلون"
- },
- "Disconnect": {
-  "fr": "Déconnecter",
-  "ar": "قطع الاتصال"
- },
- "Reports finished turns and asks for input": {
-  "fr": "Signale les tours terminés et demande une saisie",
-  "ar": "يُبلغ عن الأدوار المنتهية ويطلب الإدخال"
- },
- "Check again": {
-  "fr": "Vérifier à nouveau",
-  "ar": "التحقق مجددًا"
- },
- "Codex already runs another notify program": {
-  "fr": "Codex exécute déjà un autre programme de notification",
-  "ar": "يشغّل Codex بالفعل برنامج إشعارات آخر"
- },
- "Reads them from its status line, which hides hints such as “esc to interrupt”": {
-  "fr": "Les lit depuis sa ligne d'état, ce qui masque des indices comme « esc to interrupt »",
-  "ar": "يقرأها من سطر الحالة، مما يُخفي تلميحات مثل “esc to interrupt”"
- },
- "Claude Code limits": {
-  "fr": "Limites de Claude Code",
-  "ar": "حدود Claude Code"
- },
- "Connecting edits that agent's own settings (a .notchforge.bak copy is kept) so it reports here. It signs in to nothing.": {
-  "fr": "La connexion modifie les réglages de cet agent (une copie .notchforge.bak est conservée) pour qu'il rende compte ici. Elle ne se connecte à aucun compte.",
-  "ar": "يعدّل الربط إعدادات هذا الوكيل (مع الاحتفاظ بنسخة .notchforge.bak) ليُبلغ هنا. لا يسجّل الدخول إلى أي شيء."
- },
- "Asking": {
-  "fr": "Demandes",
-  "ar": "الطلبات"
- },
- "Seconds before the terminal asks instead. 0 turns it off": {
-  "fr": "Secondes avant que le terminal ne demande à la place. 0 désactive",
-  "ar": "الثواني قبل أن يسأل الطرفية بدلًا من ذلك. 0 يوقفه"
- },
- "Ask in the island for": {
-  "fr": "Demander dans l'îlot pendant",
-  "ar": "السؤال في الجزيرة لمدة"
- },
- "The island asks the first time an agent sends something": {
-  "fr": "L'îlot demande la première fois qu'un agent envoie quelque chose",
-  "ar": "تسأل الجزيرة في أول مرة يرسل فيها وكيل شيئًا"
- },
- "Approve new agents first": {
-  "fr": "Approuver d'abord les nouveaux agents",
-  "ar": "الموافقة على الوكلاء الجدد أولًا"
- },
- "Forget": {
-  "fr": "Oublier",
-  "ar": "نسيان"
- },
- "Forget every Allow and Deny so agents are asked again": {
-  "fr": "Oublier chaque Autoriser et Refuser pour que les agents soient à nouveau sollicités",
-  "ar": "نسيان كل سماح ورفض ليُسأل الوكلاء مجددًا"
- },
- "Remembered answers": {
-  "fr": "Réponses mémorisées",
-  "ar": "الإجابات المحفوظة"
- },
- "Reporting": {
-  "fr": "Rapports",
-  "ar": "الإبلاغ"
- },
- "Claude Code, Codex, OpenCode, Cursor Agent, Gemini CLI and others, with no setup": {
-  "fr": "Claude Code, Codex, OpenCode, Cursor Agent, Gemini CLI et d'autres, sans configuration",
-  "ar": "Claude Code وCodex وOpenCode وCursor Agent وGemini CLI وغيرها، دون إعداد"
- },
- "Say when a session ends": {
-  "fr": "Signaler la fin d'une session",
-  "ar": "الإعلام عند انتهاء الجلسة"
- },
- "Counts from Claude Code and Codex logs on this Mac. Nothing is kept or sent": {
-  "fr": "Calculé à partir des journaux de Claude Code et Codex sur ce Mac. Rien n'est conservé ni envoyé",
-  "ar": "يُحسب من سجلات Claude Code وCodex على هذا الـMac. لا يُحفظ أو يُرسل أي شيء"
- },
- "Token usage": {
-  "fr": "Utilisation des jetons",
-  "ar": "استخدام الرموز"
- },
- "Listening": {
-  "fr": "Écoute",
-  "ar": "الاستماع"
- },
- "A local webhook, a Unix socket and an inbox file": {
-  "fr": "Un webhook local, un socket Unix et un fichier de réception",
-  "ar": "Webhook محلي ومقبس Unix وملف وارد"
- },
- "Listen for agents": {
-  "fr": "Écouter les agents",
-  "ar": "الاستماع إلى الوكلاء"
- },
- "This Mac only": {
-  "fr": "Ce Mac uniquement",
-  "ar": "هذا الـMac فقط"
- },
- "Port": {
-  "fr": "Port",
-  "ar": "المنفذ"
- },
- "Optional. Keeps other programs on this Mac from posting": {
-  "fr": "Facultatif. Empêche les autres programmes de ce Mac de publier",
-  "ar": "اختياري. يمنع البرامج الأخرى على هذا الـMac من الإرسال"
- },
- "Bearer token": {
-  "fr": "Jeton Bearer",
-  "ar": "رمز Bearer"
- },
- "Send a test event": {
-  "fr": "Envoyer un événement de test",
-  "ar": "إرسال حدث اختباري"
- },
- "Where the island shows and how it opens.": {
-  "fr": "Où l'îlot s'affiche et comment il s'ouvre.",
-  "ar": "أين تظهر الجزيرة وكيف تُفتح."
- },
- "Where it shows": {
-  "fr": "Emplacement",
-  "ar": "مكان الظهور"
- },
- "Built-in (notch)": {
-  "fr": "Intégré (encoche)",
-  "ar": "مدمج (النتوء)"
- },
- "Main display": {
-  "fr": "Écran principal",
-  "ar": "الشاشة الرئيسية"
- },
- "Display with pointer": {
-  "fr": "Écran avec le pointeur",
-  "ar": "الشاشة التي بها المؤشر"
- },
- "Screen": {
-  "fr": "Écran",
-  "ar": "الشاشة"
- },
- "A display-only island at the top of each other screen": {
-  "fr": "Un îlot d'affichage seul en haut de chaque autre écran",
-  "ar": "جزيرة للعرض فقط أعلى كل شاشة أخرى"
- },
- "Copy on other screens": {
-  "fr": "Copie sur les autres écrans",
-  "ar": "نسخة على الشاشات الأخرى"
- },
- "So the menu bar stays usable. A ringing call still shows": {
-  "fr": "Pour garder la barre des menus utilisable. Un appel entrant s'affiche quand même",
-  "ar": "لتبقى شريط القائمة قابلًا للاستخدام. تظل المكالمة الواردة ظاهرة"
- },
- "Hide in fullscreen apps": {
-  "fr": "Masquer dans les apps en plein écran",
-  "ar": "إخفاء في التطبيقات بملء الشاشة"
- },
- "Opening": {
-  "fr": "Ouverture",
-  "ar": "الفتح"
- },
- "Open on hover after": {
-  "fr": "Ouvrir au survol après",
-  "ar": "الفتح عند التمرير بعد"
- },
- "Everything": {
-  "fr": "Tout",
-  "ar": "الكل"
- },
- "Normal and up": {
-  "fr": "Normal et plus",
-  "ar": "عادي وأعلى"
- },
- "High and up": {
-  "fr": "Élevé et plus",
-  "ar": "مرتفع وأعلى"
- },
- "Critical only": {
-  "fr": "Critique uniquement",
-  "ar": "الحرجة فقط"
- },
- "A notification below this waits quietly in Now": {
-  "fr": "Une notification en dessous de ce niveau attend discrètement dans Maintenant",
-  "ar": "ينتظر الإشعار الأقل من هذا المستوى بهدوء في الآن"
- },
- "Glance for": {
-  "fr": "Aperçu pendant",
-  "ar": "لمحة لمدة"
- },
- "Shoulders": {
-  "fr": "Épaules",
-  "ar": "الجانبان"
- },
- "A timer, charging, the playing song or a waiting agent": {
-  "fr": "Un minuteur, la charge, le morceau en cours ou un agent en attente",
-  "ar": "مؤقت أو الشحن أو الأغنية قيد التشغيل أو وكيل منتظر"
- },
- "Live status beside the notch": {
-  "fr": "État en direct à côté de l'encoche",
-  "ar": "حالة مباشرة بجانب النتوء"
- },
- "Cover art on the left, a level meter on the right": {
-  "fr": "La pochette à gauche, un indicateur de niveau à droite",
-  "ar": "صورة الغلاف على اليسار ومؤشر المستوى على اليمين"
- },
- "Playing music in the shoulders": {
-  "fr": "Musique en cours dans les épaules",
-  "ar": "الموسيقى قيد التشغيل في الجانبين"
- },
- "How far the closed island reaches each side of the notch": {
-  "fr": "Jusqu'où l'îlot fermé s'étend de chaque côté de l'encoche",
-  "ar": "مدى امتداد الجزيرة المغلقة على جانبي النتوء"
- },
- "Shoulder width": {
-  "fr": "Largeur des épaules",
-  "ar": "عرض الجانبين"
- },
- "A shoulder with no room is hidden, not drawn over them": {
-  "fr": "Une épaule sans place est masquée, pas dessinée par-dessus",
-  "ar": "يُخفى الجانب الذي لا مساحة له بدلًا من رسمه فوقها"
- },
- "Stay clear of menu bar items": {
-  "fr": "Éviter les éléments de la barre des menus",
-  "ar": "الابتعاد عن عناصر شريط القائمة"
- },
- "External displays": {
-  "fr": "Écrans externes",
-  "ar": "الشاشات الخارجية"
- },
- "The floating notch on displays without a hardware one": {
-  "fr": "L'encoche flottante sur les écrans qui n'en ont pas",
-  "ar": "النتوء العائم على الشاشات التي لا تحتوي على نتوء فعلي"
- },
- "Notch width": {
-  "fr": "Largeur de l'encoche",
-  "ar": "عرض النتوء"
- },
- "How far it reaches each side on those displays": {
-  "fr": "Son étendue de chaque côté sur ces écrans",
-  "ar": "مدى امتداده على كل جانب في تلك الشاشات"
- },
- "Startup": {
-  "fr": "Démarrage",
-  "ar": "بدء التشغيل"
- },
- "Open at login": {
-  "fr": "Ouvrir à la connexion",
-  "ar": "الفتح عند تسجيل الدخول"
- },
- "Settings, pause and quit, and a small player": {
-  "fr": "Réglages, pause et quitter, et un petit lecteur",
-  "ar": "الإعدادات والإيقاف المؤقت والإنهاء ومشغل صغير"
- },
- "Menu bar icon": {
-  "fr": "Icône de la barre des menus",
-  "ar": "أيقونة شريط القائمة"
- },
- "Every permission is optional; a feature waits until it is allowed.": {
-  "fr": "Chaque autorisation est facultative ; une fonction attend d'être autorisée.",
-  "ar": "كل إذن اختياري؛ تنتظر الميزة حتى يُسمح بها."
- },
- "Allow…": {
-  "fr": "Autoriser…",
-  "ar": "سماح…"
- },
- "Not allowed": {
-  "fr": "Non autorisé",
-  "ar": "غير مسموح"
- },
- "Lets Notchisland read notification banners as a fallback and optionally dismiss the native banner when the notch already shows it.": {
-  "fr": "Permet à Notchisland de lire les bannières de notification en secours et, en option, de fermer la bannière native quand l'encoche l'affiche déjà.",
-  "ar": "يتيح لـNotchisland قراءة لافتات الإشعارات كبديل، وإغلاق اللافتة الأصلية اختياريًا عندما يعرضها النتوء بالفعل."
- },
- "Lets Notchisland read the Notification Center database so WhatsApp, Discord, Messages, Slack and others appear in the notch, and read the Focus state.": {
-  "fr": "Permet à Notchisland de lire la base de données du centre de notifications pour que WhatsApp, Discord, Messages, Slack et d'autres apparaissent dans l'encoche, et de lire l'état de Concentration.",
-  "ar": "يتيح لـNotchisland قراءة قاعدة بيانات مركز الإشعارات لتظهر WhatsApp وDiscord وMessages وSlack وغيرها في النتوء، وقراءة حالة التركيز."
- },
- "Not asked yet": {
-  "fr": "Pas encore demandé",
-  "ar": "لم يُطلب بعد"
- },
- "Used only to fetch local weather. You can type a city in Settings instead.": {
-  "fr": "Utilisé uniquement pour la météo locale. Vous pouvez saisir une ville dans les Réglages.",
-  "ar": "يُستخدم فقط لجلب الطقس المحلي. يمكنك كتابة مدينة في الإعدادات بدلًا من ذلك."
- },
- "Unknown": {
-  "fr": "Inconnu",
-  "ar": "غير معروف"
- },
- "Lets Notchisland post its own alerts (e.g. low device battery) when the notch is hidden.": {
-  "fr": "Permet à Notchisland de publier ses propres alertes (p. ex. batterie faible) quand l'encoche est masquée.",
-  "ar": "يتيح لـNotchisland نشر تنبيهاته الخاصة (مثل انخفاض بطارية جهاز) عندما يكون النتوء مخفيًا."
- },
- "Not needed": {
-  "fr": "Non requis",
-  "ar": "غير مطلوب"
- },
- "Not required: accessory batteries are read from the system registry. Listed for transparency.": {
-  "fr": "Non requis : les batteries des accessoires sont lues dans le registre système. Indiqué par transparence.",
-  "ar": "غير مطلوب: تُقرأ بطاريات الملحقات من سجل النظام. مدرج للشفافية."
- },
- "Bluetooth": {
-  "fr": "Bluetooth",
-  "ar": "البلوتوث"
- },
- "Lets Notchisland ask Spotify and Apple Music what is playing, control playback and list your playlists. macOS asks once per app.": {
-  "fr": "Permet à Notchisland de demander à Spotify et Apple Music ce qui est lu, de contrôler la lecture et de lister vos playlists. macOS demande une fois par app.",
-  "ar": "يتيح لـNotchisland سؤال Spotify وApple Music عمّا يُشغَّل، والتحكم في التشغيل، وعرض قوائم التشغيل. يسأل macOS مرة لكل تطبيق."
- },
- "Automation (Spotify & Music)": {
-  "fr": "Automatisation (Spotify et Musique)",
-  "ar": "الأتمتة (Spotify والموسيقى)"
- },
- "Lets Notchisland show your upcoming events from every connected calendar account (iCloud, Google, Exchange, subscribed). Read-only.": {
-  "fr": "Permet à Notchisland d'afficher vos prochains événements de chaque compte de calendrier connecté (iCloud, Google, Exchange, abonnements). Lecture seule.",
-  "ar": "يتيح لـNotchisland عرض أحداثك القادمة من كل حساب تقويم متصل (iCloud وGoogle وExchange والاشتراكات). للقراءة فقط."
- },
- "Calendar": {
-  "fr": "Calendrier",
-  "ar": "التقويم"
- },
- "Nothing here is required. A feature that needs a permission stays off until it is allowed.": {
-  "fr": "Rien ici n'est obligatoire. Une fonction qui nécessite une autorisation reste désactivée jusqu'à ce qu'elle soit accordée.",
-  "ar": "لا شيء هنا مطلوب. تبقى الميزة التي تحتاج إلى إذن متوقفة حتى يُسمح بها."
- },
- "The accent colour, motion and contrast.": {
-  "fr": "La couleur d'accentuation, les animations et le contraste.",
-  "ar": "لون التمييز والحركة والتباين."
- },
- "Language": {
-  "fr": "Langue",
-  "ar": "اللغة"
- },
- "System": {
-  "fr": "Système",
-  "ar": "النظام"
- },
- "Notchisland's own text; Arabic keeps the left-to-right layout": {
-  "fr": "Le texte de Notchisland ; l'arabe conserve la mise en page de gauche à droite",
-  "ar": "نصوص Notchisland؛ تحتفظ العربية بالتخطيط من اليسار إلى اليمين"
- },
- "Colour": {
-  "fr": "Couleur",
-  "ar": "اللون"
- },
- "Switches, sliders and the main button in every space": {
-  "fr": "Commutateurs, curseurs et bouton principal dans chaque espace",
-  "ar": "المفاتيح وأشرطة التمرير والزر الرئيسي في كل مساحة"
- },
- "Accent": {
-  "fr": "Accentuation",
-  "ar": "لون التمييز"
- },
- "Cyan": {
-  "fr": "Cyan",
-  "ar": "سماوي"
- },
- "Sunset": {
-  "fr": "Coucher de soleil",
-  "ar": "غروب"
- },
- "Ocean": {
-  "fr": "Océan",
-  "ar": "محيط"
- },
- "Violet": {
-  "fr": "Violet",
-  "ar": "بنفسجي"
- },
- "Forest": {
-  "fr": "Forêt",
-  "ar": "غابة"
- },
- "Custom accent colour": {
-  "fr": "Couleur d'accentuation personnalisée",
-  "ar": "لون تمييز مخصص"
- },
- "Brighter secondary text and surfaces": {
-  "fr": "Texte secondaire et surfaces plus lumineux",
-  "ar": "نص ثانوي وأسطح أكثر سطوعًا"
- },
- "Higher contrast": {
-  "fr": "Contraste élevé",
-  "ar": "تباين أعلى"
- },
- "Motion": {
-  "fr": "Animations",
-  "ar": "الحركة"
- },
- "Follow the Mac": {
-  "fr": "Comme le Mac",
-  "ar": "مثل الـMac"
- },
- "Always": {
-  "fr": "Toujours",
-  "ar": "دائمًا"
- },
- "Never": {
-  "fr": "Jamais",
-  "ar": "أبدًا"
- },
- "Fade instead of spring when the island opens": {
-  "fr": "Fondu au lieu du rebond à l'ouverture de l'îlot",
-  "ar": "تلاشٍ بدلًا من الارتداد عند فتح الجزيرة"
- },
- "Reduce motion": {
-  "fr": "Réduire les animations",
-  "ar": "تقليل الحركة"
- },
- "Animation speed": {
-  "fr": "Vitesse des animations",
-  "ar": "سرعة الحركة"
- },
- "Notifications and calls, and which apps may show them.": {
-  "fr": "Notifications et appels, et quelles apps peuvent les afficher.",
-  "ar": "الإشعارات والمكالمات، والتطبيقات التي يمكنها إظهارها."
- },
- "Messages, mail and anything else in Notification Center": {
-  "fr": "Messages, mail et tout ce qui se trouve dans le centre de notifications",
-  "ar": "الرسائل والبريد وأي شيء آخر في مركز الإشعارات"
- },
- "Show notifications from apps": {
-  "fr": "Afficher les notifications des apps",
-  "ar": "إظهار إشعارات التطبيقات"
- },
- "During Focus, show": {
-  "fr": "Pendant la Concentration, afficher",
-  "ar": "أثناء التركيز، إظهار"
- },
- "Answer Messages, Discord and others from the island": {
-  "fr": "Répondre à Messages, Discord et d'autres depuis l'îlot",
-  "ar": "الرد على Messages وDiscord وغيرها من الجزيرة"
- },
- "Quick reply": {
-  "fr": "Réponse rapide",
-  "ar": "رد سريع"
- },
- "Experimental. When the island already shows it. Needs Accessibility": {
-  "fr": "Expérimental. Quand l'îlot l'affiche déjà. Nécessite Accessibilité",
-  "ar": "تجريبي. عندما تعرضها الجزيرة بالفعل. يتطلب إمكانية الوصول"
- },
- "Close the Mac's own banner": {
-  "fr": "Fermer la bannière du Mac",
-  "ar": "إغلاق لافتة الـMac"
- },
- "Calls from apps and browser tabs, with answer, decline and hang up": {
-  "fr": "Appels des apps et des onglets du navigateur, avec répondre, refuser et raccrocher",
-  "ar": "مكالمات من التطبيقات وعلامات تبويب المتصفح، مع الرد والرفض والإنهاء"
- },
- "Ring in the island": {
-  "fr": "Sonner dans l'îlot",
-  "ar": "الرنين في الجزيرة"
- },
- "Test call": {
-  "fr": "Appel de test",
-  "ar": "مكالمة اختبارية"
- },
- "Rings a sample call": {
-  "fr": "Fait sonner un appel d'exemple",
-  "ar": "يرنّ مكالمة نموذجية"
- },
- "Try it": {
-  "fr": "Essayer",
-  "ar": "تجربة"
- },
- "Read from": {
-  "fr": "Lire depuis",
-  "ar": "القراءة من"
- },
- "Delivered notifications. Needs Full Disk Access": {
-  "fr": "Notifications reçues. Nécessite l'accès complet au disque",
-  "ar": "الإشعارات المستلمة. يتطلب الوصول الكامل إلى القرص"
- },
- "Notification Center": {
-  "fr": "Centre de notifications",
-  "ar": "مركز الإشعارات"
- },
- "A fallback that reads banners as they appear. Needs Accessibility": {
-  "fr": "Une solution de secours qui lit les bannières à leur apparition. Nécessite Accessibilité",
-  "ar": "بديل يقرأ اللافتات عند ظهورها. يتطلب إمكانية الوصول"
- },
- "Banners on screen": {
-  "fr": "Bannières à l'écran",
-  "ar": "اللافتات على الشاشة"
- },
- "Whether a Focus is on. Needs Full Disk Access": {
-  "fr": "Si une Concentration est active. Nécessite l'accès complet au disque",
-  "ar": "ما إذا كان التركيز قيد التشغيل. يتطلب الوصول الكامل إلى القرص"
- },
- "Apps": {
-  "fr": "Apps",
-  "ar": "التطبيقات"
- },
- "To avoid seeing a message twice, set the app's alert style to None in System Settings › Notifications. It still reaches the island.": {
-  "fr": "Pour ne pas voir un message deux fois, réglez le style d'alerte de l'app sur Aucun dans Réglages Système › Notifications. Il atteint toujours l'îlot.",
-  "ar": "لتجنب رؤية الرسالة مرتين، اضبط نمط تنبيه التطبيق على بلا في إعدادات النظام › الإشعارات. ستظل تصل إلى الجزيرة."
- },
- "Weather, calendar, batteries and Focus.": {
-  "fr": "Météo, calendrier, batteries et Concentration.",
-  "ar": "الطقس والتقويم والبطاريات والتركيز."
- },
- "Weather": {
-  "fr": "Météo",
-  "ar": "الطقس"
- },
- "“auto” uses your approximate location": {
-  "fr": "« auto » utilise votre position approximative",
-  "ar": "“auto” يستخدم موقعك التقريبي"
- },
- "Celsius": {
-  "fr": "Celsius",
-  "ar": "مئوية"
- },
- "Fahrenheit": {
-  "fr": "Fahrenheit",
-  "ar": "فهرنهايت"
- },
- "Units": {
-  "fr": "Unités",
-  "ar": "الوحدات"
- },
- "10 minutes": {
-  "fr": "10 minutes",
-  "ar": "10 دقائق"
- },
- "20 minutes": {
-  "fr": "20 minutes",
-  "ar": "20 دقيقة"
- },
- "30 minutes": {
-  "fr": "30 minutes",
-  "ar": "30 دقيقة"
- },
- "Hour": {
-  "fr": "Heure",
-  "ar": "ساعة"
- },
- "Refresh every": {
-  "fr": "Actualiser toutes les",
-  "ar": "التحديث كل"
- },
- "Forecasts come from Open-Meteo.": {
-  "fr": "Prévisions fournies par Open-Meteo.",
-  "ar": "التوقعات مقدمة من Open-Meteo."
- },
- "From the calendar accounts on this Mac": {
-  "fr": "Depuis les comptes de calendrier de ce Mac",
-  "ar": "من حسابات التقويم على هذا الـMac"
- },
- "Today's events": {
-  "fr": "Événements du jour",
-  "ar": "أحداث اليوم"
- },
- "On 15 minutes before a meeting, off when it ends": {
-  "fr": "Activée 15 minutes avant une réunion, désactivée à sa fin",
-  "ar": "يعمل قبل الاجتماع بـ15 دقيقة ويتوقف عند انتهائه"
- },
- "Focus during meetings": {
-  "fr": "Concentration pendant les réunions",
-  "ar": "التركيز أثناء الاجتماعات"
- },
- "Batteries": {
-  "fr": "Batteries",
-  "ar": "البطاريات"
- },
- "This Mac": {
-  "fr": "Ce Mac",
-  "ar": "هذا الـMac"
- },
- "AirPods, keyboards, mice and other connected devices": {
-  "fr": "AirPods, claviers, souris et autres appareils connectés",
-  "ar": "AirPods ولوحات المفاتيح والفئران والأجهزة المتصلة الأخرى"
- },
- "Accessories": {
-  "fr": "Accessoires",
-  "ar": "الملحقات"
- },
- "Every day from": {
-  "fr": "Chaque jour de",
-  "ar": "كل يوم من"
- },
- "Until": {
-  "fr": "Jusqu'à",
-  "ar": "حتى"
- },
- "Focus on shortcut": {
-  "fr": "Raccourci d'activation",
-  "ar": "اختصار تشغيل التركيز"
- },
- "Focus off shortcut": {
-  "fr": "Raccourci de désactivation",
-  "ar": "اختصار إيقاف التركيز"
- },
- "Make these two in the Shortcuts app with the Set Focus action; the island runs them to turn Focus on and off.": {
-  "fr": "Créez-les dans l'app Raccourcis avec l'action Définir la concentration ; l'îlot les exécute pour activer et désactiver la Concentration.",
-  "ar": "أنشئ هذين الاختصارين في تطبيق الاختصارات باستخدام إجراء تعيين التركيز؛ تشغّلهما الجزيرة لتشغيل التركيز وإيقافه."
- },
- "A shelf for files you drop on the island.": {
-  "fr": "Une étagère pour les fichiers que vous déposez sur l'îlot.",
-  "ar": "رف للملفات التي تُفلتها على الجزيرة."
- },
- "Fills itself with": {
-  "fr": "Se remplit avec",
-  "ar": "يمتلئ تلقائيًا بـ"
- },
- "A finished download lands on the shelf, ready to drag anywhere": {
-  "fr": "Un téléchargement terminé arrive sur l'étagère, prêt à être glissé n'importe où",
-  "ar": "ينتقل التنزيل المكتمل إلى الرف، جاهزًا للسحب إلى أي مكان"
- },
- "Downloads": {
-  "fr": "Téléchargements",
-  "ar": "التنزيلات"
- },
- "Each new screenshot on the Desktop lands on the shelf": {
-  "fr": "Chaque nouvelle capture d'écran sur le Bureau arrive sur l'étagère",
-  "ar": "تنتقل كل لقطة شاشة جديدة على سطح المكتب إلى الرف"
- },
- "Screenshots": {
-  "fr": "Captures d'écran",
-  "ar": "لقطات الشاشة"
- },
- "Keeping": {
-  "fr": "Conservation",
-  "ar": "الاحتفاظ"
- },
- "Files are only referenced, never copied": {
-  "fr": "Les fichiers sont seulement référencés, jamais copiés",
-  "ar": "يُشار إلى الملفات فقط ولا تُنسخ أبدًا"
- },
- "Keep the shelf after quitting": {
-  "fr": "Conserver l'étagère après avoir quitté",
-  "ar": "الاحتفاظ بالرف بعد الإنهاء"
- },
- "The configuration file, logs and starting over.": {
-  "fr": "Le fichier de configuration, les journaux et la réinitialisation.",
-  "ar": "ملف الإعدادات والسجلات والبدء من جديد."
- },
- "Configuration": {
-  "fr": "Configuration",
-  "ar": "التكوين"
- },
- "Everything here is stored in a TOML file you can edit by hand": {
-  "fr": "Tout ici est stocké dans un fichier TOML modifiable à la main",
-  "ar": "يُخزَّن كل شيء هنا في ملف TOML يمكنك تحريره يدويًا"
- },
- "Settings file": {
-  "fr": "Fichier de réglages",
-  "ar": "ملف الإعدادات"
- },
- "Import…": {
-  "fr": "Importer…",
-  "ar": "استيراد…"
- },
- "Export…": {
-  "fr": "Exporter…",
-  "ar": "تصدير…"
- },
- "Save your settings to a file, or load them from one": {
-  "fr": "Enregistrez vos réglages dans un fichier ou chargez-les depuis un fichier",
-  "ar": "احفظ إعداداتك في ملف أو حمّلها من ملف"
- },
- "Back up": {
-  "fr": "Sauvegarde",
-  "ar": "النسخ الاحتياطي"
- },
- "Trouble": {
-  "fr": "Dépannage",
-  "ar": "المشكلات"
- },
- "What the island has been doing, for a bug report": {
-  "fr": "Ce que l'îlot a fait, pour un rapport de bug",
-  "ar": "ما كانت الجزيرة تفعله، لتقرير خطأ"
- },
- "Logs": {
-  "fr": "Journaux",
-  "ar": "السجلات"
- },
- "Reset…": {
-  "fr": "Réinitialiser…",
-  "ar": "إعادة تعيين…"
- },
- "Back to how the island came. Connected agents stay connected": {
-  "fr": "Retour à l'état d'origine de l'îlot. Les agents connectés restent connectés",
-  "ar": "العودة إلى حالة الجزيرة الأصلية. يبقى الوكلاء المتصلون متصلين"
- },
- "Reset all settings": {
-  "fr": "Réinitialiser tous les réglages",
-  "ar": "إعادة تعيين كل الإعدادات"
- },
- "Recording the screen": {
-  "fr": "Enregistrement de l'écran",
-  "ar": "جارٍ تسجيل الشاشة"
- },
- "Recording a voice memo": {
-  "fr": "Enregistrement d'un mémo vocal",
-  "ar": "جارٍ تسجيل مذكرة صوتية"
- },
- "Stop recording": {
-  "fr": "Arrêter l'enregistrement",
-  "ar": "إيقاف التسجيل"
- },
- "Screenshot": {
-  "fr": "Capture d'écran",
-  "ar": "لقطة شاشة"
- },
- "Selection": {
-  "fr": "Sélection",
-  "ar": "التحديد"
- },
- "Window": {
-  "fr": "Fenêtre",
-  "ar": "النافذة"
- },
- "Whole screen": {
-  "fr": "Écran entier",
-  "ar": "الشاشة بالكامل"
- },
- "Whole screen in 5 seconds": {
-  "fr": "Écran entier dans 5 secondes",
-  "ar": "الشاشة بالكامل بعد 5 ثوانٍ"
- },
- "Selection to clipboard": {
-  "fr": "Sélection vers le presse-papiers",
-  "ar": "التحديد إلى الحافظة"
- },
- "Record": {
-  "fr": "Enregistrer",
-  "ar": "تسجيل"
- },
- "Record the screen": {
-  "fr": "Enregistrer l'écran",
-  "ar": "تسجيل الشاشة"
- },
- "Record a voice memo": {
-  "fr": "Enregistrer un mémo vocal",
-  "ar": "تسجيل مذكرة صوتية"
- },
- "All capture options…": {
-  "fr": "Toutes les options de capture…",
-  "ar": "كل خيارات الالتقاط…"
- },
- "Voice memo": {
-  "fr": "Mémo vocal",
-  "ar": "مذكرة صوتية"
- },
- "The microphone could not be opened. Allow Notchisland under Microphone in System Settings › Privacy & Security.": {
-  "fr": "Impossible d'ouvrir le micro. Autorisez Notchisland sous Micro dans Réglages Système › Confidentialité et sécurité.",
-  "ar": "تعذّر فتح الميكروفون. اسمح لـNotchisland ضمن الميكروفون في إعدادات النظام › الخصوصية والأمن."
- },
- "Recording could not start. Allow Notchisland under Microphone in System Settings › Privacy & Security.": {
-  "fr": "Impossible de démarrer l'enregistrement. Autorisez Notchisland sous Micro dans Réglages Système › Confidentialité et sécurité.",
-  "ar": "تعذّر بدء التسجيل. اسمح لـNotchisland ضمن الميكروفون في إعدادات النظام › الخصوصية والأمن."
- },
- "New alarm": {
-  "fr": "Nouvelle alarme",
-  "ar": "منبه جديد"
- },
- "The notch alerts you at this time.": {
-  "fr": "L'encoche vous alerte à cette heure.",
-  "ar": "سينبهك النتوء في هذا الوقت."
- },
- "Set alarm": {
-  "fr": "Régler l'alarme",
-  "ar": "ضبط المنبه"
- },
- "Label (optional)": {
-  "fr": "Libellé (facultatif)",
-  "ar": "التسمية (اختيارية)"
- },
- "No alarms set": {
-  "fr": "Aucune alarme",
-  "ar": "لا توجد منبهات"
- },
- "Add alarm…": {
-  "fr": "Ajouter une alarme…",
-  "ar": "إضافة منبه…"
- },
- "Start": {
-  "fr": "Démarrer",
-  "ar": "بدء"
- },
- "Resume": {
-  "fr": "Reprendre",
-  "ar": "استئناف"
- },
- "Reset": {
-  "fr": "Réinitialiser",
-  "ar": "إعادة تعيين"
- },
- "Allowed": {
-  "fr": "Autorisé",
-  "ar": "مسموح"
- },
- "Not listening": {
-  "fr": "N'écoute pas",
-  "ar": "لا يستمع"
- },
- "Notchisland Settings": {
-  "fr": "Réglages de Notchisland",
-  "ar": "إعدادات Notchisland"
- },
- "Search": {
-  "fr": "Rechercher",
-  "ar": "بحث"
- },
- "All sources running": {
-  "fr": "Toutes les sources actives",
-  "ar": "كل المصادر تعمل"
- },
- "Your playlists show in Music": {
-  "fr": "Vos playlists s'affichent dans Musique",
-  "ar": "تظهر قوائم التشغيل في الموسيقى"
- },
- "Sign in to list your playlists. Playback works without it": {
-  "fr": "Connectez-vous pour lister vos playlists. La lecture fonctionne sans",
-  "ar": "سجّل الدخول لعرض قوائم التشغيل. يعمل التشغيل بدونه"
- },
- "Not signed in": {
-  "fr": "Non connecté",
-  "ar": "لم يتم تسجيل الدخول"
- },
- "Sign in…": {
-  "fr": "Se connecter…",
-  "ar": "تسجيل الدخول…"
- },
- "Not installed": {
-  "fr": "Non installé",
-  "ar": "غير مثبت"
- },
- "The Music app isn't on this Mac": {
-  "fr": "L'app Musique n'est pas sur ce Mac",
-  "ar": "تطبيق الموسيقى غير موجود على هذا الـMac"
- },
- "Automation for Music was turned off in System Settings": {
-  "fr": "L'automatisation pour Musique a été désactivée dans Réglages Système",
-  "ar": "تم إيقاف الأتمتة للموسيقى في إعدادات النظام"
- },
- "Not connected": {
-  "fr": "Non connecté",
-  "ar": "غير متصل"
- },
- "Opens Music and asks the Mac to let the island control it": {
-  "fr": "Ouvre Musique et demande au Mac de laisser l'îlot le contrôler",
-  "ar": "يفتح الموسيقى ويطلب من الـMac السماح للجزيرة بالتحكم فيه"
- },
- "None": {
-  "fr": "Aucun",
-  "ar": "بلا"
- },
- "auto, or a city": {
-  "fr": "auto, ou une ville",
-  "ar": "auto أو مدينة"
- },
- "Shortcut name": {
-  "fr": "Nom du raccourci",
-  "ar": "اسم الاختصار"
- },
- "Reset all settings?": {
-  "fr": "Réinitialiser tous les réglages ?",
-  "ar": "إعادة تعيين كل الإعدادات؟"
- },
- "Every setting goes back to how the island came. This can't be undone.": {
-  "fr": "Tous les réglages reviennent à l'état d'origine de l'îlot. Cette action est irréversible.",
-  "ar": "ستعود كل الإعدادات إلى حالة الجزيرة الأصلية. لا يمكن التراجع عن ذلك."
- },
- "Set a place in Settings": {
-  "fr": "Définissez un lieu dans les Réglages",
-  "ar": "حدد مكانًا في الإعدادات"
- },
- "Nothing else on today": {
-  "fr": "Rien d'autre aujourd'hui",
-  "ar": "لا شيء آخر اليوم"
- },
- "All day": {
-  "fr": "Toute la journée",
-  "ar": "طوال اليوم"
- },
- "All done": {
-  "fr": "Tout est fait",
-  "ar": "تم كل شيء"
- },
- "Overdue": {
-  "fr": "En retard",
-  "ar": "متأخر"
- },
- "Stop": {
-  "fr": "Arrêter",
-  "ar": "إيقاف"
- },
- "No batteries to show": {
-  "fr": "Aucune batterie à afficher",
-  "ar": "لا توجد بطاريات لعرضها"
- },
- "Unmute mic": {
-  "fr": "Réactiver le micro",
-  "ar": "إلغاء كتم الميكروفون"
- },
- "Alerts paused": {
-  "fr": "Alertes suspendues",
-  "ar": "التنبيهات متوقفة مؤقتًا"
- },
- "SUN": {
-  "fr": "DIM",
-  "ar": "أحد"
- },
- "MON": {
-  "fr": "LUN",
-  "ar": "إثنين"
- },
- "TUE": {
-  "fr": "MAR",
-  "ar": "ثلاثاء"
- },
- "WED": {
-  "fr": "MER",
-  "ar": "أربعاء"
- },
- "FRI": {
-  "fr": "VEN",
-  "ar": "جمعة"
- },
- "SAT": {
-  "fr": "SAM",
-  "ar": "سبت"
- },
- "Usage": {
-  "fr": "Utilisation",
-  "ar": "الاستخدام"
- },
- "On a call": {
-  "fr": "En appel",
-  "ar": "في مكالمة"
- },
- "Type your reply, ⏎ to send": {
-  "fr": "Tapez votre réponse, ⏎ pour envoyer",
-  "ar": "اكتب ردك، ⏎ للإرسال"
- },
- "Folder": {
-  "fr": "Dossier",
-  "ar": "مجلد"
- },
- "Copy Text from Screenshot": {
-  "fr": "Copier le texte de la capture",
-  "ar": "نسخ النص من لقطة الشاشة"
- },
- "waiting for you": {
-  "fr": "vous attend",
-  "ar": "بانتظارك"
- },
- "No artwork": {
-  "fr": "Pas d'illustration",
-  "ar": "لا توجد صورة"
- },
- "Search YouTube — Enter plays it here": {
-  "fr": "Rechercher sur YouTube — Entrée lance la lecture ici",
-  "ar": "ابحث في YouTube — Enter للتشغيل هنا"
+ " · Paused": {
+  "ar": " · متوقف مؤقتًا",
+  "fr": " · En pause"
  },
  " · Playing": {
-  "fr": " · Lecture",
-  "ar": " · قيد التشغيل"
+  "ar": " · قيد التشغيل",
+  "fr": " · Lecture"
  },
- " · Paused": {
-  "fr": " · En pause",
-  "ar": " · متوقف مؤقتًا"
+ "10 minutes": {
+  "ar": "10 دقائق",
+  "fr": "10 minutes"
  },
- "Playing audio": {
-  "fr": "Lecture audio",
-  "ar": "تشغيل الصوت"
+ "10 seconds": {
+  "ar": "10 ثوانٍ",
+  "fr": "10 secondes"
  },
- "Browser": {
-  "fr": "Navigateur",
-  "ar": "المتصفح"
+ "20 minutes": {
+  "ar": "20 دقيقة",
+  "fr": "20 minutes"
  },
- "Allow tab access to see the site and title": {
-  "fr": "Autorisez l'accès aux onglets pour voir le site et le titre",
-  "ar": "اسمح بالوصول إلى علامات التبويب لرؤية الموقع والعنوان"
+ "30 minutes": {
+  "ar": "30 دقيقة",
+  "fr": "30 minutes"
  },
- "Browser tabs are private; allow access to see them": {
-  "fr": "Les onglets du navigateur sont privés ; autorisez l'accès pour les voir",
-  "ar": "علامات تبويب المتصفح خاصة؛ اسمح بالوصول لرؤيتها"
+ "30 seconds": {
+  "ar": "30 ثانية",
+  "fr": "30 secondes"
  },
- "Allow tab access": {
-  "fr": "Autoriser l'accès aux onglets",
-  "ar": "السماح بالوصول إلى علامات التبويب"
+ "5 seconds": {
+  "ar": "5 ثوانٍ",
+  "fr": "5 secondes"
  },
- "SILENT": {
-  "fr": "SILENCE",
-  "ar": "صامت"
+ "A display-only island at the top of each other screen": {
+  "ar": "جزيرة للعرض فقط أعلى كل شاشة أخرى",
+  "fr": "Un îlot d'affichage seul en haut de chaque autre écran"
  },
- "Start something in Spotify or Apple Music": {
-  "fr": "Lancez quelque chose dans Spotify ou Apple Music",
-  "ar": "شغّل شيئًا في Spotify أو Apple Music"
+ "A fallback that reads banners as they appear. Needs Accessibility": {
+  "ar": "بديل يقرأ اللافتات عند ظهورها. يتطلب إمكانية الوصول",
+  "fr": "Une solution de secours qui lit les bannières à leur apparition. Nécessite Accessibilité"
  },
- "No output": {
-  "fr": "Aucune sortie",
-  "ar": "لا يوجد مخرج"
+ "A finished download lands on the shelf, ready to drag anywhere": {
+  "ar": "ينتقل التنزيل المكتمل إلى الرف، جاهزًا للسحب إلى أي مكان",
+  "fr": "Un téléchargement terminé arrive sur l'étagère, prêt à être glissé n'importe où"
  },
- "up to": {
-  "fr": "jusqu'à",
-  "ar": "حتى"
+ "A local webhook, a Unix socket and an inbox file": {
+  "ar": "Webhook محلي ومقبس Unix وملف وارد",
+  "fr": "Un webhook local, un socket Unix et un fichier de réception"
  },
- "Per-app audio needs macOS 14.2 or later": {
-  "fr": "L'audio par app nécessite macOS 14.2 ou ultérieur",
-  "ar": "يتطلب الصوت لكل تطبيق macOS 14.2 أو أحدث"
+ "A notification below this waits quietly in Now": {
+  "ar": "ينتظر الإشعار الأقل من هذا المستوى بهدوء في الآن",
+  "fr": "Une notification en dessous de ce niveau attend discrètement dans Maintenant"
  },
- "No app is playing audio": {
-  "fr": "Aucune app ne lit de son",
-  "ar": "لا يوجد تطبيق يشغّل الصوت"
+ "A shelf for files you drop on the island.": {
+  "ar": "رف للملفات التي تُفلتها على الجزيرة.",
+  "fr": "Une étagère pour les fichiers que vous déposez sur l'îlot."
  },
- "Waiting for you to approve Notchisland in your browser…": {
-  "fr": "En attente de votre approbation de Notchisland dans le navigateur…",
-  "ar": "في انتظار موافقتك على Notchisland في المتصفح…"
+ "A shoulder with no room is hidden, not drawn over them": {
+  "ar": "يُخفى الجانب الذي لا مساحة له بدلًا من رسمه فوقها",
+  "fr": "Une épaule sans place est masquée, pas dessinée par-dessus"
  },
- "Sign in to Spotify to list your playlists.": {
-  "fr": "Connectez-vous à Spotify pour lister vos playlists.",
-  "ar": "سجّل الدخول إلى Spotify لعرض قوائم التشغيل."
+ "A timer, charging, the playing song or a waiting agent": {
+  "ar": "مؤقت أو الشحن أو الأغنية قيد التشغيل أو وكيل منتظر",
+  "fr": "Un minuteur, la charge, le morceau en cours ou un agent en attente"
  },
- "Connect Spotify": {
-  "fr": "Connecter Spotify",
-  "ar": "ربط Spotify"
+ "Accent": {
+  "ar": "لون التمييز",
+  "fr": "Accentuation"
  },
- "Open Music to see your playlists.": {
-  "fr": "Ouvrez Musique pour voir vos playlists.",
-  "ar": "افتح الموسيقى لرؤية قوائم التشغيل."
+ "Accessibility": {
+  "ar": "إمكانية الوصول",
+  "fr": "Accessibilité"
  },
- "Retry": {
-  "fr": "Réessayer",
-  "ar": "إعادة المحاولة"
+ "Accessories": {
+  "ar": "الملحقات",
+  "fr": "Accessoires"
  },
- "No playlists yet.": {
-  "fr": "Aucune playlist pour l'instant.",
-  "ar": "لا توجد قوائم تشغيل بعد."
+ "Add alarm…": {
+  "ar": "إضافة منبه…",
+  "fr": "Ajouter une alarme…"
  },
- "No lyrics found for this track.": {
-  "fr": "Aucunes paroles trouvées pour ce morceau.",
-  "ar": "لم يتم العثور على كلمات لهذا المقطع."
+ "Advanced": {
+  "ar": "متقدم",
+  "fr": "Avancé"
  },
- "Type and press Enter to search YouTube.": {
-  "fr": "Tapez et appuyez sur Entrée pour chercher sur YouTube.",
-  "ar": "اكتب واضغط Enter للبحث في YouTube."
+ "Agents": {
+  "ar": "الوكلاء",
+  "fr": "Agents"
  },
- "Other": {
-  "fr": "Autre",
-  "ar": "أخرى"
+ "AirDrop all": {
+  "ar": "إرسال الكل عبر AirDrop",
+  "fr": "Tout envoyer par AirDrop"
  },
- "Token usage is off. You can turn it on in Settings › Coding Agents.": {
-  "fr": "L'utilisation des jetons est désactivée. Activez-la dans Réglages › Agents de code.",
-  "ar": "استخدام الرموز متوقف. يمكنك تشغيله في الإعدادات › وكلاء البرمجة."
+ "AirDrop…": {
+  "ar": "AirDrop…",
+  "fr": "AirDrop…"
  },
- "No coding-agent logs were found on this Mac.": {
-  "fr": "Aucun journal d'agent de code trouvé sur ce Mac.",
-  "ar": "لم يتم العثور على سجلات وكلاء البرمجة على هذا الـMac."
+ "AirPods, keyboards, mice and other connected devices": {
+  "ar": "AirPods ولوحات المفاتيح والفئران والأجهزة المتصلة الأخرى",
+  "fr": "AirPods, claviers, souris et autres appareils connectés"
  },
- "No other agent found": {
-  "fr": "Aucun autre agent trouvé",
-  "ar": "لم يتم العثور على وكيل آخر"
+ "Alarm": {
+  "ar": "المنبه",
+  "fr": "Alarme"
  },
- "Idle": {
-  "fr": "Inactif",
-  "ar": "خامل"
+ "Alerts from the app itself, such as timers, while the notch is hidden.": {
+  "ar": "تنبيهات من التطبيق نفسه، مثل المؤقتات، عندما يكون النتوء مخفيًا.",
+  "fr": "Alertes de l'app elle-même, comme les minuteurs, quand l'encoche est masquée."
  },
- "Connect to see session and weekly limits.": {
-  "fr": "Connectez-vous pour voir les limites de session et hebdomadaires.",
-  "ar": "اتصل لرؤية حدود الجلسة والأسبوع."
+ "Alerts paused": {
+  "ar": "التنبيهات متوقفة مؤقتًا",
+  "fr": "Alertes suspendues"
  },
- "Limits need claude in a terminal.": {
-  "fr": "Les limites nécessitent claude dans un terminal.",
-  "ar": "تتطلب الحدود تشغيل claude في الطرفية."
+ "All capture options…": {
+  "ar": "كل خيارات الالتقاط…",
+  "fr": "Toutes les options de capture…"
  },
- "No limits logged yet.": {
-  "fr": "Aucune limite enregistrée pour l'instant.",
-  "ar": "لم تُسجَّل أي حدود بعد."
+ "All day": {
+  "ar": "طوال اليوم",
+  "fr": "Toute la journée"
  },
- "This agent doesn't report limits.": {
-  "fr": "Cet agent ne signale pas de limites.",
-  "ar": "هذا الوكيل لا يُبلغ عن الحدود."
+ "All done": {
+  "ar": "تم كل شيء",
+  "fr": "Tout est fait"
  },
- "None in this range": {
-  "fr": "Aucun sur cette période",
-  "ar": "لا شيء في هذا النطاق"
+ "All sources running": {
+  "ar": "كل المصادر تعمل",
+  "fr": "Toutes les sources actives"
  },
  "All tokens": {
-  "fr": "Tous les jetons",
-  "ar": "كل الرموز"
+  "ar": "كل الرموز",
+  "fr": "Tous les jetons"
  },
- "No sessions in this range": {
-  "fr": "Aucune session sur cette période",
-  "ar": "لا توجد جلسات في هذا النطاق"
+ "Allow": {
+  "ar": "سماح",
+  "fr": "Autoriser"
  },
- "Picking up": {
-  "fr": "Prise d'appel",
-  "ar": "جارٍ الرد"
+ "Allow Calendar access to see today": {
+  "ar": "اسمح بالوصول إلى التقويم لرؤية اليوم",
+  "fr": "Autorisez l'accès au calendrier pour voir la journée"
  },
- "Never show this app": {
-  "fr": "Ne jamais afficher cette app",
-  "ar": "عدم إظهار هذا التطبيق أبدًا"
+ "Allow Reminders access to see them": {
+  "ar": "اسمح بالوصول إلى التذكيرات لرؤيتها",
+  "fr": "Autorisez l'accès aux rappels pour les voir"
  },
- "Open the Panel": {
-  "fr": "Ouvrir le panneau",
-  "ar": "فتح اللوحة"
+ "Allow tab access": {
+  "ar": "السماح بالوصول إلى علامات التبويب",
+  "fr": "Autoriser l'accès aux onglets"
  },
- "Start Timer": {
-  "fr": "Démarrer le minuteur",
-  "ar": "بدء المؤقت"
+ "Allow tab access to see the site and title": {
+  "ar": "اسمح بالوصول إلى علامات التبويب لرؤية الموقع والعنوان",
+  "fr": "Autorisez l'accès aux onglets pour voir le site et le titre"
  },
- "Stop music in 30 min": {
-  "fr": "Arrêter la musique dans 30 min",
-  "ar": "إيقاف الموسيقى بعد 30 دقيقة"
+ "Allowed": {
+  "ar": "مسموح",
+  "fr": "Autorisé"
  },
- "Stop music in 1 h": {
-  "fr": "Arrêter la musique dans 1 h",
-  "ar": "إيقاف الموسيقى بعد ساعة"
+ "Allow…": {
+  "ar": "سماح…",
+  "fr": "Autoriser…"
  },
- "Sleep": {
-  "fr": "Suspendre l'activité",
-  "ar": "إسبات"
+ "Always": {
+  "ar": "دائمًا",
+  "fr": "Toujours"
  },
- "Pomodoro 25 / 5": {
-  "fr": "Pomodoro 25 / 5",
-  "ar": "بومودورو 25 / 5"
+ "Animation speed": {
+  "ar": "سرعة الحركة",
+  "fr": "Vitesse des animations"
  },
- "Pomodoro 50 / 10": {
-  "fr": "Pomodoro 50 / 10",
-  "ar": "بومودورو 50 / 10"
+ "Answer Messages, Discord and others from the island": {
+  "ar": "الرد على Messages وDiscord وغيرها من الجزيرة",
+  "fr": "Répondre à Messages, Discord et d'autres depuis l'îlot"
+ },
+ "Answer and end calls, reply to message banners, and read video timelines in your browser.": {
+  "ar": "الرد على المكالمات وإنهاؤها، والرد على لافتات الرسائل، وقراءة الخط الزمني للفيديو في المتصفح.",
+  "fr": "Répondre aux appels et y mettre fin, répondre aux bannières de messages et lire la chronologie des vidéos dans votre navigateur."
+ },
+ "Approve Notchisland in your browser": {
+  "ar": "وافق على Notchisland في المتصفح",
+  "fr": "Approuvez Notchisland dans votre navigateur"
+ },
+ "Approve new agents first": {
+  "ar": "الموافقة على الوكلاء الجدد أولًا",
+  "fr": "Approuver d'abord les nouveaux agents"
+ },
+ "Apps": {
+  "ar": "التطبيقات",
+  "fr": "Apps"
+ },
+ "Ask in the island for": {
+  "ar": "السؤال في الجزيرة لمدة",
+  "fr": "Demander dans l'îlot pendant"
+ },
+ "Asking": {
+  "ar": "الطلبات",
+  "fr": "Demandes"
+ },
+ "Automation": {
+  "ar": "الأتمتة",
+  "fr": "Automatisation"
+ },
+ "Automation (Spotify & Music)": {
+  "ar": "الأتمتة (Spotify والموسيقى)",
+  "fr": "Automatisation (Spotify et Musique)"
+ },
+ "Automation for Music was turned off in System Settings": {
+  "ar": "تم إيقاف الأتمتة للموسيقى في إعدادات النظام",
+  "fr": "L'automatisation pour Musique a été désactivée dans Réglages Système"
+ },
+ "Back 10 seconds": {
+  "ar": "رجوع 10 ثوانٍ",
+  "fr": "Reculer de 10 secondes"
+ },
+ "Back to how the island came. Connected agents stay connected": {
+  "ar": "العودة إلى حالة الجزيرة الأصلية. يبقى الوكلاء المتصلون متصلين",
+  "fr": "Retour à l'état d'origine de l'îlot. Les agents connectés restent connectés"
+ },
+ "Back up": {
+  "ar": "النسخ الاحتياطي",
+  "fr": "Sauvegarde"
+ },
+ "Banners on screen": {
+  "ar": "اللافتات على الشاشة",
+  "fr": "Bannières à l'écran"
+ },
+ "Batteries": {
+  "ar": "البطاريات",
+  "fr": "Batteries"
+ },
+ "Bearer token": {
+  "ar": "رمز Bearer",
+  "fr": "Jeton Bearer"
+ },
+ "Black": {
+  "ar": "أسود",
+  "fr": "Noir"
+ },
+ "Bluetooth": {
+  "ar": "البلوتوث",
+  "fr": "Bluetooth"
+ },
+ "Brighter secondary text and surfaces": {
+  "ar": "نص ثانوي وأسطح أكثر سطوعًا",
+  "fr": "Texte secondaire et surfaces plus lumineux"
+ },
+ "Browser": {
+  "ar": "المتصفح",
+  "fr": "Navigateur"
+ },
+ "Browser tabs": {
+  "ar": "علامات تبويب المتصفح",
+  "fr": "Onglets du navigateur"
+ },
+ "Browser tabs are private; allow access to see them": {
+  "ar": "علامات تبويب المتصفح خاصة؛ اسمح بالوصول لرؤيتها",
+  "fr": "Les onglets du navigateur sont privés ; autorisez l'accès pour les voir"
+ },
+ "Built-in (notch)": {
+  "ar": "مدمج (النتوء)",
+  "fr": "Intégré (encoche)"
+ },
+ "By agent": {
+  "ar": "حسب الوكيل",
+  "fr": "Par agent"
+ },
+ "By model": {
+  "ar": "حسب النموذج",
+  "fr": "Par modèle"
+ },
+ "Cache read": {
+  "ar": "قراءة ذاكرة التخزين المؤقت",
+  "fr": "Lecture du cache"
+ },
+ "Cache write": {
+  "ar": "كتابة ذاكرة التخزين المؤقت",
+  "fr": "Écriture du cache"
+ },
+ "Calendar": {
+  "ar": "التقويم",
+  "fr": "Calendrier"
+ },
+ "Calendars & Reminders": {
+  "ar": "التقويمات والتذكيرات",
+  "fr": "Calendriers et rappels"
+ },
+ "Calls": {
+  "ar": "المكالمات",
+  "fr": "Appels"
+ },
+ "Calls from apps and browser tabs, with answer, decline and hang up": {
+  "ar": "مكالمات من التطبيقات وعلامات تبويب المتصفح، مع الرد والرفض والإنهاء",
+  "fr": "Appels des apps et des onglets du navigateur, avec répondre, refuser et raccrocher"
+ },
+ "Cancel": {
+  "ar": "إلغاء",
+  "fr": "Annuler"
  },
  "Cancel Timer": {
-  "fr": "Annuler le minuteur",
-  "ar": "إلغاء المؤقت"
+  "ar": "إلغاء المؤقت",
+  "fr": "Annuler le minuteur"
  },
- "Undo Clear All": {
-  "fr": "Annuler Tout effacer",
-  "ar": "التراجع عن مسح الكل"
+ "Capture": {
+  "ar": "التقاط",
+  "fr": "Capture"
  },
- "Shelve Clipboard": {
-  "fr": "Mettre le presse-papiers sur l'étagère",
-  "ar": "وضع الحافظة على الرف"
+ "Celsius": {
+  "ar": "مئوية",
+  "fr": "Celsius"
  },
- "Sound Output": {
-  "fr": "Sortie audio",
-  "ar": "مخرج الصوت"
+ "Check again": {
+  "ar": "التحقق مجددًا",
+  "fr": "Vérifier à nouveau"
  },
- "Settings…": {
-  "fr": "Réglages…",
-  "ar": "الإعدادات…"
+ "Check players every": {
+  "ar": "التحقق من المشغلات كل",
+  "fr": "Vérifier les lecteurs toutes les"
  },
- "Set Up Notchisland…": {
-  "fr": "Configurer Notchisland…",
-  "ar": "إعداد Notchisland…"
+ "Choose where sound goes from Music. No permission needed": {
+  "ar": "اختر وجهة الصوت من الموسيقى. لا يلزم أي إذن",
+  "fr": "Choisissez où va le son depuis Musique. Aucune autorisation requise"
  },
- "Open Config File": {
-  "fr": "Ouvrir le fichier de configuration",
-  "ar": "فتح ملف الإعدادات"
+ "Claude Code limits": {
+  "ar": "حدود Claude Code",
+  "fr": "Limites de Claude Code"
  },
- "Quit Notchisland": {
-  "fr": "Quitter Notchisland",
-  "ar": "إنهاء Notchisland"
+ "Claude Code, Codex, OpenCode, Cursor Agent, Gemini CLI and others, with no setup": {
+  "ar": "Claude Code وCodex وOpenCode وCursor Agent وGemini CLI وغيرها، دون إعداد",
+  "fr": "Claude Code, Codex, OpenCode, Cursor Agent, Gemini CLI et d'autres, sans configuration"
  },
- "On": {
-  "fr": "Activé",
-  "ar": "تشغيل"
+ "Claude limits": {
+  "ar": "حدود Claude",
+  "fr": "Limites de Claude"
+ },
+ "Clear": {
+  "ar": "مسح",
+  "fr": "Effacer"
+ },
+ "Clear shelf": {
+  "ar": "مسح الرف",
+  "fr": "Vider l'étagère"
+ },
+ "Clipboard": {
+  "ar": "الحافظة",
+  "fr": "Presse-papiers"
+ },
+ "Close the Mac's own banner": {
+  "ar": "إغلاق لافتة الـMac",
+  "fr": "Fermer la bannière du Mac"
+ },
+ "Codex already runs another notify program": {
+  "ar": "يشغّل Codex بالفعل برنامج إشعارات آخر",
+  "fr": "Codex exécute déjà un autre programme de notification"
+ },
+ "Coding agents": {
+  "ar": "وكلاء البرمجة",
+  "fr": "Agents de code"
+ },
+ "Coding agents report to the island and ask it for permission.": {
+  "ar": "يُبلغ وكلاء البرمجة الجزيرة ويطلبون منها الإذن.",
+  "fr": "Les agents de code rendent compte à l'îlot et lui demandent l'autorisation."
+ },
+ "Colour": {
+  "ar": "اللون",
+  "fr": "Couleur"
+ },
+ "Configuration": {
+  "ar": "التكوين",
+  "fr": "Configuration"
+ },
+ "Connect": {
+  "ar": "اتصال",
+  "fr": "Connecter"
+ },
+ "Connect Spotify": {
+  "ar": "ربط Spotify",
+  "fr": "Connecter Spotify"
+ },
+ "Connect agents": {
+  "ar": "ربط الوكلاء",
+  "fr": "Connecter des agents"
+ },
+ "Connect an agent to see its limits.": {
+  "ar": "صِل وكيلًا لرؤية حدوده.",
+  "fr": "Connectez un agent pour voir ses limites."
+ },
+ "Connect to see session and weekly limits.": {
+  "ar": "اتصل لرؤية حدود الجلسة والأسبوع.",
+  "fr": "Connectez-vous pour voir les limites de session et hebdomadaires."
+ },
+ "Connected": {
+  "ar": "متصل",
+  "fr": "Connecté"
+ },
+ "Connected agents": {
+  "ar": "الوكلاء المتصلون",
+  "fr": "Agents connectés"
+ },
+ "Connecting edits that agent's own settings (a .notchforge.bak copy is kept) so it reports here. It signs in to nothing.": {
+  "ar": "يعدّل الربط إعدادات هذا الوكيل (مع الاحتفاظ بنسخة .notchforge.bak) ليُبلغ هنا. لا يسجّل الدخول إلى أي شيء.",
+  "fr": "La connexion modifie les réglages de cet agent (une copie .notchforge.bak est conservée) pour qu'il rende compte ici. Elle ne se connecte à aucun compte."
+ },
+ "Context": {
+  "ar": "السياق",
+  "fr": "Contexte"
+ },
+ "Continue": {
+  "ar": "متابعة",
+  "fr": "Continuer"
+ },
+ "Control Spotify": {
+  "ar": "التحكم في Spotify",
+  "fr": "Contrôler Spotify"
+ },
+ "Copy": {
+  "ar": "نسخ",
+  "fr": "Copier"
+ },
+ "Copy Path": {
+  "ar": "نسخ المسار",
+  "fr": "Copier le chemin"
+ },
+ "Copy Text": {
+  "ar": "نسخ النص",
+  "fr": "Copier le texte"
+ },
+ "Copy Text from Screenshot": {
+  "ar": "نسخ النص من لقطة الشاشة",
+  "fr": "Copier le texte de la capture"
+ },
+ "Copy on other screens": {
+  "ar": "نسخة على الشاشات الأخرى",
+  "fr": "Copie sur les autres écrans"
+ },
+ "Counts from Claude Code and Codex logs on this Mac. Nothing is kept or sent": {
+  "ar": "يُحسب من سجلات Claude Code وCodex على هذا الـMac. لا يُحفظ أو يُرسل أي شيء",
+  "fr": "Calculé à partir des journaux de Claude Code et Codex sur ce Mac. Rien n'est conservé ni envoyé"
+ },
+ "Cover art on the left, a level meter on the right": {
+  "ar": "صورة الغلاف على اليسار ومؤشر المستوى على اليمين",
+  "fr": "La pochette à gauche, un indicateur de niveau à droite"
+ },
+ "Critical only": {
+  "ar": "الحرجة فقط",
+  "fr": "Critique uniquement"
+ },
+ "Custom accent colour": {
+  "ar": "لون تمييز مخصص",
+  "fr": "Couleur d'accentuation personnalisée"
+ },
+ "Cyan": {
+  "ar": "سماوي",
+  "fr": "Cyan"
+ },
+ "Day": {
+  "ar": "اليوم",
+  "fr": "Journée"
+ },
+ "Delivered notifications. Needs Full Disk Access": {
+  "ar": "الإشعارات المستلمة. يتطلب الوصول الكامل إلى القرص",
+  "fr": "Notifications reçues. Nécessite l'accès complet au disque"
+ },
+ "Deny": {
+  "ar": "رفض",
+  "fr": "Refuser"
+ },
+ "Disconnect": {
+  "ar": "قطع الاتصال",
+  "fr": "Déconnecter"
+ },
+ "Dismiss": {
+  "ar": "تجاهل",
+  "fr": "Ignorer"
+ },
+ "Display with pointer": {
+  "ar": "الشاشة التي بها المؤشر",
+  "fr": "Écran avec le pointeur"
+ },
+ "Done": {
+  "ar": "تم",
+  "fr": "Terminé"
+ },
+ "Downloads": {
+  "ar": "التنزيلات",
+  "fr": "Téléchargements"
+ },
+ "Drop files on the notch": {
+  "ar": "أفلت الملفات على النتوء",
+  "fr": "Déposez des fichiers sur l'encoche"
+ },
+ "Drop to add": {
+  "ar": "أفلت للإضافة",
+  "fr": "Déposer pour ajouter"
+ },
+ "During Focus, show": {
+  "ar": "أثناء التركيز، إظهار",
+  "fr": "Pendant la Concentration, afficher"
+ },
+ "Each new screenshot on the Desktop lands on the shelf": {
+  "ar": "تنتقل كل لقطة شاشة جديدة على سطح المكتب إلى الرف",
+  "fr": "Chaque nouvelle capture d'écran sur le Bureau arrive sur l'étagère"
+ },
+ "Earlier": {
+  "ar": "سابقًا",
+  "fr": "Plus tôt"
+ },
+ "Empty": {
+  "ar": "فارغ",
+  "fr": "Vide"
+ },
+ "Every day from": {
+  "ar": "كل يوم من",
+  "fr": "Chaque jour de"
+ },
+ "Every permission is optional; a feature waits until it is allowed.": {
+  "ar": "كل إذن اختياري؛ تنتظر الميزة حتى يُسمح بها.",
+  "fr": "Chaque autorisation est facultative ; une fonction attend d'être autorisée."
+ },
+ "Every setting goes back to how the island came. This can't be undone.": {
+  "ar": "ستعود كل الإعدادات إلى حالة الجزيرة الأصلية. لا يمكن التراجع عن ذلك.",
+  "fr": "Tous les réglages reviennent à l'état d'origine de l'îlot. Cette action est irréversible."
+ },
+ "Everything": {
+  "ar": "الكل",
+  "fr": "Tout"
+ },
+ "Everything here is stored in a TOML file you can edit by hand": {
+  "ar": "يُخزَّن كل شيء هنا في ملف TOML يمكنك تحريره يدويًا",
+  "fr": "Tout ici est stocké dans un fichier TOML modifiable à la main"
+ },
+ "Experimental. When the island already shows it. Needs Accessibility": {
+  "ar": "تجريبي. عندما تعرضها الجزيرة بالفعل. يتطلب إمكانية الوصول",
+  "fr": "Expérimental. Quand l'îlot l'affiche déjà. Nécessite Accessibilité"
+ },
+ "Export…": {
+  "ar": "تصدير…",
+  "fr": "Exporter…"
+ },
+ "External displays": {
+  "ar": "الشاشات الخارجية",
+  "fr": "Écrans externes"
+ },
+ "FRI": {
+  "ar": "جمعة",
+  "fr": "VEN"
+ },
+ "Fade instead of spring when the island opens": {
+  "ar": "تلاشٍ بدلًا من الارتداد عند فتح الجزيرة",
+  "fr": "Fondu au lieu du rebond à l'ouverture de l'îlot"
+ },
+ "Fahrenheit": {
+  "ar": "فهرنهايت",
+  "fr": "Fahrenheit"
+ },
+ "Files are only referenced, never copied": {
+  "ar": "يُشار إلى الملفات فقط ولا تُنسخ أبدًا",
+  "fr": "Les fichiers sont seulement référencés, jamais copiés"
+ },
+ "Fills itself with": {
+  "ar": "يمتلئ تلقائيًا بـ",
+  "fr": "Se remplit avec"
+ },
+ "Focus": {
+  "ar": "التركيز",
+  "fr": "Concentration"
+ },
+ "Focus during meetings": {
+  "ar": "التركيز أثناء الاجتماعات",
+  "fr": "Concentration pendant les réunions"
+ },
+ "Focus off shortcut": {
+  "ar": "اختصار إيقاف التركيز",
+  "fr": "Raccourci de désactivation"
+ },
+ "Focus on": {
+  "ar": "التركيز قيد التشغيل",
+  "fr": "Concentration activée"
+ },
+ "Focus on shortcut": {
+  "ar": "اختصار تشغيل التركيز",
+  "fr": "Raccourci d'activation"
+ },
+ "Folder": {
+  "ar": "مجلد",
+  "fr": "Dossier"
+ },
+ "Follow the Mac": {
+  "ar": "مثل الـMac",
+  "fr": "Comme le Mac"
+ },
+ "Forecasts come from Open-Meteo.": {
+  "ar": "التوقعات مقدمة من Open-Meteo.",
+  "fr": "Prévisions fournies par Open-Meteo."
+ },
+ "Forest": {
+  "ar": "غابة",
+  "fr": "Forêt"
+ },
+ "Forget": {
+  "ar": "نسيان",
+  "fr": "Oublier"
+ },
+ "Forget every Allow and Deny so agents are asked again": {
+  "ar": "نسيان كل سماح ورفض ليُسأل الوكلاء مجددًا",
+  "fr": "Oublier chaque Autoriser et Refuser pour que les agents soient à nouveau sollicités"
+ },
+ "Forward 10 seconds": {
+  "ar": "تقديم 10 ثوانٍ",
+  "fr": "Avancer de 10 secondes"
+ },
+ "From the calendar accounts on this Mac": {
+  "ar": "من حسابات التقويم على هذا الـMac",
+  "fr": "Depuis les comptes de calendrier de ce Mac"
+ },
+ "Full Disk Access": {
+  "ar": "الوصول الكامل إلى القرص",
+  "fr": "Accès complet au disque"
+ },
+ "Glance for": {
+  "ar": "لمحة لمدة",
+  "fr": "Aperçu pendant"
+ },
+ "Granted": {
+  "ar": "ممنوح",
+  "fr": "Autorisé"
+ },
+ "Hang up": {
+  "ar": "إنهاء المكالمة",
+  "fr": "Raccrocher"
+ },
+ "Heaviest sessions": {
+  "ar": "أثقل الجلسات",
+  "fr": "Sessions les plus lourdes"
+ },
+ "Hide in fullscreen apps": {
+  "ar": "إخفاء في التطبيقات بملء الشاشة",
+  "fr": "Masquer dans les apps en plein écran"
+ },
+ "Hide until it stops ringing": {
+  "ar": "إخفاء حتى يتوقف الرنين",
+  "fr": "Masquer jusqu'à la fin de la sonnerie"
+ },
+ "High and up": {
+  "ar": "مرتفع وأعلى",
+  "fr": "Élevé et plus"
+ },
+ "Higher contrast": {
+  "ar": "تباين أعلى",
+  "fr": "Contraste élevé"
+ },
+ "Hour": {
+  "ar": "ساعة",
+  "fr": "Heure"
+ },
+ "How far it reaches each side on those displays": {
+  "ar": "مدى امتداده على كل جانب في تلك الشاشات",
+  "fr": "Son étendue de chaque côté sur ces écrans"
+ },
+ "How far the closed island reaches each side of the notch": {
+  "ar": "مدى امتداد الجزيرة المغلقة على جانبي النتوء",
+  "fr": "Jusqu'où l'îlot fermé s'étend de chaque côté de l'encoche"
+ },
+ "Idle": {
+  "ar": "خامل",
+  "fr": "Inactif"
+ },
+ "Import…": {
+  "ar": "استيراد…",
+  "fr": "Importer…"
+ },
+ "Input": {
+  "ar": "الإدخال",
+  "fr": "Entrée"
+ },
+ "Island": {
+  "ar": "الجزيرة",
+  "fr": "Îlot"
+ },
+ "It asked to show notifications. Nothing appears until you decide.": {
+  "ar": "طلب إظهار الإشعارات. لن يظهر شيء حتى تقرر.",
+  "fr": "Il a demandé à afficher des notifications. Rien n'apparaît tant que vous n'avez pas décidé."
+ },
+ "Join": {
+  "ar": "انضمام",
+  "fr": "Rejoindre"
+ },
+ "Keep the shelf after quitting": {
+  "ar": "الاحتفاظ بالرف بعد الإنهاء",
+  "fr": "Conserver l'étagère après avoir quitté"
+ },
+ "Keeping": {
+  "ar": "الاحتفاظ",
+  "fr": "Conservation"
+ },
+ "Label (optional)": {
+  "ar": "التسمية (اختيارية)",
+  "fr": "Libellé (facultatif)"
+ },
+ "Language": {
+  "ar": "اللغة",
+  "fr": "Langue"
+ },
+ "Last 30 days": {
+  "ar": "آخر 30 يومًا",
+  "fr": "30 derniers jours"
+ },
+ "Last 7 days": {
+  "ar": "آخر 7 أيام",
+  "fr": "7 derniers jours"
+ },
+ "Lets Notchisland ask Spotify and Apple Music what is playing, control playback and list your playlists. macOS asks once per app.": {
+  "ar": "يتيح لـNotchisland سؤال Spotify وApple Music عمّا يُشغَّل، والتحكم في التشغيل، وعرض قوائم التشغيل. يسأل macOS مرة لكل تطبيق.",
+  "fr": "Permet à Notchisland de demander à Spotify et Apple Music ce qui est lu, de contrôler la lecture et de lister vos playlists. macOS demande une fois par app."
+ },
+ "Lets Notchisland post its own alerts (e.g. low device battery) when the notch is hidden.": {
+  "ar": "يتيح لـNotchisland نشر تنبيهاته الخاصة (مثل انخفاض بطارية جهاز) عندما يكون النتوء مخفيًا.",
+  "fr": "Permet à Notchisland de publier ses propres alertes (p. ex. batterie faible) quand l'encoche est masquée."
+ },
+ "Lets Notchisland read notification banners as a fallback and optionally dismiss the native banner when the notch already shows it.": {
+  "ar": "يتيح لـNotchisland قراءة لافتات الإشعارات كبديل، وإغلاق اللافتة الأصلية اختياريًا عندما يعرضها النتوء بالفعل.",
+  "fr": "Permet à Notchisland de lire les bannières de notification en secours et, en option, de fermer la bannière native quand l'encoche l'affiche déjà."
+ },
+ "Lets Notchisland read the Notification Center database so WhatsApp, Discord, Messages, Slack and others appear in the notch, and read the Focus state.": {
+  "ar": "يتيح لـNotchisland قراءة قاعدة بيانات مركز الإشعارات لتظهر WhatsApp وDiscord وMessages وSlack وغيرها في النتوء، وقراءة حالة التركيز.",
+  "fr": "Permet à Notchisland de lire la base de données du centre de notifications pour que WhatsApp, Discord, Messages, Slack et d'autres apparaissent dans l'encoche, et de lire l'état de Concentration."
+ },
+ "Lets Notchisland show your upcoming events from every connected calendar account (iCloud, Google, Exchange, subscribed). Read-only.": {
+  "ar": "يتيح لـNotchisland عرض أحداثك القادمة من كل حساب تقويم متصل (iCloud وGoogle وExchange والاشتراكات). للقراءة فقط.",
+  "fr": "Permet à Notchisland d'afficher vos prochains événements de chaque compte de calendrier connecté (iCloud, Google, Exchange, abonnements). Lecture seule."
+ },
+ "Library": {
+  "ar": "المكتبة",
+  "fr": "Bibliothèque"
+ },
+ "Limits": {
+  "ar": "الحدود",
+  "fr": "Limites"
+ },
+ "Limits need claude in a terminal.": {
+  "ar": "تتطلب الحدود تشغيل claude في الطرفية.",
+  "fr": "Les limites nécessitent claude dans un terminal."
+ },
+ "Liquid Glass": {
+  "ar": "الزجاج السائل",
+  "fr": "Verre liquide"
+ },
+ "Liquid Glass flows out of the black notch as the island opens": {
+  "ar": "يتدفّق الزجاج السائل من النتوء الأسود عند فتح الجزيرة",
+  "fr": "Le verre liquide émerge de l'encoche noire à l'ouverture de l'îlot"
+ },
+ "Listen for agents": {
+  "ar": "الاستماع إلى الوكلاء",
+  "fr": "Écouter les agents"
+ },
+ "Listening": {
+  "ar": "الاستماع",
+  "fr": "Écoute"
+ },
+ "Live status beside the notch": {
+  "ar": "حالة مباشرة بجانب النتوء",
+  "fr": "État en direct à côté de l'encoche"
+ },
+ "Loading playlists…": {
+  "ar": "جارٍ تحميل قوائم التشغيل…",
+  "fr": "Chargement des playlists…"
+ },
+ "Local weather and rain alerts. A city in Settings works too.": {
+  "ar": "الطقس المحلي وتنبيهات المطر. يمكن أيضًا تحديد مدينة في الإعدادات.",
+  "fr": "Météo locale et alertes de pluie. Une ville dans les Réglages fonctionne aussi."
+ },
+ "Location": {
+  "ar": "الموقع",
+  "fr": "Localisation"
+ },
+ "Logs": {
+  "ar": "السجلات",
+  "fr": "Journaux"
+ },
+ "Look": {
+  "ar": "المظهر",
+  "fr": "Apparence"
+ },
+ "Lyrics": {
+  "ar": "كلمات الأغنية",
+  "fr": "Paroles"
+ },
+ "MON": {
+  "ar": "إثنين",
+  "fr": "LUN"
+ },
+ "Main display": {
+  "ar": "الشاشة الرئيسية",
+  "fr": "Écran principal"
+ },
+ "Make these two in the Shortcuts app with the Set Focus action; the island runs them to turn Focus on and off.": {
+  "ar": "أنشئ هذين الاختصارين في تطبيق الاختصارات باستخدام إجراء تعيين التركيز؛ تشغّلهما الجزيرة لتشغيل التركيز وإيقافه.",
+  "fr": "Créez-les dans l'app Raccourcis avec l'action Définir la concentration ; l'îlot les exécute pour activer et désactiver la Concentration."
+ },
+ "Mark done": {
+  "ar": "تحديد كمنجز",
+  "fr": "Marquer comme fait"
+ },
+ "Menu bar icon": {
+  "ar": "أيقونة شريط القائمة",
+  "fr": "Icône de la barre des menus"
+ },
+ "Messages, mail and anything else in Notification Center": {
+  "ar": "الرسائل والبريد وأي شيء آخر في مركز الإشعارات",
+  "fr": "Messages, mail et tout ce qui se trouve dans le centre de notifications"
+ },
+ "Microphone": {
+  "ar": "الميكروفون",
+  "fr": "Micro"
+ },
+ "Minute": {
+  "ar": "دقيقة",
+  "fr": "Minute"
+ },
+ "More sound": {
+  "ar": "مزيد من الصوت",
+  "fr": "Plus de son"
+ },
+ "Motion": {
+  "ar": "الحركة",
+  "fr": "Animations"
+ },
+ "Music": {
+  "ar": "الموسيقى",
+  "fr": "Musique"
+ },
+ "Music playing": {
+  "ar": "الموسيقى قيد التشغيل",
+  "fr": "Musique en cours"
+ },
+ "Mute mic": {
+  "ar": "كتم الميكروفون",
+  "fr": "Couper le micro"
+ },
+ "Needs you": {
+  "ar": "يحتاج إليك",
+  "fr": "Vous attend"
+ },
+ "Never": {
+  "ar": "أبدًا",
+  "fr": "Jamais"
+ },
+ "Never show this app": {
+  "ar": "عدم إظهار هذا التطبيق أبدًا",
+  "fr": "Ne jamais afficher cette app"
+ },
+ "New alarm": {
+  "ar": "منبه جديد",
+  "fr": "Nouvelle alarme"
+ },
+ "Next track": {
+  "ar": "المقطع التالي",
+  "fr": "Morceau suivant"
+ },
+ "No agents running": {
+  "ar": "لا يعمل أي وكيل",
+  "fr": "Aucun agent actif"
+ },
+ "No alarms set": {
+  "ar": "لا توجد منبهات",
+  "fr": "Aucune alarme"
+ },
+ "No app is playing audio": {
+  "ar": "لا يوجد تطبيق يشغّل الصوت",
+  "fr": "Aucune app ne lit de son"
+ },
+ "No artwork": {
+  "ar": "لا توجد صورة",
+  "fr": "Pas d'illustration"
+ },
+ "No batteries to show": {
+  "ar": "لا توجد بطاريات لعرضها",
+  "fr": "Aucune batterie à afficher"
+ },
+ "No coding-agent logs were found on this Mac.": {
+  "ar": "لم يتم العثور على سجلات وكلاء البرمجة على هذا الـMac.",
+  "fr": "Aucun journal d'agent de code trouvé sur ce Mac."
+ },
+ "No limits logged yet.": {
+  "ar": "لم تُسجَّل أي حدود بعد.",
+  "fr": "Aucune limite enregistrée pour l'instant."
+ },
+ "No lyrics found for this track.": {
+  "ar": "لم يتم العثور على كلمات لهذا المقطع.",
+  "fr": "Aucunes paroles trouvées pour ce morceau."
+ },
+ "No other agent found": {
+  "ar": "لم يتم العثور على وكيل آخر",
+  "fr": "Aucun autre agent trouvé"
+ },
+ "No output": {
+  "ar": "لا يوجد مخرج",
+  "fr": "Aucune sortie"
  },
  "No output devices": {
-  "fr": "Aucun périphérique de sortie",
-  "ar": "لا توجد أجهزة إخراج"
+  "ar": "لا توجد أجهزة إخراج",
+  "fr": "Aucun périphérique de sortie"
+ },
+ "No playlists yet.": {
+  "ar": "لا توجد قوائم تشغيل بعد.",
+  "fr": "Aucune playlist pour l'instant."
+ },
+ "No recommendations found.": {
+  "ar": "لم يتم العثور على توصيات.",
+  "fr": "Aucune recommandation trouvée."
+ },
+ "No sessions in this range": {
+  "ar": "لا توجد جلسات في هذا النطاق",
+  "fr": "Aucune session sur cette période"
+ },
+ "No timeline from this source": {
+  "ar": "لا يوجد خط زمني لهذا المصدر",
+  "fr": "Pas de chronologie pour cette source"
+ },
+ "None": {
+  "ar": "بلا",
+  "fr": "Aucun"
+ },
+ "None in this range": {
+  "ar": "لا شيء في هذا النطاق",
+  "fr": "Aucun sur cette période"
+ },
+ "Normal and up": {
+  "ar": "عادي وأعلى",
+  "fr": "Normal et plus"
+ },
+ "Not allowed": {
+  "ar": "غير مسموح",
+  "fr": "Non autorisé"
+ },
+ "Not asked yet": {
+  "ar": "لم يُطلب بعد",
+  "fr": "Pas encore demandé"
+ },
+ "Not connected": {
+  "ar": "غير متصل",
+  "fr": "Non connecté"
+ },
+ "Not installed": {
+  "ar": "غير مثبت",
+  "fr": "Non installé"
+ },
+ "Not listening": {
+  "ar": "لا يستمع",
+  "fr": "N'écoute pas"
+ },
+ "Not needed": {
+  "ar": "غير مطلوب",
+  "fr": "Non requis"
+ },
+ "Not required: accessory batteries are read from the system registry. Listed for transparency.": {
+  "ar": "غير مطلوب: تُقرأ بطاريات الملحقات من سجل النظام. مدرج للشفافية.",
+  "fr": "Non requis : les batteries des accessoires sont lues dans le registre système. Indiqué par transparence."
+ },
+ "Not signed in": {
+  "ar": "لم يتم تسجيل الدخول",
+  "fr": "Non connecté"
+ },
+ "Notch width": {
+  "ar": "عرض النتوء",
+  "fr": "Largeur de l'encoche"
+ },
+ "Notchisland Settings": {
+  "ar": "إعدادات Notchisland",
+  "fr": "Réglages de Notchisland"
+ },
+ "Notchisland's own text; Arabic keeps the left-to-right layout": {
+  "ar": "نصوص Notchisland؛ تحتفظ العربية بالتخطيط من اليسار إلى اليمين",
+  "fr": "Le texte de Notchisland ; l'arabe conserve la mise en page de gauche à droite"
+ },
+ "Nothing else on today": {
+  "ar": "لا شيء آخر اليوم",
+  "fr": "Rien d'autre aujourd'hui"
+ },
+ "Nothing here is required. A feature that needs a permission stays off until it is allowed.": {
+  "ar": "لا شيء هنا مطلوب. تبقى الميزة التي تحتاج إلى إذن متوقفة حتى يُسمح بها.",
+  "fr": "Rien ici n'est obligatoire. Une fonction qui nécessite une autorisation reste désactivée jusqu'à ce qu'elle soit accordée."
+ },
+ "Nothing needs you": {
+  "ar": "لا شيء يحتاج إليك",
+  "fr": "Rien ne vous attend"
+ },
+ "Nothing playing": {
+  "ar": "لا شيء قيد التشغيل",
+  "fr": "Aucune lecture"
+ },
+ "Nothing shelved yet": {
+  "ar": "لا شيء على الرف بعد",
+  "fr": "Rien sur l'étagère"
+ },
+ "Notification Center": {
+  "ar": "مركز الإشعارات",
+  "fr": "Centre de notifications"
+ },
+ "Notifications": {
+  "ar": "الإشعارات",
+  "fr": "Notifications"
+ },
+ "Notifications and calls, and which apps may show them.": {
+  "ar": "الإشعارات والمكالمات، والتطبيقات التي يمكنها إظهارها.",
+  "fr": "Notifications et appels, et quelles apps peuvent les afficher."
+ },
+ "Now": {
+  "ar": "الآن",
+  "fr": "Maintenant"
+ },
+ "Now playing": {
+  "ar": "قيد التشغيل الآن",
+  "fr": "En cours de lecture"
+ },
+ "Ocean": {
+  "ar": "محيط",
+  "fr": "Océan"
+ },
+ "Off": {
+  "ar": "إيقاف",
+  "fr": "Désactivé"
+ },
+ "On": {
+  "ar": "تشغيل",
+  "fr": "Activé"
+ },
+ "On 15 minutes before a meeting, off when it ends": {
+  "ar": "يعمل قبل الاجتماع بـ15 دقيقة ويتوقف عند انتهائه",
+  "fr": "Activée 15 minutes avant une réunion, désactivée à sa fin"
+ },
+ "On a call": {
+  "ar": "في مكالمة",
+  "fr": "En appel"
+ },
+ "Open": {
+  "ar": "فتح",
+  "fr": "Ouvrir"
+ },
+ "Open Agents": {
+  "ar": "فتح الوكلاء",
+  "fr": "Ouvrir Agents"
+ },
+ "Open Config File": {
+  "ar": "فتح ملف الإعدادات",
+  "fr": "Ouvrir le fichier de configuration"
+ },
+ "Open Music": {
+  "ar": "فتح الموسيقى",
+  "fr": "Ouvrir Musique"
+ },
+ "Open Music to see your playlists.": {
+  "ar": "افتح الموسيقى لرؤية قوائم التشغيل.",
+  "fr": "Ouvrez Musique pour voir vos playlists."
+ },
+ "Open Settings": {
+  "ar": "فتح الإعدادات",
+  "fr": "Ouvrir les Réglages"
+ },
+ "Open Spotify": {
+  "ar": "فتح Spotify",
+  "fr": "Ouvrir Spotify"
+ },
+ "Open at login": {
+  "ar": "الفتح عند تسجيل الدخول",
+  "fr": "Ouvrir à la connexion"
+ },
+ "Open on hover after": {
+  "ar": "الفتح عند التمرير بعد",
+  "fr": "Ouvrir au survol après"
+ },
+ "Open the Panel": {
+  "ar": "فتح اللوحة",
+  "fr": "Ouvrir le panneau"
+ },
+ "Opening": {
+  "ar": "الفتح",
+  "fr": "Ouverture"
+ },
+ "Opens Music and asks the Mac to let the island control it": {
+  "ar": "يفتح الموسيقى ويطلب من الـMac السماح للجزيرة بالتحكم فيه",
+  "fr": "Ouvre Musique et demande au Mac de laisser l'îlot le contrôler"
+ },
+ "Optional. Keeps other programs on this Mac from posting": {
+  "ar": "اختياري. يمنع البرامج الأخرى على هذا الـMac من الإرسال",
+  "fr": "Facultatif. Empêche les autres programmes de ce Mac de publier"
+ },
+ "Other": {
+  "ar": "أخرى",
+  "fr": "Autre"
+ },
+ "Output": {
+  "ar": "المخرج",
+  "fr": "Sortie"
+ },
+ "Outputs and apps playing sound": {
+  "ar": "المخارج والتطبيقات التي تشغّل الصوت",
+  "fr": "Sorties et apps qui émettent du son"
+ },
+ "Overdue": {
+  "ar": "متأخر",
+  "fr": "En retard"
+ },
+ "PLAYING AUDIO": {
+  "ar": "تشغيل الصوت",
+  "fr": "LECTURE AUDIO"
+ },
+ "Pause": {
+  "ar": "إيقاف مؤقت",
+  "fr": "Pause"
+ },
+ "Pause alerts": {
+  "ar": "إيقاف التنبيهات مؤقتًا",
+  "fr": "Suspendre les alertes"
+ },
+ "Per-app audio needs macOS 14.2 or later": {
+  "ar": "يتطلب الصوت لكل تطبيق macOS 14.2 أو أحدث",
+  "fr": "L'audio par app nécessite macOS 14.2 ou ultérieur"
+ },
+ "Permissions": {
+  "ar": "الأذونات",
+  "fr": "Autorisations"
+ },
+ "Picking up": {
+  "ar": "جارٍ الرد",
+  "fr": "Prise d'appel"
+ },
+ "Play": {
+  "ar": "تشغيل",
+  "fr": "Lire"
+ },
+ "Play or pause": {
+  "ar": "تشغيل أو إيقاف مؤقت",
+  "fr": "Lire ou mettre en pause"
+ },
+ "Play something from YouTube": {
+  "ar": "شغّل شيئًا من YouTube",
+  "fr": "Lancez quelque chose depuis YouTube"
+ },
+ "Playback position": {
+  "ar": "موضع التشغيل",
+  "fr": "Position de lecture"
+ },
+ "Players": {
+  "ar": "المشغلات",
+  "fr": "Lecteurs"
+ },
+ "Playing audio": {
+  "ar": "تشغيل الصوت",
+  "fr": "Lecture audio"
+ },
+ "Playing from YouTube": {
+  "ar": "قيد التشغيل من YouTube",
+  "fr": "Lecture depuis YouTube"
+ },
+ "Playing music in the shoulders": {
+  "ar": "الموسيقى قيد التشغيل في الجانبين",
+  "fr": "Musique en cours dans les épaules"
+ },
+ "Pomodoro 25 / 5": {
+  "ar": "بومودورو 25 / 5",
+  "fr": "Pomodoro 25 / 5"
+ },
+ "Pomodoro 50 / 10": {
+  "ar": "بومودورو 50 / 10",
+  "fr": "Pomodoro 50 / 10"
+ },
+ "Port": {
+  "ar": "المنفذ",
+  "fr": "Port"
+ },
+ "Previous track": {
+  "ar": "المقطع السابق",
+  "fr": "Morceau précédent"
+ },
+ "Quick Look": {
+  "ar": "نظرة سريعة",
+  "fr": "Coup d'œil"
+ },
+ "Quick reply": {
+  "ar": "رد سريع",
+  "fr": "Réponse rapide"
+ },
+ "Quit Notchisland": {
+  "ar": "إنهاء Notchisland",
+  "fr": "Quitter Notchisland"
+ },
+ "Read from": {
+  "ar": "القراءة من",
+  "fr": "Lire depuis"
+ },
+ "Read notifications from Notification Center so they appear in the notch.": {
+  "ar": "قراءة الإشعارات من مركز الإشعارات لتظهر في النتوء.",
+  "fr": "Lire les notifications du centre de notifications pour les afficher dans l'encoche."
+ },
+ "Reading your agents' logs…": {
+  "ar": "جارٍ قراءة سجلات الوكلاء…",
+  "fr": "Lecture des journaux de vos agents…"
+ },
+ "Reads them from its status line, which hides hints such as “esc to interrupt”": {
+  "ar": "يقرأها من سطر الحالة، مما يُخفي تلميحات مثل “esc to interrupt”",
+  "fr": "Les lit depuis sa ligne d'état, ce qui masque des indices comme « esc to interrupt »"
+ },
+ "Record": {
+  "ar": "تسجيل",
+  "fr": "Enregistrer"
+ },
+ "Record a voice memo": {
+  "ar": "تسجيل مذكرة صوتية",
+  "fr": "Enregistrer un mémo vocal"
+ },
+ "Record the screen": {
+  "ar": "تسجيل الشاشة",
+  "fr": "Enregistrer l'écran"
+ },
+ "Recording a voice memo": {
+  "ar": "جارٍ تسجيل مذكرة صوتية",
+  "fr": "Enregistrement d'un mémo vocal"
+ },
+ "Recording could not start. Allow Notchisland under Microphone in System Settings › Privacy & Security.": {
+  "ar": "تعذّر بدء التسجيل. اسمح لـNotchisland ضمن الميكروفون في إعدادات النظام › الخصوصية والأمن.",
+  "fr": "Impossible de démarrer l'enregistrement. Autorisez Notchisland sous Micro dans Réglages Système › Confidentialité et sécurité."
+ },
+ "Recording the screen": {
+  "ar": "جارٍ تسجيل الشاشة",
+  "fr": "Enregistrement de l'écran"
+ },
+ "Reduce motion": {
+  "ar": "تقليل الحركة",
+  "fr": "Réduire les animations"
+ },
+ "Refresh every": {
+  "ar": "التحديث كل",
+  "fr": "Actualiser toutes les"
+ },
+ "Remembered answers": {
+  "ar": "الإجابات المحفوظة",
+  "fr": "Réponses mémorisées"
+ },
+ "Reminders": {
+  "ar": "التذكيرات",
+  "fr": "Rappels"
+ },
+ "Remove": {
+  "ar": "إزالة",
+  "fr": "Supprimer"
+ },
+ "Remove from Tray": {
+  "ar": "إزالة من الدرج",
+  "fr": "Retirer du bac"
+ },
+ "Repeat": {
+  "ar": "تكرار",
+  "fr": "Répéter"
+ },
+ "Reply": {
+  "ar": "رد",
+  "fr": "Répondre"
+ },
+ "Reporting": {
+  "ar": "الإبلاغ",
+  "fr": "Rapports"
+ },
+ "Reports finished turns and asks for input": {
+  "ar": "يُبلغ عن الأدوار المنتهية ويطلب الإدخال",
+  "fr": "Signale les tours terminés et demande une saisie"
+ },
+ "Reset": {
+  "ar": "إعادة تعيين",
+  "fr": "Réinitialiser"
+ },
+ "Reset all settings": {
+  "ar": "إعادة تعيين كل الإعدادات",
+  "fr": "Réinitialiser tous les réglages"
+ },
+ "Reset all settings?": {
+  "ar": "إعادة تعيين كل الإعدادات؟",
+  "fr": "Réinitialiser tous les réglages ?"
+ },
+ "Reset…": {
+  "ar": "إعادة تعيين…",
+  "fr": "Réinitialiser…"
+ },
+ "Resume": {
+  "ar": "استئناف",
+  "fr": "Reprendre"
+ },
+ "Retry": {
+  "ar": "إعادة المحاولة",
+  "fr": "Réessayer"
+ },
+ "Reveal in Finder": {
+  "ar": "إظهار في Finder",
+  "fr": "Afficher dans le Finder"
+ },
+ "Ring in the island": {
+  "ar": "الرنين في الجزيرة",
+  "fr": "Sonner dans l'îlot"
+ },
+ "Ringing on": {
+  "ar": "الرنين مفعّل",
+  "fr": "Sonnerie activée"
+ },
+ "Rings a sample call": {
+  "ar": "يرنّ مكالمة نموذجية",
+  "fr": "Fait sonner un appel d'exemple"
+ },
+ "Running": {
+  "ar": "قيد التشغيل",
+  "fr": "En cours"
+ },
+ "SAT": {
+  "ar": "سبت",
+  "fr": "SAM"
+ },
+ "SILENT": {
+  "ar": "صامت",
+  "fr": "SILENCE"
+ },
+ "SUN": {
+  "ar": "أحد",
+  "fr": "DIM"
+ },
+ "Save to your Spotify library": {
+  "ar": "حفظ في مكتبة Spotify",
+  "fr": "Enregistrer dans votre bibliothèque Spotify"
+ },
+ "Save your settings to a file, or load them from one": {
+  "ar": "احفظ إعداداتك في ملف أو حمّلها من ملف",
+  "fr": "Enregistrez vos réglages dans un fichier ou chargez-les depuis un fichier"
+ },
+ "Say when a session ends": {
+  "ar": "الإعلام عند انتهاء الجلسة",
+  "fr": "Signaler la fin d'une session"
+ },
+ "Screen": {
+  "ar": "الشاشة",
+  "fr": "Écran"
+ },
+ "Screenshot": {
+  "ar": "لقطة شاشة",
+  "fr": "Capture d'écran"
+ },
+ "Screenshots": {
+  "ar": "لقطات الشاشة",
+  "fr": "Captures d'écran"
+ },
+ "Search": {
+  "ar": "بحث",
+  "fr": "Rechercher"
+ },
+ "Search YouTube — Enter plays it here": {
+  "ar": "ابحث في YouTube — Enter للتشغيل هنا",
+  "fr": "Rechercher sur YouTube — Entrée lance la lecture ici"
+ },
+ "Search settings": {
+  "ar": "البحث في الإعدادات",
+  "fr": "Rechercher dans les réglages"
+ },
+ "Seconds before the terminal asks instead. 0 turns it off": {
+  "ar": "الثواني قبل أن يسأل الطرفية بدلًا من ذلك. 0 يوقفه",
+  "fr": "Secondes avant que le terminal ne demande à la place. 0 désactive"
+ },
+ "See live sessions and their time left, and allow or deny tool requests from the notch. Works with Claude Code, Codex, Gemini CLI, Cursor, OpenCode and Aider.": {
+  "ar": "شاهد الجلسات المباشرة والوقت المتبقي لها، واسمح بطلبات الأدوات أو ارفضها من النتوء. يعمل مع Claude Code وCodex وGemini CLI وCursor وOpenCode وAider.",
+  "fr": "Voyez les sessions en direct et leur temps restant, et autorisez ou refusez les demandes d'outils depuis l'encoche. Fonctionne avec Claude Code, Codex, Gemini CLI, Cursor, OpenCode et Aider."
+ },
+ "Selection": {
+  "ar": "التحديد",
+  "fr": "Sélection"
+ },
+ "Selection to clipboard": {
+  "ar": "التحديد إلى الحافظة",
+  "fr": "Sélection vers le presse-papiers"
+ },
+ "Send": {
+  "ar": "إرسال",
+  "fr": "Envoyer"
+ },
+ "Send a test event": {
+  "ar": "إرسال حدث اختباري",
+  "fr": "Envoyer un événement de test"
+ },
+ "Session": {
+  "ar": "الجلسة",
+  "fr": "Session"
+ },
+ "Sessions": {
+  "ar": "الجلسات",
+  "fr": "Sessions"
+ },
+ "Sessions show here as soon as an agent starts.": {
+  "ar": "تظهر الجلسات هنا بمجرد بدء أحد الوكلاء.",
+  "fr": "Les sessions apparaissent ici dès qu'un agent démarre."
  },
  "Set Up Notchisland": {
-  "fr": "Configurer Notchisland",
-  "ar": "إعداد Notchisland"
+  "ar": "إعداد Notchisland",
+  "fr": "Configurer Notchisland"
+ },
+ "Set Up Notchisland…": {
+  "ar": "إعداد Notchisland…",
+  "fr": "Configurer Notchisland…"
+ },
+ "Set a place in Settings": {
+  "ar": "حدد مكانًا في الإعدادات",
+  "fr": "Définissez un lieu dans les Réglages"
+ },
+ "Set alarm": {
+  "ar": "ضبط المنبه",
+  "fr": "Régler l'alarme"
+ },
+ "Settings": {
+  "ar": "الإعدادات",
+  "fr": "Réglages"
+ },
+ "Settings file": {
+  "ar": "ملف الإعدادات",
+  "fr": "Fichier de réglages"
+ },
+ "Settings, pause and quit, and a small player": {
+  "ar": "الإعدادات والإيقاف المؤقت والإنهاء ومشغل صغير",
+  "fr": "Réglages, pause et quitter, et un petit lecteur"
+ },
+ "Settings…": {
+  "ar": "الإعدادات…",
+  "fr": "Réglages…"
+ },
+ "Shelf": {
+  "ar": "الرف",
+  "fr": "Étagère"
+ },
+ "Shelve Clipboard": {
+  "ar": "وضع الحافظة على الرف",
+  "fr": "Mettre le presse-papiers sur l'étagère"
+ },
+ "Shortcut name": {
+  "ar": "اسم الاختصار",
+  "fr": "Nom du raccourci"
+ },
+ "Shoulder width": {
+  "ar": "عرض الجانبين",
+  "fr": "Largeur des épaules"
+ },
+ "Shoulders": {
+  "ar": "الجانبان",
+  "fr": "Épaules"
+ },
+ "Show and control Spotify, Music and the video playing in your browser.": {
+  "ar": "إظهار Spotify والموسيقى والفيديو قيد التشغيل في المتصفح والتحكم فيها.",
+  "fr": "Afficher et contrôler Spotify, Musique et la vidéo en cours dans votre navigateur."
+ },
+ "Show in Finder": {
+  "ar": "إظهار في Finder",
+  "fr": "Afficher dans le Finder"
+ },
+ "Show notifications from apps": {
+  "ar": "إظهار إشعارات التطبيقات",
+  "fr": "Afficher les notifications des apps"
+ },
+ "Show player": {
+  "ar": "إظهار المشغل",
+  "fr": "Afficher le lecteur"
+ },
+ "Shuffle": {
+  "ar": "خلط",
+  "fr": "Aléatoire"
+ },
+ "Sign in to Spotify to list your playlists.": {
+  "ar": "سجّل الدخول إلى Spotify لعرض قوائم التشغيل.",
+  "fr": "Connectez-vous à Spotify pour lister vos playlists."
+ },
+ "Sign in to list your playlists. Playback works without it": {
+  "ar": "سجّل الدخول لعرض قوائم التشغيل. يعمل التشغيل بدونه",
+  "fr": "Connectez-vous pour lister vos playlists. La lecture fonctionne sans"
+ },
+ "Sign in…": {
+  "ar": "تسجيل الدخول…",
+  "fr": "Se connecter…"
+ },
+ "Sign out": {
+  "ar": "تسجيل الخروج",
+  "fr": "Se déconnecter"
+ },
+ "Signed in": {
+  "ar": "تم تسجيل الدخول",
+  "fr": "Connecté"
+ },
+ "Sleep": {
+  "ar": "إسبات",
+  "fr": "Suspendre l'activité"
+ },
+ "Snooze": {
+  "ar": "تأجيل",
+  "fr": "Rappeler plus tard"
+ },
+ "So the menu bar stays usable. A ringing call still shows": {
+  "ar": "لتبقى شريط القائمة قابلًا للاستخدام. تظل المكالمة الواردة ظاهرة",
+  "fr": "Pour garder la barre des menus utilisable. Un appel entrant s'affiche quand même"
+ },
+ "Sound Output": {
+  "ar": "مخرج الصوت",
+  "fr": "Sortie audio"
+ },
+ "Spaces": {
+  "ar": "المساحات",
+  "fr": "Espaces"
+ },
+ "Spotify and Apple Music": {
+  "ar": "Spotify وApple Music",
+  "fr": "Spotify et Apple Music"
+ },
+ "Spotify sign-in": {
+  "ar": "تسجيل الدخول إلى Spotify",
+  "fr": "Connexion à Spotify"
+ },
+ "Spotify volume": {
+  "ar": "مستوى صوت Spotify",
+  "fr": "Volume de Spotify"
+ },
+ "Spotify's sign-in is open. Allow access there, then come back.": {
+  "ar": "صفحة تسجيل الدخول إلى Spotify مفتوحة. اسمح بالوصول هناك ثم عُد.",
+  "fr": "La connexion Spotify est ouverte. Autorisez l'accès, puis revenez."
+ },
+ "Start": {
+  "ar": "بدء",
+  "fr": "Démarrer"
+ },
+ "Start Timer": {
+  "ar": "بدء المؤقت",
+  "fr": "Démarrer le minuteur"
+ },
+ "Start something in Spotify or Apple Music": {
+  "ar": "شغّل شيئًا في Spotify أو Apple Music",
+  "fr": "Lancez quelque chose dans Spotify ou Apple Music"
+ },
+ "Startup": {
+  "ar": "بدء التشغيل",
+  "fr": "Démarrage"
+ },
+ "Stay clear of menu bar items": {
+  "ar": "الابتعاد عن عناصر شريط القائمة",
+  "fr": "Éviter les éléments de la barre des menus"
+ },
+ "Stop": {
+  "ar": "إيقاف",
+  "fr": "Arrêter"
+ },
+ "Stop music in 1 h": {
+  "ar": "إيقاف الموسيقى بعد ساعة",
+  "fr": "Arrêter la musique dans 1 h"
+ },
+ "Stop music in 30 min": {
+  "ar": "إيقاف الموسيقى بعد 30 دقيقة",
+  "fr": "Arrêter la musique dans 30 min"
+ },
+ "Stop recording": {
+  "ar": "إيقاف التسجيل",
+  "fr": "Arrêter l'enregistrement"
+ },
+ "Stopwatch": {
+  "ar": "ساعة الإيقاف",
+  "fr": "Chronomètre"
+ },
+ "Sunset": {
+  "ar": "غروب",
+  "fr": "Coucher de soleil"
+ },
+ "Switches, sliders and the main button in every space": {
+  "ar": "المفاتيح وأشرطة التمرير والزر الرئيسي في كل مساحة",
+  "fr": "Commutateurs, curseurs et bouton principal dans chaque espace"
+ },
+ "System": {
+  "ar": "النظام",
+  "fr": "Système"
+ },
+ "THU": {
+  "ar": "خميس",
+  "fr": "JEU"
+ },
+ "TUE": {
+  "ar": "ثلاثاء",
+  "fr": "MAR"
+ },
+ "Test call": {
+  "ar": "مكالمة اختبارية",
+  "fr": "Appel de test"
+ },
+ "The Music app isn't on this Mac": {
+  "ar": "تطبيق الموسيقى غير موجود على هذا الـMac",
+  "fr": "L'app Musique n'est pas sur ce Mac"
+ },
+ "The accent colour, motion and contrast.": {
+  "ar": "لون التمييز والحركة والتباين.",
+  "fr": "La couleur d'accentuation, les animations et le contraste."
+ },
+ "The configuration file, logs and starting over.": {
+  "ar": "ملف الإعدادات والسجلات والبدء من جديد.",
+  "fr": "Le fichier de configuration, les journaux et la réinitialisation."
+ },
+ "The floating notch on displays without a hardware one": {
+  "ar": "النتوء العائم على الشاشات التي لا تحتوي على نتوء فعلي",
+  "fr": "L'encoche flottante sur les écrans qui n'en ont pas"
+ },
+ "The island asks the first time an agent sends something": {
+  "ar": "تسأل الجزيرة في أول مرة يرسل فيها وكيل شيئًا",
+  "fr": "L'îlot demande la première fois qu'un agent envoie quelque chose"
+ },
+ "The microphone could not be opened. Allow Notchisland under Microphone in System Settings › Privacy & Security.": {
+  "ar": "تعذّر فتح الميكروفون. اسمح لـNotchisland ضمن الميكروفون في إعدادات النظام › الخصوصية والأمن.",
+  "fr": "Impossible d'ouvrir le micro. Autorisez Notchisland sous Micro dans Réglages Système › Confidentialité et sécurité."
+ },
+ "The notch alerts you at this time.": {
+  "ar": "سينبهك النتوء في هذا الوقت.",
+  "fr": "L'encoche vous alerte à cette heure."
+ },
+ "Theme": {
+  "ar": "السمة",
+  "fr": "Thème"
+ },
+ "They wait here; drag them back out to move them anywhere": {
+  "ar": "تنتظر هنا؛ اسحبها للخارج لنقلها إلى أي مكان",
+  "fr": "Ils attendent ici ; faites-les glisser pour les déplacer n'importe où"
+ },
+ "This Mac": {
+  "ar": "هذا الـMac",
+  "fr": "Ce Mac"
+ },
+ "This Mac only": {
+  "ar": "هذا الـMac فقط",
+  "fr": "Ce Mac uniquement"
+ },
+ "This agent doesn't report limits.": {
+  "ar": "هذا الوكيل لا يُبلغ عن الحدود.",
+  "fr": "Cet agent ne signale pas de limites."
+ },
+ "Timer": {
+  "ar": "المؤقت",
+  "fr": "Minuteur"
+ },
+ "To avoid seeing a message twice, set the app's alert style to None in System Settings › Notifications. It still reaches the island.": {
+  "ar": "لتجنب رؤية الرسالة مرتين، اضبط نمط تنبيه التطبيق على بلا في إعدادات النظام › الإشعارات. ستظل تصل إلى الجزيرة.",
+  "fr": "Pour ne pas voir un message deux fois, réglez le style d'alerte de l'app sur Aucun dans Réglages Système › Notifications. Il atteint toujours l'îlot."
+ },
+ "Today": {
+  "ar": "اليوم",
+  "fr": "Aujourd'hui"
+ },
+ "Today's events": {
+  "ar": "أحداث اليوم",
+  "fr": "Événements du jour"
+ },
+ "Token usage": {
+  "ar": "استخدام الرموز",
+  "fr": "Utilisation des jetons"
+ },
+ "Token usage is off. You can turn it on in Settings › Coding Agents.": {
+  "ar": "استخدام الرموز متوقف. يمكنك تشغيله في الإعدادات › وكلاء البرمجة.",
+  "fr": "L'utilisation des jetons est désactivée. Activez-la dans Réglages › Agents de code."
+ },
+ "Tokens": {
+  "ar": "الرموز",
+  "fr": "Jetons"
+ },
+ "Tokens today": {
+  "ar": "رموز اليوم",
+  "fr": "Jetons aujourd'hui"
+ },
+ "Tomorrow": {
+  "ar": "غدًا",
+  "fr": "Demain"
+ },
+ "Tray": {
+  "ar": "الدرج",
+  "fr": "Bac"
+ },
+ "Trouble": {
+  "ar": "المشكلات",
+  "fr": "Dépannage"
+ },
+ "Try it": {
+  "ar": "تجربة",
+  "fr": "Essayer"
+ },
+ "Type and press Enter to search YouTube.": {
+  "ar": "اكتب واضغط Enter للبحث في YouTube.",
+  "fr": "Tapez et appuyez sur Entrée pour chercher sur YouTube."
+ },
+ "Type your reply, ⏎ to send": {
+  "ar": "اكتب ردك، ⏎ للإرسال",
+  "fr": "Tapez votre réponse, ⏎ pour envoyer"
+ },
+ "Undo Clear All": {
+  "ar": "التراجع عن مسح الكل",
+  "fr": "Annuler Tout effacer"
+ },
+ "Units": {
+  "ar": "الوحدات",
+  "fr": "Unités"
+ },
+ "Unknown": {
+  "ar": "غير معروف",
+  "fr": "Inconnu"
+ },
+ "Unmute mic": {
+  "ar": "إلغاء كتم الميكروفون",
+  "fr": "Réactiver le micro"
+ },
+ "Until": {
+  "ar": "حتى",
+  "fr": "Jusqu'à"
+ },
+ "Up next": {
+  "ar": "التالي",
+  "fr": "À suivre"
+ },
+ "Usage": {
+  "ar": "الاستخدام",
+  "fr": "Utilisation"
+ },
+ "Usage details": {
+  "ar": "تفاصيل الاستخدام",
+  "fr": "Détails d'utilisation"
+ },
+ "Used only to fetch local weather. You can type a city in Settings instead.": {
+  "ar": "يُستخدم فقط لجلب الطقس المحلي. يمكنك كتابة مدينة في الإعدادات بدلًا من ذلك.",
+  "fr": "Utilisé uniquement pour la météo locale. Vous pouvez saisir une ville dans les Réglages."
+ },
+ "Violet": {
+  "ar": "بنفسجي",
+  "fr": "Violet"
+ },
+ "Voice memo": {
+  "ar": "مذكرة صوتية",
+  "fr": "Mémo vocal"
+ },
+ "Volume": {
+  "ar": "مستوى الصوت",
+  "fr": "Volume"
+ },
+ "WED": {
+  "ar": "أربعاء",
+  "fr": "MER"
+ },
+ "Waiting for you to approve Notchisland in your browser…": {
+  "ar": "في انتظار موافقتك على Notchisland في المتصفح…",
+  "fr": "En attente de votre approbation de Notchisland dans le navigateur…"
+ },
+ "Weather": {
+  "ar": "الطقس",
+  "fr": "Météo"
+ },
+ "Weather, calendar, batteries and Focus.": {
+  "ar": "الطقس والتقويم والبطاريات والتركيز.",
+  "fr": "Météo, calendrier, batteries et Concentration."
+ },
+ "Week": {
+  "ar": "الأسبوع",
+  "fr": "Semaine"
+ },
+ "Welcome to Notchisland": {
+  "ar": "مرحبًا بك في Notchisland",
+  "fr": "Bienvenue dans Notchisland"
+ },
+ "What plays in the island, and how music apps connect.": {
+  "ar": "ما يُشغَّل في الجزيرة وكيفية اتصال تطبيقات الموسيقى.",
+  "fr": "Ce qui est lu dans l'îlot et comment les apps de musique se connectent."
+ },
+ "What the island has been doing, for a bug report": {
+  "ar": "ما كانت الجزيرة تفعله، لتقرير خطأ",
+  "fr": "Ce que l'îlot a fait, pour un rapport de bug"
+ },
+ "What's playing, controls and playlists": {
+  "ar": "ما يُشغَّل الآن وعناصر التحكم وقوائم التشغيل",
+  "fr": "Lecture en cours, commandes et playlists"
+ },
+ "Where it shows": {
+  "ar": "مكان الظهور",
+  "fr": "Emplacement"
+ },
+ "Where the island shows and how it opens.": {
+  "ar": "أين تظهر الجزيرة وكيف تُفتح.",
+  "fr": "Où l'îlot s'affiche et comment il s'ouvre."
+ },
+ "Whether a Focus is on. Needs Full Disk Access": {
+  "ar": "ما إذا كان التركيز قيد التشغيل. يتطلب الوصول الكامل إلى القرص",
+  "fr": "Si une Concentration est active. Nécessite l'accès complet au disque"
+ },
+ "Whole screen": {
+  "ar": "الشاشة بالكامل",
+  "fr": "Écran entier"
+ },
+ "Whole screen in 5 seconds": {
+  "ar": "الشاشة بالكامل بعد 5 ثوانٍ",
+  "fr": "Écran entier dans 5 secondes"
+ },
+ "Window": {
+  "ar": "النافذة",
+  "fr": "Fenêtre"
+ },
+ "You can change any of this later in Settings › Permissions.": {
+  "ar": "يمكنك تغيير أي من ذلك لاحقًا في الإعدادات › الأذونات.",
+  "fr": "Vous pourrez modifier tout cela plus tard dans Réglages › Autorisations."
+ },
+ "YouTube, SoundCloud and other tabs play as music. The Mac asks once per browser": {
+  "ar": "تُشغَّل علامات تبويب YouTube وSoundCloud وغيرها كموسيقى. يسأل Mac مرة واحدة لكل متصفح",
+  "fr": "YouTube, SoundCloud et les autres onglets sont lus comme de la musique. Le Mac demande une fois par navigateur"
+ },
+ "Your day, your next meeting with a Join button, and reminders you can tick off.": {
+  "ar": "يومك، واجتماعك التالي مع زر الانضمام، وتذكيرات يمكنك تحديدها كمنجزة.",
+  "fr": "Votre journée, votre prochaine réunion avec un bouton Rejoindre et des rappels à cocher."
+ },
+ "Your playlists show in Music": {
+  "ar": "تظهر قوائم التشغيل في الموسيقى",
+  "fr": "Vos playlists s'affichent dans Musique"
+ },
+ "auto, or a city": {
+  "ar": "auto أو مدينة",
+  "fr": "auto, ou une ville"
+ },
+ "now": {
+  "ar": "الآن",
+  "fr": "maintenant"
+ },
+ "up to": {
+  "ar": "حتى",
+  "fr": "jusqu'à"
+ },
+ "waiting for you": {
+  "ar": "بانتظارك",
+  "fr": "vous attend"
+ },
+ "“auto” uses your approximate location": {
+  "ar": "“auto” يستخدم موقعك التقريبي",
+  "fr": "« auto » utilise votre position approximative"
+ },
+ "⌃⌥C shelves the clipboard": {
+  "ar": "⌃⌥C يضع الحافظة على الرف",
+  "fr": "⌃⌥C range le presse-papiers sur l'étagère"
  }
 }

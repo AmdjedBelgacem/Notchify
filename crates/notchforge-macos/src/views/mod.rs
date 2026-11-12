@@ -40,6 +40,7 @@ impl Views {
     pub fn new(mtm: MainThreadMarker, layout: &NotchLayout, config: &Arc<Config>, engine: &EngineHandle) -> Self {
         kit::set_accent(&config.appearance.accent);
         crate::i18n::set_language(&config.appearance.language);
+        kit::set_glass(config.appearance.glass() && !crate::glass::system_reduce_transparency());
         kit::set_reduce_motion(match config.appearance.reduced_motion {
             notchforge_core::config::ReducedMotion::Always => true,
             notchforge_core::config::ReducedMotion::Never => false,

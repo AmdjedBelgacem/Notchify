@@ -1246,6 +1246,15 @@ fn build_pane(form: &Form<'_>, pane: Pane, c: &Config) {
                     cfg.appearance.language = crate::i18n::CHOICES[i].0.to_owned();
                 },
             );
+            form.section("Theme");
+            let themes = ["Black", "Liquid Glass"];
+            form.popup(
+                "Island",
+                Some("Liquid Glass flows out of the black notch as the island opens"),
+                &themes,
+                usize::from(c.appearance.theme == "glass"),
+                |cfg, i| cfg.appearance.theme = if i == 1 { "glass" } else { "black" }.to_owned(),
+            );
             form.section("Colour");
             form.accents(&c.appearance.accent);
             form.switch(
